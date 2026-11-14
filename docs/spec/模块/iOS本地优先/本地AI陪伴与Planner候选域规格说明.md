@@ -75,15 +75,14 @@ LocalRecordReadModel / LocalFactReadModel / Inbox
 
 ### 3.3 最终请求包合同（LOCAL-AI-003A-K 共用）
 
-本地表达上下文只使用一个只读请求包。iOS 在 Hosted 和 BYOK 两条路径都先构造同一组字段，Hosted 通过 `generate_local_expression` 投影其中的请求字段，BYOK 将相同上下文放入本机 Provider 的 JSON facts。请求包的顶层字段如下：
+本地表达上下文只使用一个只读请求包。iOS 先在本地构造同一组上下文，Hosted 与 BYOK 再把它投影成各自 Provider 需要的字段。Hosted `generate_local_expression` 的线上请求体固定为：
 
 ```json
 {
+  "action": "generate_local_expression",
   "current_fact": {},
-  "recent_facts": [],
-  "memory_context": {"facts": []},
-  "planner_candidates": [],
-  "provider_mode": "hosted|byok|deterministic",
+  "planner_candidate": null,
+  "local_memory_context": {"facts": []},
   "expression_preferences": {},
   "client_local_time": "YYYY-MM-DD HH:mm",
   "client_captured_at": "ISO-8601",
@@ -92,13 +91,11 @@ LocalRecordReadModel / LocalFactReadModel / Inbox
 }
 ```
 
-Shortcut 的 Hosted 线上请求保持现有入口语义，传输 `current_fact`、选中的 `planner_candidate`、可选的 `local_memory_context`、偏好和时间字段；`recent_facts` 与 `provider_mode` 仍是 iOS 本地上下文和 Edge 归一化所使用的路由元数据。不得因此扩展图片识别或 PWA 业务请求。
-
-`current_fact` 是当前正式事实，`recent_facts` 只来自同 profile、同 domain 的正式事实，最多 12 条。`local_staging_records` 的 `pending_review`、`failed` 或已删除行不会进入这两个字段。事件时间按 `occurred_at`、`order_finished_at`、`record_date + record_time` 的顺序取值。`client_captured_at` 和请求接收时间只表示捕获/请求上下文，不得改写成事件发生时间。
-
-`memory_context` 仅在 `companion_memory_enabled` 开启时读取和发送。它只允许当前 domain 的 key，最多 8 条，每条 `type` 最多 32 字、`summary` 最多 240 字，`confidence` 必须在 0…1。记忆关闭或归一化后为空时省略整个字段。`recent_companion_lines` 同样受记忆开关控制，最多 5 条，用于去重。
-
-`planner_candidates` 的每项必须包含 `candidate_id`、`semantic_key`、`canonical_text`、`claim_fingerprint`、`dimension`、`source=expression_planner`、`evidence`、`numbers`、`count_numbers` 和 `number_facts`。`evidence` 最多 8 项，`numbers`、`count_numbers`、`number_facts` 各最多 8 项；候选文本最多 300 字，标识最多 200 字，证据 field 最多 80 字。证据 kind/source 使用 `current_fact/local_record`、`recent_fact/local_record`、`local_memory/local_memory`，每个 `number_fact` 必须带自己的 evidence。`claim_fingerprint` 是对 `{semantic_key, canonical_text}` 按键排序后使用 UTF-8 FNV-1a 64 的稳定指纹，格式为 `fnv1a64:<16位小写十六进制>`。
+- `planner_candidate` 是单个对象，不是 `planner_candidates[]` 数组；`recent_facts` 与 `provider_mode` 只存在于 iOS 本地上下文和 Edge 归一化路由，不上 Hosted 线。BYOK 把同一组 `current_fact`、单个 `planner_candidate`、可选 `memory_context`、偏好和时间字段放进本机 Provider 的 JSON facts。
+- `current_fact` 是当前正式事实；事件时间按 `occurred_at`、`order_finished_at`、`record_date + record_time` 的顺序取值。`client_captured_at` 和请求接收时间只表示捕获/请求上下文，不得改写成事件发生时间。
+- `local_memory_context` 仅在 `companion_memory_enabled` 开启时读取和发送。它只允许当前 domain 的 key，最多 8 条，每条 `type` 最多 32 字、`summary` 最多 240 字，`confidence` 必须在 0…1。记忆关闭或归一化后为空时省略整个字段。`recent_companion_lines` 同样受记忆开关控制，最多 5 条，用于去重。
+- 线上 `planner_candidate` 携带 `candidate_id`、`semantic_key`、`canonical_text`、`claim_fingerprint`、`dimension`、`presentation_target`、`source=expression_planner`、`icon`、`badge`、`band`、`emotion_line`、`utility_line`、`detail_reason`、`timing_signal`、`evidence`、`numbers`、`count_numbers` 和 `number_facts`。`canonical_text` 必填且必须与 `emotion_line` 完全一致；`claim_fingerprint` 正是对 `{semantic_key, canonical_text}` 计算的值。`evidence` 最多 8 项，`numbers`、`count_numbers`、`number_facts` 各最多 8 项；候选文本最多 300 字，标识最多 200 字，证据 field 最多 80 字。
+- 证据 kind/source 只使用 `current_fact/local_record`、`recent_fact/local_record`、`local_memory/local_memory`。每个 `number_fact` 必须带自己的 evidence，且其 kind/source/reference/field 必须出现在候选 `evidence` 中；数值必须能由 current fact、对应 recent fact 或 memory 的同一 field 解析。`claim_fingerprint` 是对 `{semantic_key, canonical_text}` 按键排序后使用 UTF-8 FNV-1a 64 的稳定指纹，格式为 `fnv1a64:<16位小写十六进制>`。
 
 Provider 无法使用、候选验证失败或证据/指纹越界时，丢弃整个非法候选，保留 `current_fact` 并使用确定性 fallback。Edge 的 `plannerFallbackReason`/`trace.fallback_reason` 记录 `invalid_planner_candidate`、`candidate_bounds_exceeded`、具体合同校验原因或 `null`。fallback 不撤销事实写入，也不写入业务同步 outbox。
 
@@ -117,7 +114,7 @@ Hosted 和 BYOK 的结果在持久化前归一化为同一 schema。`companion_m
 
 ### 4.2 Provider
 
-- BYOK Provider 可以使用 `current_fact + memory_context + planner_candidates` 生成 Voice；
+- BYOK Provider 可以使用 `current_fact + memory_context + planner_candidate` 生成 Voice；
 - Hosted Provider 使用当前事实和选中的 Planner 候选；只有记忆开关开启时，才额外接收同域、限量的本地记忆摘要，以改善陪伴表达；服务端校验摘要结构和长度，不保存原始记忆上下文；
 - Hosted 和 BYOK 均不得发送完整历史或整份个人上下文；模型输出的事实仍须由当前事实或明确的 Planner 候选支持；
 - 快捷指令 `recognize_only` 只做图片识别并返回结构化事实，不读取云端 Companion 记忆、不调用 Voice；正式入账后由 iOS 设备在本机组合同域摘要，再调用 `generate_local_expression`；

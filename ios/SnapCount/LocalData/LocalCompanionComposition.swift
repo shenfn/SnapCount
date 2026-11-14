@@ -92,6 +92,10 @@ final class HostedAICompanionProvider: LocalCompanionProvider {
     ) -> [String: Any]? {
         guard let candidate else { return nil }
         var payload = candidate.localPayload.mapValues(\.value)
+        // `canonical_text` is required by the Edge contract and the Swift
+        // fingerprint is computed from it. Keep it byte-identical to
+        // `emotion_line` so both clients recompute the same claim.
+        payload["canonical_text"] = candidate.emotionLine
         if payload["numbers"] == nil {
             payload["numbers"] = []
             payload["count_numbers"] = []

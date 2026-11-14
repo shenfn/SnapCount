@@ -319,17 +319,34 @@ struct ShortcutUploadResult {
             ?? payload.message
             ?? payload.error
             ?? "截图已上传，打开芥子查看结果。"
-        let text = ShortcutUploadResult.notificationText(
+        let mergedText = ShortcutUploadResult.notificationText(
             baseText: baseText,
             payload: payload
         )
-        notificationText = text
-        displayText = ShortcutUploadResult.expandedDisplayText(
-            baseText: text,
-            companionMessage: payload.companionMessage,
-            feedback: payload.aiFeedback
-        )
+        // Compose the block once: the notification body and the in-app result
+        // must show the same companion + fixed facts, not a re-merged copy.
+        displayText = mergedText
+        notificationText = mergedText
         route = payload.routePath
+    }
+
+    /// Archived Shortcut outcome. Compose the companion + fixed receipt facts
+    /// once and reuse it for both the result card and the system notification.
+    static func archived(
+        notificationText: String,
+        companionMessage: String?,
+        feedback: NativeAIFeedback?
+    ) -> ShortcutUploadResult {
+        let mergedText = expandedDisplayText(
+            baseText: notificationText,
+            companionMessage: companionMessage,
+            feedback: feedback
+        )
+        return ShortcutUploadResult(
+            displayText: mergedText,
+            notificationText: mergedText,
+            route: "records"
+        )
     }
 
     var notificationTitle: String {

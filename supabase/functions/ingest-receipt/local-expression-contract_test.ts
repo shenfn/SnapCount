@@ -79,6 +79,18 @@ Deno.test("memory candidate cannot inherit current-fact number provenance", () =
   }).ok, "memory candidate must not inherit current-fact number provenance");
 });
 
+Deno.test("cross-end golden fingerprint matches the Swift local planner fixture", () => {
+  // The same {semantic_key, canonical_text} pair is asserted in
+  // ios/SnapCountTests/LocalExpressionContextTests.swift
+  // (testCrossEndGoldenFingerprintMatchesEdgeFixture). Drift in either
+  // implementation changes this value and fails one side.
+  assert(
+    localClaimFingerprint("local_expense_current_fact", "这笔便利店消费已记录，金额为¥12.80。")
+      === "fnv1a64:510d871ebff57f0f",
+    "Swift and Edge must compute the same FNV-1a 64 claim fingerprint",
+  );
+});
+
 Deno.test("unsupported evidence returns deterministic fallback reason", () => {
   const candidate = {
     candidate_id: "candidate-unsupported",

@@ -19,16 +19,16 @@ final class LocalExpressionContextTests: XCTestCase {
             LocalPlannerCandidateEngine.candidates(for: current, recentFacts: recent)
                 .first(where: { $0.dimension == "repeat_pattern" })
         )
-        XCTAssertEqual(repeatCandidate.evidence.filter { $0.kind == "recent_fact" }.count, 12)
+        XCTAssertEqual(repeatCandidate.evidence.filter { $0.kind == "recent_fact" }.count, 7)
         XCTAssertTrue(repeatCandidate.numberFacts.contains { $0.value == 12.8 && $0.evidence.first?.reference == current.id })
         XCTAssertTrue(LocalExpressionContract.validates(
             candidate: repeatCandidate,
             currentFactID: current.id,
-            recentFactIDs: Set(recent.prefix(12).map(\.id))
+            recentFactIDs: Set(recent.prefix(7).map(\.id))
         ))
     }
 
-    func testStructuredDomainsProduceContinuityOnlyWithFormalHistory() {
+    func testStructuredDomainsProduceBoundedContinuityOnlyWithFormalHistory() {
         for domain in ["food", "sleep", "sport", "reading"] {
             let current = LocalExpressionFact(
                 id: "\(domain)-current", domainKey: domain, title: domain, summary: "",
@@ -39,8 +39,12 @@ final class LocalExpressionContextTests: XCTestCase {
                 recordDate: "2026-11-13", recordTime: nil, amount: nil, category: nil
             )
             let candidates = LocalPlannerCandidateEngine.candidates(for: current, recentFacts: [recent])
-            XCTAssertTrue(candidates.contains { $0.dimension == "continuity" })
-            XCTAssertTrue(candidates.contains { $0.numberFacts.contains { $0.role == "count" } })
+            let continuity = candidates.first { $0.dimension == "continuity" }
+            XCTAssertNotNil(continuity)
+            XCTAssertLessThanOrEqual(continuity?.evidence.count ?? .max, LocalPlannerCandidateEngine.maxCandidateEvidence)
+            // A derived count cannot be resolved to a single fact field by
+            // Edge's numericFieldValue, so it must not carry a number fact.
+            XCTAssertEqual(continuity?.numberFacts.count, 0)
         }
     }
 
@@ -137,6 +141,80 @@ final class LocalExpressionContextTests: XCTestCase {
         XCTAssertEqual(current.claimFingerprint, "fnv1a64:510d871ebff57f0f")
         XCTAssertTrue(LocalExpressionContract.validates(candidate: current, currentFactID: fact.id))
         XCTAssertEqual(current.claimFingerprint, LocalPlannerCandidateEngine.candidates(for: fact).first?.claimFingerprint)
+    }
+
+    func testCrossEndGoldenFingerprintMatchesEdgeFixture() {
+        XCTAssertEqual(
+            LocalExpressionContract.claimFingerprint(
+                semanticKey: "local_expense_current_fact",
+                canonicalText: "这笔便利店消费已记录，金额为¥12.80。"
+            ),
+            "fnv1a64:510d871ebff57f0f"
+        )
+    }
+
+    func testEveryProducedCandidateMeetsEdgeBoundsAndProvenance() throws {
+        let current = LocalExpressionFact(
+            id: "expense-current", domainKey: "expense", title: "便利店", summary: "日用",
+            recordDate: "2026-11-14", recordTime: nil, amount: 12.8, category: "日用"
+        )
+        let recent = (0..<12).map { index in
+            LocalExpressionFact(
+                id: "expense-recent-\(index)", domainKey: "expense", title: "便利店", summary: "日用",
+                recordDate: "2026-11-\(String(format: "%02d", 13 - index))", recordTime: nil,
+                amount: Double(index + 1), category: "日用"
+            )
+        }
+        let memoryJSON = #"{"facts":[{"key":"local_ai.expense.merchant_repeat","type":"merchant_pattern","confidence":0.9,"value":"近30天在「便利店」有重复消费记录。","entity_type":"merchant","entity_value":"便利店"}]}"#
+        let candidates = LocalPlannerCandidateEngine.candidates(
+            for: current,
+            recentFacts: recent,
+            memoryContextJSON: memoryJSON
+        )
+        XCTAssertEqual(
+            Set(candidates.map(\.dimension)),
+            ["current_fact", "repeat_pattern", "continuity", "memory_context"]
+        )
+
+        let currentPayload = HostedAICompanionProvider.factPayload(current)
+        let recentPayloads = recent.map(HostedAICompanionProvider.factPayload)
+        let memoryObject = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: Data(memoryJSON.utf8)) as? [String: Any]
+        )
+        let memoryFacts = try XCTUnwrap(memoryObject["facts"] as? [[String: Any]])
+
+        for candidate in candidates {
+            let payload = try XCTUnwrap(
+                HostedAICompanionProvider.plannerPayload(candidate, fact: current),
+                candidate.dimension
+            )
+            XCTAssertEqual(
+                payload["canonical_text"] as? String,
+                Optional(candidate.emotionLine),
+                candidate.dimension
+            )
+            let evidence = try XCTUnwrap(payload["evidence"] as? [Any], candidate.dimension)
+            XCTAssertLessThanOrEqual(
+                evidence.count,
+                LocalPlannerCandidateEngine.maxCandidateEvidence,
+                candidate.dimension
+            )
+            let numberFacts = payload["number_facts"] as? [Any] ?? []
+            XCTAssertLessThanOrEqual(
+                numberFacts.count,
+                LocalPlannerCandidateEngine.maxCandidateEvidence,
+                candidate.dimension
+            )
+            XCTAssertNoThrow(
+                try EdgePlannerValidatorMirror.validate(
+                    payload,
+                    currentFact: currentPayload,
+                    recentFacts: recentPayloads,
+                    memoryFacts: memoryFacts
+                ),
+                candidate.dimension
+            )
+        }
     }
 
     func testLOCALAI003ContractBoundsRecentFactEvidenceReferences() throws {

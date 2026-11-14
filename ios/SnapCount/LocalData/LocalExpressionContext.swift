@@ -23,6 +23,10 @@ enum LocalExpressionContract {
         return String(format: "fnv1a64:%016llx", hash)
     }
 
+    /// Swift-side smoke check used by tests. Unlike the Edge validator at
+    /// `supabase/functions/ingest-receipt/local-expression-contract.ts`, this
+    /// does **not** verify number provenance or numeric values; use
+    /// `EdgePlannerValidatorMirror` in the test target for the full contract.
     static func validates(
         candidate: NativeAIFeedback,
         currentFactID: String,
@@ -208,6 +212,9 @@ enum LocalPlannerCandidateEngine {
     static let supportedDomains: Set<String> = [
         "expense", "income", "food", "sleep", "sport", "reading", "wallet"
     ]
+    /// Mirrors `MAX_CANDIDATE_EVIDENCE` in the Edge action. Only the current
+    /// fact plus this many recent facts may be referenced by a candidate.
+    static let maxCandidateEvidence = 8
 
     static func makeContext(
         for detail: NativeRecordDetail,
@@ -218,10 +225,11 @@ enum LocalPlannerCandidateEngine {
         clientLocalTime: String? = nil,
         weekday: String? = nil,
         recentCompanionLines: [String] = [],
-        now: Date = Date()
+        now: Date = Date(),
+        timeZone: TimeZone = .current
     ) -> LocalExpressionContext {
         let currentFact = LocalExpressionFact(detail: detail)
-        let localTime = Self.localTimeContext(for: now)
+        let localTime = Self.localTimeContext(for: now, timeZone: timeZone)
         let capturedAt = ISO8601DateFormatter().string(from: now)
         return LocalExpressionContext(
             currentFact: currentFact,
@@ -375,9 +383,13 @@ enum LocalPlannerCandidateEngine {
         for fact: LocalExpressionFact,
         recentFacts: [LocalExpressionFact]
     ) -> [NativeAIFeedback] {
+        // Deterministic prioritization: the current fact is always first and
+        // the most recent supplied facts follow in their existing order. Edge
+        // caps candidate evidence at 8 items, so history is capped at
+        // `maxCandidateEvidence - 1` to leave room for the current fact.
         let history = Array(recentFacts
             .filter { $0.id != fact.id && $0.domainKey == fact.domainKey }
-            .prefix(12))
+            .prefix(maxCandidateEvidence - 1))
         guard !history.isEmpty else { return [] }
         var result: [NativeAIFeedback] = []
         if fact.domainKey == "expense" || fact.domainKey == "income" {
@@ -385,6 +397,7 @@ enum LocalPlannerCandidateEngine {
             let matches = history.filter { canonicalEntity($0.title) == entity && !entity.isEmpty }
             if !matches.isEmpty {
                 let label = fact.domainKey == "expense" ? "消费" : "收入"
+                let facts = bounded([fact] + matches)
                 result.append(makeCrossCandidate(
                     fact: fact,
                     semanticKey: "local_\(fact.domainKey)_repeat_pattern",
@@ -392,17 +405,12 @@ enum LocalPlannerCandidateEngine {
                     text: "这次\(label)和近期同一来源的记录重复出现。",
                     utility: "可以继续按这个来源对照后续变化。",
                     reason: "候选来自当前记录和近期同来源正式事实。",
-                    facts: [fact] + matches,
-                    numberFacts: amountNumberFacts(for: [fact] + matches)
+                    facts: facts,
+                    numberFacts: amountNumberFacts(for: facts)
                 ))
             }
         }
-        let continuityNumbers = [NumberFactInput(
-            value: Double(history.count), meaning: "recent_count", role: "count",
-            evidence: history.map { [
-                "kind": "recent_fact", "source": "local_record", "reference": $0.id, "field": "record"
-            ] }
-        )]
+        let facts = bounded([fact] + history)
         result.append(makeCrossCandidate(
             fact: fact,
             semanticKey: "local_\(fact.domainKey)_continuity",
@@ -410,10 +418,23 @@ enum LocalPlannerCandidateEngine {
             text: "近期还有\(history.count)条\(domainLabel(fact.domainKey))正式记录，可以和这次记录连续对照。",
             utility: "保留这段正式记录，之后可以继续观察变化。",
             reason: "候选只使用当前记录和有界近期正式事实。",
-            facts: [fact] + history,
-            numberFacts: continuityNumbers
+            facts: facts,
+            // A derived count has no single fact field that Edge's
+            // `numericFieldValue` can resolve, so continuity carries no
+            // numeric provenance rather than an unresolvable count fact.
+            numberFacts: []
         ))
         return result
+    }
+
+    private static func bounded(_ facts: [LocalExpressionFact]) -> [LocalExpressionFact] {
+        Array(facts.prefix(maxCandidateEvidence))
+    }
+
+    /// A candidate evidence reference must use the same field as its number
+    /// provenance: `amount` for amount-bearing facts, otherwise `record`.
+    private static func evidenceField(for fact: LocalExpressionFact) -> String {
+        fact.amount == nil ? "record" : "amount"
     }
 
     private static func amountNumberFacts(for facts: [LocalExpressionFact]) -> [NumberFactInput] {
@@ -442,7 +463,7 @@ enum LocalPlannerCandidateEngine {
         let fingerprint = LocalExpressionContract.claimFingerprint(semanticKey: semanticKey, canonicalText: text)
         let evidence = facts.enumerated().map { index, item in [
             "kind": index == 0 ? "current_fact" : "recent_fact",
-            "source": "local_record", "reference": item.id, "field": "record"
+            "source": "local_record", "reference": item.id, "field": evidenceField(for: item)
         ] }
         let numbers = numberFacts.map { number in
             ["value": number.value, "meaning": number.meaning, "role": number.role, "evidence": number.evidence]
@@ -463,6 +484,10 @@ enum LocalPlannerCandidateEngine {
         return NativeAIFeedback(payload: payload)!
     }
 
+    /// Only the current-fact candidate and a high-confidence memory angle are
+    /// selectable today. Repeat/continuity candidates are produced for a future
+    /// product decision but remain internal: the Hosted wire contract carries a
+    /// single candidate, and wiring cross-record selection needs its own slice.
     static func selectedCandidate(
         for fact: LocalExpressionFact,
         recentFacts: [LocalExpressionFact] = [],
@@ -505,14 +530,19 @@ enum LocalPlannerCandidateEngine {
             .filter { !$0.isWhitespace && !$0.isPunctuation }
     }
 
-    private static func localTimeContext(for date: Date) -> (time: String, weekday: String) {
+    private static func localTimeContext(
+        for date: Date,
+        timeZone: TimeZone
+    ) -> (time: String, weekday: String) {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "zh_CN")
-        formatter.timeZone = .current
+        formatter.timeZone = timeZone
         formatter.dateFormat = "yyyy-MM-dd HH:mm"
         let time = formatter.string(from: date)
         let weekdays = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"]
-        let weekdayIndex = Calendar.current.component(.weekday, from: date) - 1
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = timeZone
+        let weekdayIndex = calendar.component(.weekday, from: date) - 1
         let weekday = weekdays.indices.contains(weekdayIndex) ? weekdays[weekdayIndex] : ""
         return (time, weekday)
     }

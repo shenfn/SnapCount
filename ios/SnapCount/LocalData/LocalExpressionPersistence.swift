@@ -378,7 +378,8 @@ final class LocalExpressionPersistence {
         profileID: UUID,
         settings: NativeUserSettings,
         providerMode: LocalExpressionProviderMode,
-        now: Date = Date()
+        now: Date = Date(),
+        timeZone: TimeZone = .current
     ) -> LocalExpressionContext? {
         let persistedSettings = settingsProvider()
         guard settings.companionEnabled, persistedSettings.companionEnabled else { return nil }
@@ -411,7 +412,8 @@ final class LocalExpressionPersistence {
             providerMode: providerMode,
             expressionPreferences: LocalCompanionExpressionPreferences(settings: settings),
             recentCompanionLines: recentLines,
-            now: now
+            now: now,
+            timeZone: timeZone
         )
     }
 

@@ -120,14 +120,10 @@ struct UploadScreenshotIntent: AppIntent {
                                     )
                                 }
                             }
-                            result = ShortcutUploadResult(
-                                displayText: ShortcutUploadResult.expandedDisplayText(
-                                    baseText: text,
-                                    companionMessage: companionMessage,
-                                    feedback: deliveryFeedback
-                                ),
+                            result = ShortcutUploadResult.archived(
                                 notificationText: text,
-                                route: "records"
+                                companionMessage: companionMessage,
+                                feedback: deliveryFeedback
                             )
                         case .staged, .financialPending:
                             trialOutcome = .staged

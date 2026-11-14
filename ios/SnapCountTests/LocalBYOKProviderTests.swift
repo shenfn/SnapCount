@@ -41,8 +41,8 @@ final class LocalBYOKProviderTests: XCTestCase {
         do {
             _ = try await provider.compose(context: makeContext(providerMode: .hosted))
             XCTFail("Malformed feedback should be rejected")
-        } catch QwenBYOKError.invalidResponse {
-            XCTAssertTrue(true)
+        } catch let error as QwenBYOKError {
+            XCTAssertEqual(error, .invalidResponse)
         }
     }
 
@@ -79,8 +79,8 @@ final class LocalBYOKProviderTests: XCTestCase {
         do {
             _ = try await provider.compose(context: makeContext(providerMode: .byok))
             XCTFail("Malformed feedback should be rejected")
-        } catch QwenBYOKError.invalidResponse {
-            XCTAssertTrue(true)
+        } catch let error as QwenBYOKError {
+            XCTAssertEqual(error, .invalidResponse)
         }
     }
 
@@ -97,8 +97,8 @@ final class LocalBYOKProviderTests: XCTestCase {
         do {
             _ = try await hosted.compose(context: makeContext(providerMode: .hosted))
             XCTFail("Hosted malformed low-confidence feedback should be rejected")
-        } catch QwenBYOKError.invalidResponse {
-            XCTAssertTrue(true)
+        } catch let error as QwenBYOKError {
+            XCTAssertEqual(error, .invalidResponse)
         }
 
         let byok = QwenBYOKCompanionProvider(apiKey: "sk-test", session: session)
@@ -109,8 +109,8 @@ final class LocalBYOKProviderTests: XCTestCase {
         do {
             _ = try await byok.compose(context: makeContext(providerMode: .byok))
             XCTFail("BYOK malformed low-confidence feedback should be rejected")
-        } catch QwenBYOKError.invalidResponse {
-            XCTAssertTrue(true)
+        } catch let error as QwenBYOKError {
+            XCTAssertEqual(error, .invalidResponse)
         }
     }
 

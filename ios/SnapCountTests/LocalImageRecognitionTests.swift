@@ -22,7 +22,14 @@ final class LocalImageRecognitionTests: XCTestCase {
         XCTAssertEqual(candidate.amountMinor, 2000)
         XCTAssertEqual(try context.imageStore.data(at: XCTUnwrap(candidate.imagePath)), data)
         let repeated = try await recognition.ingest(imageData: data, captureKind: "screenshot", filename: "expense.jpg")
-        XCTAssertEqual(repeated, outcome)
+        // The deduplicated outcome rebuilds from persisted data and intentionally
+        // has no provider confidence, so equality must cover the stable payload.
+        XCTAssertEqual(repeated.result, outcome.result)
+        XCTAssertEqual(repeated.imageHash, outcome.imageHash)
+        XCTAssertEqual(repeated.notificationText, outcome.notificationText)
+        XCTAssertEqual(repeated.feedback, outcome.feedback)
+        XCTAssertNil(repeated.feedbackConfidence)
+        XCTAssertEqual(outcome.feedbackConfidence, 1)
         XCTAssertEqual(provider.callCount, 1)
         XCTAssertEqual(try pending.pending(profileID: profile.id).count, 1)
         XCTAssertTrue(try LocalExpenseRepository(database: context.database).expenses(profileID: profile.id, monthKey: "2026-09").isEmpty)
@@ -63,7 +70,14 @@ final class LocalImageRecognitionTests: XCTestCase {
         XCTAssertTrue(try pending.pending(profileID: profile.id).isEmpty)
 
         let repeated = try await recognition.ingest(imageData: data, captureKind: "screenshot", filename: "expense.jpg")
-        XCTAssertEqual(repeated, outcome)
+        // The deduplicated outcome rebuilds from persisted data and intentionally
+        // has no provider confidence, so equality must cover the stable payload.
+        XCTAssertEqual(repeated.result, outcome.result)
+        XCTAssertEqual(repeated.imageHash, outcome.imageHash)
+        XCTAssertEqual(repeated.notificationText, outcome.notificationText)
+        XCTAssertEqual(repeated.feedback, outcome.feedback)
+        XCTAssertNil(repeated.feedbackConfidence)
+        XCTAssertEqual(outcome.feedbackConfidence, 0.92)
         XCTAssertEqual(provider.callCount, 1)
         XCTAssertEqual(try LocalExpenseRepository(database: context.database)
             .expenses(profileID: profile.id, monthKey: "2026-09").count, 1)

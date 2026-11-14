@@ -160,13 +160,6 @@ struct LocalImageIntakeOutcome: Equatable {
     var feedback: NativeAIFeedback? = nil
     /// 原始反馈置信度，用于在异步 Companion 接线时保持低置信度降级。
     var feedbackConfidence: Double? = nil
-
-    static func == (lhs: LocalImageIntakeOutcome, rhs: LocalImageIntakeOutcome) -> Bool {
-        lhs.result == rhs.result
-            && lhs.imageHash == rhs.imageHash
-            && lhs.notificationText == rhs.notificationText
-            && lhs.feedback == rhs.feedback
-    }
 }
 
 final class LocalImageRecognitionUseCase {
