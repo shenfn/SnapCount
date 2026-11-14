@@ -127,3 +127,25 @@ Executed 4 tests, with 0 failures (0 unexpected)
 ```
 
 `git diff --check` completed with no output and exit status 0 after the fixes.
+
+## Round 2 handoff reconciliation
+
+Updated the existing handoff frontmatter to `head: cdc201f` and replaced the stale `6/6`, `27/27`, and `deno check passed` claims with the authoritative Task 6 state. The handoff now records focused XCTest 4/4, full XCTest 654/654, Edge bundle parse 4/4, Node Deno-compatible Edge harness 36/36, and Deno CLI unavailable.
+
+Exact documentation and diff check:
+
+```text
+git diff --check
+git diff --check: passed (no output)
+```
+
+```text
+6:head: cdc201f
+7:status: Task 6 集成回归与最终 packet 合同已完成，等待 Task 7 真机门禁
+133:- 当前 Task 6 authoritative validation：iPhone 17 / iOS Simulator focused integration XCTest 4/4 通过；全量 XCTest 654/654 通过。
+134:- 当前 Edge validation：esbuild bundle parse 4/4 通过；Node Deno-compatible harness 36/36 通过。
+135:- Deno CLI 当前不可用，原生命令返回 `zsh: command not found: deno`；不要将当前状态描述为 `deno check` 已通过。
+174:- `xcodebuild ... -only-testing:SnapCountTests/LocalAIIntegrationRegressionTests test CODE_SIGNING_ALLOWED=NO`：4/4 通过。
+175:- 全量 iOS Simulator XCTest：654/654 通过。
+176:- esbuild + Node Deno-compatible Edge harness：36/36 通过；4 个 Edge bundle parse 通过。
+```

@@ -3,7 +3,7 @@ project: SnapCount
 name: 本地 AI 记忆与 Planner 阶段一开发交接
 updated: 2026-11-14
 branch: feature/inbox-pwa-parity
-head: ded3b8aac7246ad9f97b0227619fb4df53af8773
+head: cdc201f
 status: Task 6 集成回归与最终 packet 合同已完成，等待 Task 7 真机门禁
 tags: [handoff, ios, local-first, ai-companion, planner, memory]
 ---
@@ -130,13 +130,14 @@ App Store 首版采用单设备本地优先策略：
 
 ## 7. 验证状态
 
-- 已执行：iPhone 17 / iOS Simulator 定向 XCTest，6/6 通过。
-- 已执行：Edge Context Packet 与 Prompt Deno 测试，27/27 通过；Edge `deno check` 通过。
+- 当前 Task 6 authoritative validation：iPhone 17 / iOS Simulator focused integration XCTest 4/4 通过；全量 XCTest 654/654 通过。
+- 当前 Edge validation：esbuild bundle parse 4/4 通过；Node Deno-compatible harness 36/36 通过。
+- Deno CLI 当前不可用，原生命令返回 `zsh: command not found: deno`；不要将当前状态描述为 `deno check` 已通过。
 - 已执行：Supabase Edge Function 部署成功；项目函数列表确认 `ingest-receipt` 为 `ACTIVE`、版本 `205`、`verify_jwt=false`。
 - 已执行：`xcodebuild build` 成功；改动后的 App 已安装并启动于 iPhone 17 / iOS Simulator 27.2，记录列表可见。未在本轮重放快捷指令、打开详情验证卡片，或发送在线 Hosted 请求。
 - 已执行：`git diff --check` 通过。
 - 尚待：已登录账户的 iOS Hosted 开/关实测、GitHub macOS CI、真机和 TestFlight。
-- 当前工作区包含未提交文档和代码改动；`.build/` 是未跟踪构建产物，不要加入功能提交。
+- `.build/`、`prototype/settings-variants.html` 和 `tools/persona-lab/` 是保留的未跟踪工作区内容，不要加入功能提交。
 
 ## 8. Task 6 最终 packet 合同与回归状态
 
