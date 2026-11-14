@@ -107,3 +107,23 @@ Completed with no output and exit status 0.
 
 - The full simulator run emitted existing iOS simulator accessibility duplicate-class and API handler warnings. No test failed.
 - Real-device Shortcut acceptance, TestFlight processing, production deployment, and phone screenshot gates remain Task 7 scope.
+
+## Round 1 fixes
+
+- Strengthened the staging exclusion assertion to require the formal sport fact title set to exactly `["正式运动"]` and explicitly reject the staged title `"待确认运动"`. This would fail if a staging row leaked into the `LocalFactReader` projection.
+- Updated the existing handoff `docs/handoff/2026-11-10-本地AI记忆与Planner阶段一开发交接.md` with the final packet contract, A-K matrix, and current Task 6 validation state.
+
+Focused regression after the fixes:
+
+```text
+xcodebuild -project ios/SnapCount.xcodeproj -scheme SnapCount -destination 'platform=iOS Simulator,name=iPhone 17' -only-testing:SnapCountTests/LocalAIIntegrationRegressionTests test CODE_SIGNING_ALLOWED=NO
+```
+
+Output:
+
+```text
+Executed 4 tests, with 0 failures (0 unexpected)
+** TEST SUCCEEDED **
+```
+
+`git diff --check` completed with no output and exit status 0 after the fixes.
