@@ -8,6 +8,13 @@ struct NativeAIFeedback: Equatable {
         let field: String?
     }
 
+    struct NumberFact: Equatable {
+        let value: Double
+        let meaning: String
+        let role: String
+        let evidence: [EvidenceReference]
+    }
+
     let exposureEventId: String?
     let candidateId: String?
     let semanticKey: String
@@ -27,6 +34,7 @@ struct NativeAIFeedback: Equatable {
     let expressionCoverageSemanticKeys: [String]
     let expressionCoverageClaimFingerprint: String?
     let evidence: [EvidenceReference]
+    let numberFacts: [NumberFact]
 
     init?(payload: [String: AnyCodable]?) {
         guard let payload else { return nil }
@@ -91,21 +99,40 @@ struct NativeAIFeedback: Equatable {
         self.expressionCoverageClaimFingerprint = coverageIsCurrent
             ? rawCoverageClaimFingerprint
             : nil
-        self.evidence = (payload.array("evidence") ?? []).compactMap { value in
-            let object: [String: Any]
-            if let raw = value as? [String: Any] {
-                object = raw
-            } else if let raw = value as? [String: AnyCodable] {
-                object = raw.mapValues(\.value)
-            } else {
-                return nil
-            }
-            guard let kind = object["kind"] as? String,
-                  let source = object["source"] as? String,
-                  let reference = object["reference"] as? String,
-                  !kind.isEmpty, !source.isEmpty, !reference.isEmpty else { return nil }
-            return EvidenceReference(kind: kind, source: source, reference: reference, field: object["field"] as? String)
+        self.evidence = (payload.array("evidence") ?? []).compactMap(Self.evidenceReference(from:))
+        self.numberFacts = (payload.array("number_facts") ?? []).compactMap { value in
+            guard let object = Self.object(from: value),
+                  let number = object["value"].flatMap(Self.number(from:)),
+                  number.isFinite,
+                  let meaning = object["meaning"] as? String,
+                  let role = object["role"] as? String,
+                  let rawEvidence = object["evidence"] as? [Any] else { return nil }
+            let evidence = rawEvidence.compactMap(Self.evidenceReference(from:))
+            guard !meaning.isEmpty, !role.isEmpty, !evidence.isEmpty else { return nil }
+            return NumberFact(value: number, meaning: meaning, role: role, evidence: evidence)
         }
+    }
+
+    private static func object(from value: Any) -> [String: Any]? {
+        if let object = value as? [String: Any] { return object }
+        if let object = value as? [String: AnyCodable] { return object.mapValues(\.value) }
+        return nil
+    }
+
+    private static func number(from value: Any) -> Double? {
+        if let number = value as? NSNumber { return number.doubleValue }
+        if let number = value as? Double { return number }
+        if let number = value as? Int { return Double(number) }
+        return nil
+    }
+
+    private static func evidenceReference(from value: Any) -> EvidenceReference? {
+        guard let object = object(from: value),
+              let kind = object["kind"] as? String,
+              let source = object["source"] as? String,
+              let reference = object["reference"] as? String,
+              !kind.isEmpty, !source.isEmpty, !reference.isEmpty else { return nil }
+        return EvidenceReference(kind: kind, source: source, reference: reference, field: object["field"] as? String)
     }
 
     var bandLabel: String {

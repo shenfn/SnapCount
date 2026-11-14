@@ -23,6 +23,7 @@ final class HostedAICompanionProvider: LocalCompanionProvider {
     func compose(context: LocalExpressionContext) async throws -> LocalCompanionResult {
         let selected = LocalPlannerCandidateEngine.selectedCandidate(
             for: context.currentFact,
+            recentFacts: context.recentFacts,
             memoryContextJSON: context.memoryContextJSON
         )
         let response = try await service.generateLocalExpression(
@@ -85,21 +86,7 @@ final class HostedAICompanionProvider: LocalCompanionProvider {
     ) -> [String: Any]? {
         guard let candidate else { return nil }
         var payload = candidate.localPayload.mapValues(\.value)
-        if candidate.dimension == "current_fact", let amount = fact.amount, amount.isFinite {
-            payload["numbers"] = [amount]
-            payload["count_numbers"] = []
-            payload["number_facts"] = [[
-                "value": amount,
-                "meaning": "amount",
-                "role": "measure",
-                "evidence": [[
-                    "kind": "current_fact",
-                    "source": "local_record",
-                    "reference": fact.id,
-                    "field": "amount"
-                ]]
-            ]]
-        } else {
+        if payload["numbers"] == nil {
             payload["numbers"] = []
             payload["count_numbers"] = []
             payload["number_facts"] = []
@@ -135,6 +122,7 @@ final class QwenBYOKCompanionProvider: LocalCompanionProvider {
         }
         let selected = LocalPlannerCandidateEngine.selectedCandidate(
             for: context.currentFact,
+            recentFacts: context.recentFacts,
             memoryContextJSON: context.memoryContextJSON
         )
         var facts = HostedAICompanionProvider.factPayload(context.currentFact)

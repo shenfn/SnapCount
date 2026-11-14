@@ -134,9 +134,27 @@ final class LocalFactReader {
                 }
             }
 
+            let walletRows = try Row.fetchAll(
+                db,
+                sql: """
+                    SELECT * FROM local_wallet_snapshots
+                    WHERE profile_id = ?
+                      AND record_date BETWEEN ? AND ?
+                      AND deleted_at IS NULL
+                    """,
+                arguments: [profileID.uuidString, startDate, endDate]
+            )
+            let wallets = walletRows.compactMap { row in
+                do { return try Self.walletFact(row: row) }
+                catch {
+                    Self.reportProjectionSkip(table: "local_wallet_snapshots", row: row, error: error)
+                    return nil
+                }
+            }
+
             return LocalFactMonth(
                 profileID: profileID,
-                facts: (expenses + incomes + records).sorted(by: Self.isNewer)
+                facts: (expenses + incomes + records + wallets).sorted(by: Self.isNewer)
             )
     }
 
@@ -217,6 +235,45 @@ final class LocalFactReader {
             createdAt: createdAt,
             updatedAt: updatedAt
         ))
+    }
+
+    private static func walletFact(row: Row) throws -> LocalFact {
+        guard let id = UUID(uuidString: row["id"]),
+              let profileID = UUID(uuidString: row["profile_id"]),
+              let title: String = row["title"],
+              let summary: String = row["summary"],
+              let payloadJSON: String = row["payload_json"],
+              let recordDate: String = row["record_date"],
+              let balanceMinor: Int64 = row["snapshot_balance_minor"],
+              let createdAt: Date = row["created_at"],
+              let updatedAt: Date = row["updated_at"] else {
+            throw LocalDataError.invalidRecord
+        }
+        var normalizedPayload = (try? LocalRecordCodec.decode(payloadJSON)) ?? [:]
+        normalizedPayload["snapshot_balance_minor"] = AnyCodable(Double(balanceMinor))
+        let normalizedPayloadJSON = (try? LocalRecordCodec.encode(normalizedPayload)) ?? payloadJSON
+        return LocalFact(
+            id: id,
+            profileID: profileID,
+            reference: "wallet/\(id.uuidString)",
+            kind: .record,
+            domainKey: "wallet",
+            sourceKind: "manual",
+            domainVersion: "local-v1",
+            title: title,
+            summary: summary,
+            payloadJSON: normalizedPayloadJSON,
+            businessDate: recordDate,
+            recordTime: row["record_time"],
+            occurredAt: row["occurred_at"],
+            note: nil,
+            imagePath: row["image_path"],
+            imageHash: row["image_hash"],
+            companionMessage: (try? LocalRecordCodec.decode(payloadJSON))?.string("companion_message"),
+            localVersion: row["local_version"],
+            createdAt: createdAt,
+            updatedAt: updatedAt
+        )
     }
 
     private static func fact(from expense: LocalExpense) -> LocalFact {

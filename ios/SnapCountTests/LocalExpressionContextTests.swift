@@ -3,6 +3,122 @@ import XCTest
 @testable import SnapCount
 
 final class LocalExpressionContextTests: XCTestCase {
+    func testCrossRecordExpenseRepeatCarriesBoundedEvidenceAndNumberProvenance() throws {
+        let current = LocalExpressionFact(
+            id: "expense-current", domainKey: "expense", title: "便利店", summary: "日用",
+            recordDate: "2026-11-14", recordTime: nil, amount: 12.8, category: "日用"
+        )
+        let recent = (0..<20).map { index in
+            LocalExpressionFact(
+                id: "expense-\(index)", domainKey: "expense", title: "便利店", summary: "日用",
+                recordDate: "2026-11-\(String(format: "%02d", max(1, 14 - index)))", recordTime: nil,
+                amount: Double(index + 1), category: "日用"
+            )
+        }
+        let repeatCandidate = try XCTUnwrap(
+            LocalPlannerCandidateEngine.candidates(for: current, recentFacts: recent)
+                .first(where: { $0.dimension == "repeat_pattern" })
+        )
+        XCTAssertEqual(repeatCandidate.evidence.filter { $0.kind == "recent_fact" }.count, 12)
+        XCTAssertTrue(repeatCandidate.numberFacts.contains { $0.value == 12.8 && $0.evidence.first?.reference == current.id })
+        XCTAssertTrue(LocalExpressionContract.validates(
+            candidate: repeatCandidate,
+            currentFactID: current.id,
+            recentFactIDs: Set(recent.prefix(12).map(\.id))
+        ))
+    }
+
+    func testStructuredDomainsProduceContinuityOnlyWithFormalHistory() {
+        for domain in ["food", "sleep", "sport", "reading"] {
+            let current = LocalExpressionFact(
+                id: "\(domain)-current", domainKey: domain, title: domain, summary: "",
+                recordDate: "2026-11-14", recordTime: nil, amount: nil, category: nil
+            )
+            let recent = LocalExpressionFact(
+                id: "\(domain)-recent", domainKey: domain, title: domain, summary: "",
+                recordDate: "2026-11-13", recordTime: nil, amount: nil, category: nil
+            )
+            let candidates = LocalPlannerCandidateEngine.candidates(for: current, recentFacts: [recent])
+            XCTAssertTrue(candidates.contains { $0.dimension == "continuity" })
+            XCTAssertTrue(candidates.contains { $0.numberFacts.contains { $0.role == "count" } })
+        }
+    }
+
+    func testNoHistoryReturnsCurrentCandidateOnly() {
+        let fact = LocalExpressionFact(
+            id: "no-history", domainKey: "sport", title: "运动", summary: "",
+            recordDate: "2026-11-14", recordTime: nil, amount: nil, category: nil
+        )
+        XCTAssertEqual(LocalPlannerCandidateEngine.candidates(for: fact).map(\.dimension), ["current_fact"])
+    }
+
+    func testFactReaderIncludesActiveWalletHistoryAndExcludesPendingStaging() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let database = try LocalDatabase(databaseURL: directory.appendingPathComponent("local.sqlite"))
+        let profile = try LocalProfileStore(database: database).activeProfile()
+        let wallet = try LocalWalletSnapshotRepository(database: database).create(LocalWalletSnapshotDraft(
+            id: UUID(), profileID: profile.id, title: "现金账户", summary: "余额",
+            payloadJSON: "{}", recordDate: "2026-11-14", recordTime: nil, occurredAt: nil,
+            balanceMinor: 12_300, currency: "CNY", kind: .asset, imagePath: nil, imageHash: nil,
+            createdAt: Date()
+        ))
+        let stagingID = UUID().uuidString
+        try database.writer.write { db in
+            try db.execute(sql: """
+                INSERT INTO local_staging_records (
+                    id, profile_id, domain_key, status, confidence, title, summary, payload_json,
+                    record_date, record_time, image_path, image_hash, created_at, updated_at,
+                    target_record_id, resolved_action, resolved_at, source_kind, domain_version,
+                    evidence_json, missing_fields_json
+                ) VALUES (?, ?, 'wallet', 'pending_review', 0.8, '待确认钱包', '候选', '{}',
+                          '2026-11-14', NULL, NULL, NULL, ?, ?, NULL, NULL, NULL,
+                          'ai_candidate', 1, '[]', '[]')
+                """, arguments: [stagingID, profile.id.uuidString, Date(), Date()])
+        }
+        let facts = try LocalFactReader(database: database).range(
+            profileID: profile.id, from: "2026-11-01", to: "2026-11-30"
+        ).facts
+        XCTAssertTrue(facts.contains { $0.id == wallet.id && $0.domainKey == "wallet" })
+        XCTAssertFalse(facts.contains { $0.id.uuidString == stagingID })
+    }
+
+    func testCompositionContextPopulatesRecentFormalFactsWithMemoryOff() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let database = try LocalDatabase(databaseURL: directory.appendingPathComponent("local.sqlite"))
+        let profile = try LocalProfileStore(database: database).activeProfile()
+        let repository = try LocalExpenseRepository(database: database)
+        let older = try repository.createExpense(LocalExpenseDraft(
+            id: UUID(), profileID: profile.id, accountID: nil, amountMinor: 800,
+            currency: "CNY", merchantName: "便利店", platform: "", category: "日用",
+            paymentMethod: "cash", transactionDate: "2026-11-13", transactionTime: nil,
+            note: nil, createdAt: Date(timeIntervalSince1970: 1_800_000_000)
+        ), operationID: UUID())
+        let current = try repository.createExpense(LocalExpenseDraft(
+            id: UUID(), profileID: profile.id, accountID: nil, amountMinor: 1280,
+            currency: "CNY", merchantName: "便利店", platform: "", category: "日用",
+            paymentMethod: "cash", transactionDate: "2026-11-14", transactionTime: nil,
+            note: nil, createdAt: Date(timeIntervalSince1970: 1_800_000_100)
+        ), operationID: UUID())
+        var settings = NativeUserSettings()
+        settings.companionMemoryEnabled = false
+        let persistence = LocalExpressionPersistence(
+            database: database,
+            settingsProvider: { LocalExpressionSettings(companionEnabled: true, memoryEnabled: false) }
+        )
+        let context = try XCTUnwrap(persistence.makeCompositionContext(
+            for: LocalExpenseReadModel.detail(from: current), profileID: profile.id,
+            settings: settings, providerMode: .deterministic,
+            now: ISO8601DateFormatter().date(from: "2026-11-14T12:00:00Z")!
+        ))
+        XCTAssertEqual(context.recentFacts.map(\.id), [older.id.uuidString])
+        XCTAssertNil(context.memoryContextJSON)
+        XCTAssertTrue(context.plannerCandidates.contains { $0.dimension == "repeat_pattern" })
+    }
+
     func testLOCALAI003ContractKeepsEvidenceAndNumbersBoundToCandidateDimension() throws {
         let fact = LocalExpressionFact(
             id: "fact-contract-1", domainKey: "expense", title: "便利店", summary: "日常用品",

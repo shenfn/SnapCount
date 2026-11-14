@@ -14,6 +14,7 @@ struct LocalExpressionSettings: Equatable {
 final class LocalExpressionPersistence {
     private static let projectionSourceTable = "local_expression_projection"
     private static let projectionWindowDays = 30
+    private static let plannerRecentFactLimit = 12
 
     private let database: LocalDatabase
     private let memoryRepository: LocalCompanionMemoryRepository
@@ -397,14 +398,42 @@ final class LocalExpressionPersistence {
                 now: now
             )) ?? []
         }
+        let recentFacts = recentFormalFacts(
+            profileID: profileID,
+            currentFactID: detail.rawId,
+            domainKey: detail.domainKey ?? detail.kind,
+            now: now
+        )
         return LocalPlannerCandidateEngine.makeContext(
             for: detail,
+            recentFacts: recentFacts,
             memoryContextJSON: memoryContextJSON,
             providerMode: providerMode,
             expressionPreferences: LocalCompanionExpressionPreferences(settings: settings),
             recentCompanionLines: recentLines,
             now: now
         )
+    }
+
+    private func recentFormalFacts(
+        profileID: UUID,
+        currentFactID: String,
+        domainKey: String,
+        now: Date
+    ) -> [LocalExpressionFact] {
+        guard let factReader,
+              let start = Calendar(identifier: .gregorian).date(byAdding: .day, value: -Self.projectionWindowDays, to: now) else {
+            return []
+        }
+        let startDate = NativeLocalDate.dateKey(start)
+        let endDate = NativeLocalDate.dateKey(now)
+        guard let facts = try? factReader.range(profileID: profileID, from: startDate, to: endDate).facts else {
+            return []
+        }
+        return facts
+            .filter { $0.id.uuidString != currentFactID && $0.domainKey == domainKey }
+            .prefix(Self.plannerRecentFactLimit)
+            .map(LocalExpressionFact.init(fact:))
     }
 
     private static func projectionDrafts(

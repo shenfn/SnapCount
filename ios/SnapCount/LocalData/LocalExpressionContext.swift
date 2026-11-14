@@ -102,6 +102,31 @@ struct LocalExpressionFact: Equatable {
         }
     }
 
+    init(fact: LocalFact) {
+        id = fact.id.uuidString
+        domainKey = fact.domainKey
+        title = fact.title
+        summary = fact.summary
+        platform = nil
+        paymentMethod = nil
+        sourceName = fact.domainKey == "income" ? fact.title : nil
+        recordDate = fact.businessDate
+        recordTime = fact.recordTime
+        occurredAt = fact.occurredAt
+        orderFinishedAt = nil
+        let payload = (try? LocalRecordCodec.decode(fact.payloadJSON)) ?? [:]
+        if fact.domainKey == "expense" || fact.domainKey == "income" {
+            amount = payload.double("amount_minor").map { $0 / 100 }
+        } else if fact.domainKey == "wallet" {
+            amount = payload.double("snapshot_balance_minor").map { $0 / 100 }
+                ?? payload.double("balance_minor").map { $0 / 100 }
+        } else {
+            amount = nil
+        }
+        category = payload.string("category") ?? payload.string("income_category")
+        payloadJSON = fact.payloadJSON
+    }
+
     init(
         id: String,
         domainKey: String,
@@ -202,7 +227,11 @@ enum LocalPlannerCandidateEngine {
             currentFact: currentFact,
             recentFacts: recentFacts,
             memoryContextJSON: memoryContextJSON,
-            plannerCandidates: candidates(for: currentFact, memoryContextJSON: memoryContextJSON),
+            plannerCandidates: candidates(
+                for: currentFact,
+                recentFacts: recentFacts,
+                memoryContextJSON: memoryContextJSON
+            ),
             providerMode: providerMode,
             expressionPreferences: expressionPreferences,
             clientLocalTime: clientLocalTime ?? localTime.time,
@@ -214,6 +243,7 @@ enum LocalPlannerCandidateEngine {
 
     static func candidates(
         for fact: LocalExpressionFact,
+        recentFacts: [LocalExpressionFact] = [],
         memoryContextJSON: String? = nil
     ) -> [NativeAIFeedback] {
         let domain = supportedDomains.contains(fact.domainKey) ? fact.domainKey : "expense"
@@ -269,6 +299,10 @@ enum LocalPlannerCandidateEngine {
         let currentEvidence: [[String: Any]] = [[
             "kind": "current_fact", "source": "local_record", "reference": fact.id, "field": fact.amount == nil ? NSNull() : "amount"
         ]]
+        let currentNumberFacts: [[String: Any]] = fact.amount.map { amount in [[
+            "value": amount, "meaning": "amount", "role": "measure",
+            "evidence": [["kind": "current_fact", "source": "local_record", "reference": fact.id, "field": "amount"]]
+        ]] } ?? []
 
         let payload: [String: AnyCodable] = [
             "candidate_id": AnyCodable(candidateID),
@@ -286,11 +320,13 @@ enum LocalPlannerCandidateEngine {
             "utility_line": AnyCodable(utilityLine),
             "detail_reason": AnyCodable(detailReason),
             "timing_signal": AnyCodable(["label": fact.recordDate ?? "本地事实"] as [String: Any]),
-            "local_exposure": AnyCodable(true)
-            ,"evidence": AnyCodable(currentEvidence)
+            "local_exposure": AnyCodable(true),
+            "evidence": AnyCodable(currentEvidence),
+            "number_facts": AnyCodable(currentNumberFacts)
         ]
         guard let feedback = NativeAIFeedback(payload: payload) else { return [] }
         var result = [feedback]
+        result.append(contentsOf: crossRecordCandidates(for: fact, recentFacts: recentFacts))
         if let memory = firstMemory(from: memoryContextJSON, matching: fact) {
             let memoryKey = memory.key
             let memorySemanticKey = "local_\(domain)_memory_context"
@@ -328,11 +364,111 @@ enum LocalPlannerCandidateEngine {
         return result
     }
 
+    private struct NumberFactInput {
+        let value: Double
+        let meaning: String
+        let role: String
+        let evidence: [[String: Any]]
+    }
+
+    private static func crossRecordCandidates(
+        for fact: LocalExpressionFact,
+        recentFacts: [LocalExpressionFact]
+    ) -> [NativeAIFeedback] {
+        let history = Array(recentFacts
+            .filter { $0.id != fact.id && $0.domainKey == fact.domainKey }
+            .prefix(12))
+        guard !history.isEmpty else { return [] }
+        var result: [NativeAIFeedback] = []
+        if fact.domainKey == "expense" || fact.domainKey == "income" {
+            let entity = canonicalEntity(fact.title)
+            let matches = history.filter { canonicalEntity($0.title) == entity && !entity.isEmpty }
+            if !matches.isEmpty {
+                let label = fact.domainKey == "expense" ? "消费" : "收入"
+                result.append(makeCrossCandidate(
+                    fact: fact,
+                    semanticKey: "local_\(fact.domainKey)_repeat_pattern",
+                    dimension: "repeat_pattern",
+                    text: "这次\(label)和近期同一来源的记录重复出现。",
+                    utility: "可以继续按这个来源对照后续变化。",
+                    reason: "候选来自当前记录和近期同来源正式事实。",
+                    facts: [fact] + matches,
+                    numberFacts: amountNumberFacts(for: [fact] + matches)
+                ))
+            }
+        }
+        let continuityNumbers = [NumberFactInput(
+            value: Double(history.count), meaning: "recent_count", role: "count",
+            evidence: history.map { [
+                "kind": "recent_fact", "source": "local_record", "reference": $0.id, "field": "record"
+            ] }
+        )]
+        result.append(makeCrossCandidate(
+            fact: fact,
+            semanticKey: "local_\(fact.domainKey)_continuity",
+            dimension: "continuity",
+            text: "近期还有\(history.count)条\(domainLabel(fact.domainKey))正式记录，可以和这次记录连续对照。",
+            utility: "保留这段正式记录，之后可以继续观察变化。",
+            reason: "候选只使用当前记录和有界近期正式事实。",
+            facts: [fact] + history,
+            numberFacts: continuityNumbers
+        ))
+        return result
+    }
+
+    private static func amountNumberFacts(for facts: [LocalExpressionFact]) -> [NumberFactInput] {
+        facts.compactMap { fact in
+            guard let amount = fact.amount, amount.isFinite else { return nil }
+            return NumberFactInput(
+                value: amount, meaning: "amount", role: "measure",
+                evidence: [[
+                    "kind": fact.id == facts.first?.id ? "current_fact" : "recent_fact",
+                    "source": "local_record", "reference": fact.id, "field": "amount"
+                ]]
+            )
+        }
+    }
+
+    private static func makeCrossCandidate(
+        fact: LocalExpressionFact,
+        semanticKey: String,
+        dimension: String,
+        text: String,
+        utility: String,
+        reason: String,
+        facts: [LocalExpressionFact],
+        numberFacts: [NumberFactInput]
+    ) -> NativeAIFeedback {
+        let fingerprint = LocalExpressionContract.claimFingerprint(semanticKey: semanticKey, canonicalText: text)
+        let evidence = facts.enumerated().map { index, item in [
+            "kind": index == 0 ? "current_fact" : "recent_fact",
+            "source": "local_record", "reference": item.id, "field": "record"
+        ] }
+        let numbers = numberFacts.map { number in
+            ["value": number.value, "meaning": number.meaning, "role": number.role, "evidence": number.evidence]
+        }
+        let payload: [String: AnyCodable] = [
+            "candidate_id": AnyCodable("local-planner-\(dimension)-\(String(fingerprint.suffix(16)))"),
+            "semantic_key": AnyCodable(semanticKey), "canonical_text": AnyCodable(text),
+            "claim_fingerprint": AnyCodable(fingerprint), "exposure_event_id": AnyCodable("local:\(fingerprint)"),
+            "presentation_target": AnyCodable("feedback_card"), "dimension": AnyCodable(dimension),
+            "source": AnyCodable("expression_planner"), "icon": AnyCodable("sparkles"),
+            "badge": AnyCodable("本地 Planner"), "band": AnyCodable("neutral"),
+            "emotion_line": AnyCodable(text), "utility_line": AnyCodable(utility),
+            "detail_reason": AnyCodable(reason),
+            "timing_signal": AnyCodable(["label": fact.recordDate ?? "本地事实"] as [String: Any]),
+            "local_exposure": AnyCodable(true), "evidence": AnyCodable(evidence),
+            "number_facts": AnyCodable(numbers)
+        ]
+        return NativeAIFeedback(payload: payload)!
+    }
+
     static func selectedCandidate(
         for fact: LocalExpressionFact,
+        recentFacts: [LocalExpressionFact] = [],
         memoryContextJSON: String? = nil
     ) -> NativeAIFeedback? {
-        let candidates = candidates(for: fact, memoryContextJSON: memoryContextJSON)
+        let candidates = candidates(for: fact, recentFacts: recentFacts, memoryContextJSON: memoryContextJSON)
         guard let current = candidates.first else { return nil }
         guard let memory = candidates.first(where: { $0.dimension == "memory_context" }) else {
             return current
@@ -431,6 +567,25 @@ extension NativeAIFeedback {
                     "source": $0.source,
                     "reference": $0.reference,
                     "field": $0.field ?? NSNull()
+                ] as [String: Any]
+            })
+        }
+        if !numberFacts.isEmpty {
+            payload["numbers"] = AnyCodable(numberFacts.map(\.value))
+            payload["count_numbers"] = AnyCodable(numberFacts.filter { $0.role == "count" }.map(\.value))
+            payload["number_facts"] = AnyCodable(numberFacts.map { number in
+                [
+                    "value": number.value,
+                    "meaning": number.meaning,
+                    "role": number.role,
+                    "evidence": number.evidence.map {
+                        [
+                            "kind": $0.kind,
+                            "source": $0.source,
+                            "reference": $0.reference,
+                            "field": $0.field ?? NSNull()
+                        ] as [String: Any]
+                    }
                 ] as [String: Any]
             })
         }
