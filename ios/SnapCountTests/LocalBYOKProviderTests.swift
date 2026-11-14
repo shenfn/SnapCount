@@ -84,6 +84,36 @@ final class LocalBYOKProviderTests: XCTestCase {
         }
     }
 
+    func testLOCALAI003KRejectsMalformedLowConfidenceFeedbackAtBothBoundaries() async throws {
+        let session = try makeStubSession()
+        let hosted = HostedAICompanionProvider(
+            accessToken: "test-access-token",
+            service: SnapCountUploadService(session: session, functionsURL: "https://example.test/functions/v1", anonKey: "test-key")
+        )
+        BYOKURLProtocolStub.configure(
+            statusCode: 200,
+            responseData: Data(#"{"ok":true,"data":{"companion_message":"主句","ai_feedback":{"emotion_line":123,"confidence":0.4}}}"#.utf8)
+        )
+        do {
+            _ = try await hosted.compose(context: makeContext(providerMode: .hosted))
+            XCTFail("Hosted malformed low-confidence feedback should be rejected")
+        } catch QwenBYOKError.invalidResponse {
+            XCTAssertTrue(true)
+        }
+
+        let byok = QwenBYOKCompanionProvider(apiKey: "sk-test", session: session)
+        BYOKURLProtocolStub.configure(
+            statusCode: 200,
+            responseData: byokResponse(#"{"companion_message":"主句","ai_feedback":{"emotion_line":123,"confidence":0.4}}"#)
+        )
+        do {
+            _ = try await byok.compose(context: makeContext(providerMode: .byok))
+            XCTFail("BYOK malformed low-confidence feedback should be rejected")
+        } catch QwenBYOKError.invalidResponse {
+            XCTAssertTrue(true)
+        }
+    }
+
     func testLOCALAI003KEmptyCompanionAndRecentLineDeduplication() throws {
         let result = try LocalCompanionResultNormalizer.normalize(
             companionMessage: "重复主句",

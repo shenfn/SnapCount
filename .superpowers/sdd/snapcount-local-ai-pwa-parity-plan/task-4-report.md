@@ -53,3 +53,25 @@ completed with no output and exit status 0.
 ## Tests added
 
 The public provider seam tests cover Hosted and BYOK valid output, null feedback, low confidence, malformed feedback, empty companion handling, exact companion/emotion de-duplication, length and band normalization, and identical normalized feedback schema keys.
+
+## Round 1/5 reviewer fix
+
+The reviewer identified that the low-confidence guard ran before feedback field validation. The normalizer now validates required and optional field types, line caps, and band normalization before omitting confidence values below `0.5`. This rejects malformed low-confidence feedback consistently at both provider boundaries while preserving omission for valid low-confidence feedback.
+
+Regression test:
+
+```text
+LocalBYOKProviderTests.testLOCALAI003KRejectsMalformedLowConfidenceFeedbackAtBothBoundaries
+```
+
+Exact covering command and output:
+
+```text
+xcodebuild -project ios/SnapCount.xcodeproj -scheme SnapCount -destination 'platform=iOS Simulator,name=iPhone 17' -only-testing:SnapCountTests/LocalBYOKProviderTests test
+
+Test Suite 'LocalBYOKProviderTests' passed
+Executed 16 tests, with 0 failures (0 unexpected)
+** TEST SUCCEEDED **
+```
+
+`git diff --check` completed with no output and exit status 0 after the fix.

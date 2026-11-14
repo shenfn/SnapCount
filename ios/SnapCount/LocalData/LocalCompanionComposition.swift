@@ -235,17 +235,15 @@ internal enum LocalCompanionResultNormalizer {
               let confidence = normalizedConfidence(confidenceValue) else {
             throw LocalCompanionResultNormalizerError.malformedFeedback
         }
-        guard confidence >= 0.5 else { return nil }
         guard let emotion = try normalizedText(object["emotion_line"], max: 28) else {
             throw LocalCompanionResultNormalizerError.malformedFeedback
         }
-        guard !recent.contains(emotion) else { return nil }
-
         let badge = try normalizedText(object["badge"], max: 10) ?? "即时反馈"
         let icon = try normalizedText(object["icon"], max: 4) ?? icon(for: domainKey)
         let bandValue = try normalizedBand(object["band"])
         let utility = try normalizedText(object["utility_line"], max: 30)
         let detail = try normalizedText(object["detail_reason"], max: 60)
+        guard confidence >= 0.5, !recent.contains(emotion) else { return nil }
         return [
             "version": AnyCodable("feedback-v1"),
             "domain_key": AnyCodable(domainKey),
