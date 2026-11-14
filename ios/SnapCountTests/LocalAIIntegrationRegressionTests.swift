@@ -46,8 +46,8 @@ final class LocalAIIntegrationRegressionTests: XCTestCase {
         XCTAssertEqual(result.companionMessage, "这笔已记下。")
         XCTAssertNotNil(result.aiFeedback)
 
-        let body = try XCTUnwrap(BYOKURLProtocolStub.capturedBody)
-        let packet = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
+        let hostedBody = try XCTUnwrap(BYOKURLProtocolStub.capturedBody)
+        let packet = try XCTUnwrap(JSONSerialization.jsonObject(with: hostedBody) as? [String: Any])
         XCTAssertEqual(packet["action"] as? String, "generate_local_expression")
         XCTAssertEqual((packet["current_fact"] as? [String: Any])?["id"] as? String, current.id.uuidString)
         XCTAssertNotNil(packet["planner_candidate"] as? [String: Any])
@@ -56,6 +56,16 @@ final class LocalAIIntegrationRegressionTests: XCTestCase {
         XCTAssertEqual(packet["client_local_time"] as? String, "2026-11-14 20:00")
         XCTAssertEqual(packet["client_captured_at"] as? String, "2026-11-14T12:00:00Z")
         XCTAssertEqual(packet["weekday"] as? String, "周六")
+
+        BYOKURLProtocolStub.configure(
+            statusCode: 200,
+            responseData: byokResponse(#"{"companion_message":"这笔已记下。","ai_feedback":{"badge":"观察","icon":"✨","band":"positive","emotion_line":"这笔记录有明确依据。","utility_line":"保留这份节奏","detail_reason":"来自当前事实","confidence":0.9}}"#)
+        )
+        let byokResult = try await QwenBYOKCompanionProvider(apiKey: "byok-key", session: session).compose(context: context)
+        XCTAssertEqual(byokResult.companionMessage, result.companionMessage)
+        let hostedFeedback = try XCTUnwrap(result.aiFeedback)
+        let byokFeedback = try XCTUnwrap(byokResult.aiFeedback)
+        XCTAssertEqual(Set(byokFeedback.keys), Set(hostedFeedback.keys))
 
         persistence.persist(companion: result, for: detail)
         let stored = try XCTUnwrap(try repository.expense(id: current.id))
@@ -193,5 +203,10 @@ final class LocalAIIntegrationRegressionTests: XCTestCase {
             paymentMethod: "cash", transactionDate: date, transactionTime: nil,
             note: nil, createdAt: Date()
         )
+    }
+
+    private func byokResponse(_ content: String) -> Data {
+        let object: [String: Any] = ["choices": [["message": ["content": content]]]]
+        return try! JSONSerialization.data(withJSONObject: object)
     }
 }
