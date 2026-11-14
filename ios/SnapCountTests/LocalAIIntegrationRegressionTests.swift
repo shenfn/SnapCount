@@ -145,7 +145,8 @@ final class LocalAIIntegrationRegressionTests: XCTestCase {
             profileID: try profileStore.activeProfile().id, from: "2026-11-01", to: "2026-11-30"
         ).facts
         XCTAssertTrue(facts.contains { $0.id == formal.record.id })
-        XCTAssertFalse(facts.contains { $0.id.uuidString == staged.record.id })
+        XCTAssertEqual(facts.filter { $0.domainKey == "sport" }.map(\.title), ["正式运动"])
+        XCTAssertFalse(facts.contains { $0.title == "待确认运动" })
 
         let recordID = UUID(uuidString: "66666666-6666-6666-6666-666666666666")!
         let first = try await useCase.confirmStaging(id: staged.record.id, recordID: recordID)

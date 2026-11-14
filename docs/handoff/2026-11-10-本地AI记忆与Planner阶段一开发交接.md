@@ -1,10 +1,10 @@
 ---
 project: SnapCount
 name: 本地 AI 记忆与 Planner 阶段一开发交接
-updated: 2026-11-10
+updated: 2026-11-14
 branch: feature/inbox-pwa-parity
-head: 7d2ba303624fa568c0cc5cad5195060d34c792ee
-status: 本地记忆 Hosted 接线与本地 Planner 隐藏展示已完成，Edge Function v205 已部署，等待 iOS 客户端联调
+head: ded3b8aac7246ad9f97b0227619fb4df53af8773
+status: Task 6 集成回归与最终 packet 合同已完成，等待 Task 7 真机门禁
 tags: [handoff, ios, local-first, ai-companion, planner, memory]
 ---
 
@@ -138,7 +138,45 @@ App Store 首版采用单设备本地优先策略：
 - 尚待：已登录账户的 iOS Hosted 开/关实测、GitHub macOS CI、真机和 TestFlight。
 - 当前工作区包含未提交文档和代码改动；`.build/` 是未跟踪构建产物，不要加入功能提交。
 
-## 8. 下一会话交付标准
+## 8. Task 6 最终 packet 合同与回归状态
+
+### 8.1 共享上下文合同
+
+LOCAL-AI-003A-K 共用一个只读本地表达上下文：`current_fact`、`recent_facts`、`memory_context`、`planner_candidates`、`provider_mode`、`expression_preferences`、`client_local_time`、`client_captured_at`、`weekday` 和 `recent_companion_lines`。正式事实只来自当前 profile，`recent_facts` 最多 12 条；pending/failed/deleted staging 永远不进入正式上下文。
+
+- `memory_context` 只在记忆开关开启时读取和发送，限当前 domain 8 条、`type` 32 字、`summary` 240 字、confidence 0…1。最近陪伴文案最多 5 条，记忆关闭时两者都不访问、不发送。
+- 每个 Planner candidate 必须带 `candidate_id`、`semantic_key`、`canonical_text`、`claim_fingerprint`、`dimension`、`source=expression_planner`、evidence、numbers、count_numbers 和 number_facts。evidence、numbers、count_numbers、number_facts 各最多 8 项，candidate text 最多 300 字，标识最多 200 字，evidence field 最多 80 字。
+- evidence kind/source 只允许 `current_fact/local_record`、`recent_fact/local_record`、`local_memory/local_memory`。每个 number_fact 必须带 provenance evidence。指纹是 `{semantic_key, canonical_text}` 稳定排序后 UTF-8 FNV-1a 64，格式 `fnv1a64:<16位小写十六进制>`。
+- 事件时间优先 `occurred_at`、`order_finished_at`、`record_date + record_time`。`client_captured_at` 和 request received time 只表示捕获/请求上下文，不得冒充事件时间。
+- 候选越界、证据或指纹校验失败时整项丢弃，保留 current fact 并确定性降级。Edge `fallback_reason` 使用 `invalid_planner_candidate`、`candidate_bounds_exceeded`、具体合同原因或 `null`。
+- Hosted 与 BYOK 归一化为相同结果 schema：最多 30 字 `companion_message`，以及可空 `ai_feedback`，字段为 `version=feedback-v1`、domain_key、badge、icon、band、tone、emotion_line、utility_line、detail_reason、confidence、internal_score、source。低置信度、畸形或重复结果归一化为空。
+- 通知和结果页保留稳定事实 fallback，按 Companion、feedback 顺序合并并去重。Shortcut route 使用 `inbox/<id>` 或 `records/<kind>/<id>`。Planner 不渲染独立 `local:` 卡，重复重试不重复正式记录、通知行或结果卡。Shortcut Hosted wire request 仍只投影 current fact、选中 candidate、可选 memory、偏好和时间字段，PWA 入口不变。
+
+### 8.2 LOCAL-AI-003A-K 验收矩阵
+
+| 场景 | Task 6 回归结果 |
+| --- | --- |
+| 003A | 本地 context 可确定性降级，Planner 仅作 Companion 内部上下文 |
+| 003B | formal expense/income 近期事实有界且 staging 排除，同域 memory 约束保持 |
+| 003C | 七域 candidate evidence 和 per-number provenance 可回溯 |
+| 003D | pending staging 不入 formal context，确认重试返回同一稳定记录 |
+| 003E | Companion 关闭时不构造新表达 context，事实仍保存 |
+| 003F | memory 关闭时不读 memory、不发 memory 字段或最近文案 |
+| 003G | Provider 失败不撤销事实，deterministic feedback 保留 |
+| 003H | 完整备份 portability 测试保持 Companion/Planner/memory 状态 |
+| 003I | Edge normalizer 保持同域、有界 memory 与 packet trace/fallback reason |
+| 003J | notification/result-sheet 共享合并去重，不显示独立 `local:` Planner 卡 |
+| 003K | Shortcut recognize-only 只返回事实，确认后表达，route 和重试幂等 |
+
+### 8.3 Task 6 验证
+
+- `xcodebuild ... -only-testing:SnapCountTests/LocalAIIntegrationRegressionTests test CODE_SIGNING_ALLOWED=NO`：4/4 通过。
+- 全量 iOS Simulator XCTest：654/654 通过。
+- esbuild + Node Deno-compatible Edge harness：36/36 通过；4 个 Edge bundle parse 通过。
+- `deno` CLI 当前不可用，原生命令返回 `zsh: command not found: deno`；未修改 Edge 运行时或生产部署。
+- `git diff --check` 通过。Task 7 仍负责真机 Shortcut、TestFlight 和手机截图门禁。
+
+## 9. 下一会话交付标准
 
 下一会话结束时至少应能说明：
 
