@@ -3,8 +3,8 @@ project: SnapCount
 name: 本地 AI 记忆与 Planner 阶段一开发交接
 updated: 2026-11-14
 branch: feature/inbox-pwa-parity
-head: cdc201f
-status: Task 6 集成回归与最终 packet 合同已完成，等待 Task 7 真机门禁
+head: df50f3c
+status: 最终整分支复核修复已完成（Hosted planner 合同、通知合并、时区回归），等待 Task 7 真机门禁
 tags: [handoff, ios, local-first, ai-companion, planner, memory]
 ---
 
@@ -130,8 +130,8 @@ App Store 首版采用单设备本地优先策略：
 
 ## 7. 验证状态
 
-- 当前 Task 6 authoritative validation：iPhone 17 / iOS Simulator focused integration XCTest 4/4 通过；全量 XCTest 654/654 通过。
-- 当前 Edge validation：esbuild bundle parse 4/4 通过；Node Deno-compatible harness 36/36 通过。
+- 当前 authoritative validation：iPhone 17 / iOS Simulator focused integration XCTest 5/5 通过；全量 XCTest 657/657 通过。
+- 当前 Edge validation：esbuild bundle parse 4/4 通过；Node Deno-compatible harness 37/37 通过。
 - Deno CLI 当前不可用，原生命令返回 `zsh: command not found: deno`；不要将当前状态描述为 `deno check` 已通过。
 - 已执行：Supabase Edge Function 部署成功；项目函数列表确认 `ingest-receipt` 为 `ACTIVE`、版本 `205`、`verify_jwt=false`。
 - 已执行：`xcodebuild build` 成功；改动后的 App 已安装并启动于 iPhone 17 / iOS Simulator 27.2，记录列表可见。未在本轮重放快捷指令、打开详情验证卡片，或发送在线 Hosted 请求。
@@ -143,10 +143,10 @@ App Store 首版采用单设备本地优先策略：
 
 ### 8.1 共享上下文合同
 
-LOCAL-AI-003A-K 共用一个只读本地表达上下文：`current_fact`、`recent_facts`、`memory_context`、`planner_candidates`、`provider_mode`、`expression_preferences`、`client_local_time`、`client_captured_at`、`weekday` 和 `recent_companion_lines`。正式事实只来自当前 profile，`recent_facts` 最多 12 条；pending/failed/deleted staging 永远不进入正式上下文。
+LOCAL-AI-003A-K 共用一个只读本地表达上下文：`current_fact`、`recent_facts`、`memory_context`、`planner_candidates`、`provider_mode`、`expression_preferences`、`client_local_time`、`client_captured_at`、`weekday` 和 `recent_companion_lines`。正式事实只来自当前 profile，`recent_facts` 最多 12 条；pending/failed/deleted staging 永远不进入正式上下文。Hosted 线上只投影 `current_fact`、单个 `planner_candidate`、可选 `local_memory_context`、偏好和时间字段；`recent_facts` 与 `provider_mode` 不上线。
 
 - `memory_context` 只在记忆开关开启时读取和发送，限当前 domain 8 条、`type` 32 字、`summary` 240 字、confidence 0…1。最近陪伴文案最多 5 条，记忆关闭时两者都不访问、不发送。
-- 每个 Planner candidate 必须带 `candidate_id`、`semantic_key`、`canonical_text`、`claim_fingerprint`、`dimension`、`source=expression_planner`、evidence、numbers、count_numbers 和 number_facts。evidence、numbers、count_numbers、number_facts 各最多 8 项，candidate text 最多 300 字，标识最多 200 字，evidence field 最多 80 字。
+- 每个 Planner candidate 必须带 `candidate_id`、`semantic_key`、`canonical_text`、`claim_fingerprint`、`dimension`、`source=expression_planner`、evidence、numbers、count_numbers 和 number_facts。`canonical_text` 必填且与 `emotion_line` 完全一致；指纹按该值计算。evidence、numbers、count_numbers、number_facts 各最多 8 项，candidate text 最多 300 字，标识最多 200 字，evidence field 最多 80 字。
 - evidence kind/source 只允许 `current_fact/local_record`、`recent_fact/local_record`、`local_memory/local_memory`。每个 number_fact 必须带 provenance evidence。指纹是 `{semantic_key, canonical_text}` 稳定排序后 UTF-8 FNV-1a 64，格式 `fnv1a64:<16位小写十六进制>`。
 - 事件时间优先 `occurred_at`、`order_finished_at`、`record_date + record_time`。`client_captured_at` 和 request received time 只表示捕获/请求上下文，不得冒充事件时间。
 - 候选越界、证据或指纹校验失败时整项丢弃，保留 current fact 并确定性降级。Edge `fallback_reason` 使用 `invalid_planner_candidate`、`candidate_bounds_exceeded`、具体合同原因或 `null`。
@@ -171,9 +171,9 @@ LOCAL-AI-003A-K 共用一个只读本地表达上下文：`current_fact`、`rece
 
 ### 8.3 Task 6 验证
 
-- `xcodebuild ... -only-testing:SnapCountTests/LocalAIIntegrationRegressionTests test CODE_SIGNING_ALLOWED=NO`：4/4 通过。
-- 全量 iOS Simulator XCTest：654/654 通过。
-- esbuild + Node Deno-compatible Edge harness：36/36 通过；4 个 Edge bundle parse 通过。
+- `xcodebuild ... -only-testing:SnapCountTests/LocalAIIntegrationRegressionTests test CODE_SIGNING_ALLOWED=NO`：5/5 通过（含 `TZ=UTC` 与 `TZ=Asia/Shanghai` 各一次）。
+- 全量 iOS Simulator XCTest：657/657 通过。
+- esbuild + Node Deno-compatible Edge harness：37/37 通过；4 个 Edge bundle parse 通过。
 - `deno` CLI 当前不可用，原生命令返回 `zsh: command not found: deno`；未修改 Edge 运行时或生产部署。
 - `git diff --check` 通过。Task 7 仍负责真机 Shortcut、TestFlight 和手机截图门禁。
 
