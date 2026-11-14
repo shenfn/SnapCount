@@ -4,6 +4,154 @@ import XCTest
 @testable import SnapCount
 
 final class LocalBYOKProviderTests: XCTestCase {
+    func testLOCALAI003KHostedValidResponseUsesNormalizedFeedbackSchema() async throws {
+        let session = try makeStubSession()
+        BYOKURLProtocolStub.configure(
+            statusCode: 200,
+            responseData: Data(#"{"ok":true,"data":{"companion_message":"  已记下  ","ai_feedback":{"badge":"今日观察","icon":"🌟","band":"positive","emotion_line":"  今天完成得不错  ","utility_line":"可继续保持","detail_reason":"当前记录有明确依据","confidence":1.4}}}"#.utf8)
+        )
+        let result = try await HostedAICompanionProvider(
+            accessToken: "test-access-token",
+            service: SnapCountUploadService(session: session, functionsURL: "https://example.test/functions/v1", anonKey: "test-key")
+        ).compose(context: makeContext(providerMode: .hosted))
+
+        XCTAssertEqual(result.companionMessage, "已记下")
+        let feedback = try XCTUnwrap(result.aiFeedback)
+        XCTAssertEqual(Set(feedback.keys), ["version", "domain_key", "badge", "icon", "band", "tone", "emotion_line", "utility_line", "detail_reason", "confidence", "internal_score", "source"])
+        XCTAssertEqual(feedback.double("confidence"), 1)
+        XCTAssertEqual(feedback.string("band"), "positive")
+    }
+
+    func testLOCALAI003KHostedNullLowConfidenceAndMalformedFeedback() async throws {
+        let session = try makeStubSession()
+        let provider = HostedAICompanionProvider(
+            accessToken: "test-access-token",
+            service: SnapCountUploadService(session: session, functionsURL: "https://example.test/functions/v1", anonKey: "test-key")
+        )
+
+        BYOKURLProtocolStub.configure(statusCode: 200, responseData: Data(#"{"ok":true,"data":{"companion_message":"可选陪伴","ai_feedback":null}}"#.utf8))
+        let nullResult = try await provider.compose(context: makeContext(providerMode: .hosted))
+        XCTAssertNil(nullResult.aiFeedback)
+
+        BYOKURLProtocolStub.configure(statusCode: 200, responseData: Data(#"{"ok":true,"data":{"companion_message":"可选陪伴","ai_feedback":{"emotion_line":"低置信度","confidence":0.49}}}"#.utf8))
+        let lowConfidenceResult = try await provider.compose(context: makeContext(providerMode: .hosted))
+        XCTAssertNil(lowConfidenceResult.aiFeedback)
+
+        BYOKURLProtocolStub.configure(statusCode: 200, responseData: Data(#"{"ok":true,"data":{"companion_message":"可选陪伴","ai_feedback":{"confidence":0.9}}}"#.utf8))
+        do {
+            _ = try await provider.compose(context: makeContext(providerMode: .hosted))
+            XCTFail("Malformed feedback should be rejected")
+        } catch QwenBYOKError.invalidResponse {
+            XCTAssertTrue(true)
+        }
+    }
+
+    func testLOCALAI003KBYOKValidResponseUsesSameNormalizedSchema() async throws {
+        let session = try makeStubSession()
+        BYOKURLProtocolStub.configure(
+            statusCode: 200,
+            responseData: byokResponse(#"{"companion_message":"BYOK 主句","ai_feedback":{"badge":"观察","icon":"💸","band":"bad-band","emotion_line":"BYOK 情绪","utility_line":"","detail_reason":null,"confidence":"0.8"}}"#)
+        )
+        let result = try await QwenBYOKCompanionProvider(apiKey: "sk-test", session: session)
+            .compose(context: makeContext(providerMode: .byok))
+
+        XCTAssertEqual(result.companionMessage, "BYOK 主句")
+        let feedback = try XCTUnwrap(result.aiFeedback)
+        XCTAssertEqual(Set(feedback.keys), ["version", "domain_key", "badge", "icon", "band", "tone", "emotion_line", "utility_line", "detail_reason", "confidence", "internal_score", "source"])
+        XCTAssertEqual(feedback.string("band"), "neutral")
+        XCTAssertEqual(feedback.double("confidence"), 0.8)
+        XCTAssertTrue(feedback["utility_line"]?.value is NSNull)
+    }
+
+    func testLOCALAI003KBYOKRejectsLowConfidenceAndMalformedFeedback() async throws {
+        let session = try makeStubSession()
+        let provider = QwenBYOKCompanionProvider(apiKey: "sk-test", session: session)
+
+        BYOKURLProtocolStub.configure(statusCode: 200, responseData: byokResponse(#"{"companion_message":"主句","ai_feedback":null}"#))
+        let nullResult = try await provider.compose(context: makeContext(providerMode: .byok))
+        XCTAssertNil(nullResult.aiFeedback)
+
+        BYOKURLProtocolStub.configure(statusCode: 200, responseData: byokResponse(#"{"companion_message":"主句","ai_feedback":{"emotion_line":"低置信度","confidence":0.4}}"#))
+        let lowConfidenceResult = try await provider.compose(context: makeContext(providerMode: .byok))
+        XCTAssertNil(lowConfidenceResult.aiFeedback)
+
+        BYOKURLProtocolStub.configure(statusCode: 200, responseData: byokResponse(#"{"companion_message":"主句","ai_feedback":{"confidence":0.9}}"#))
+        do {
+            _ = try await provider.compose(context: makeContext(providerMode: .byok))
+            XCTFail("Malformed feedback should be rejected")
+        } catch QwenBYOKError.invalidResponse {
+            XCTAssertTrue(true)
+        }
+    }
+
+    func testLOCALAI003KEmptyCompanionAndRecentLineDeduplication() throws {
+        let result = try LocalCompanionResultNormalizer.normalize(
+            companionMessage: "重复主句",
+            aiFeedback: [
+                "emotion_line": AnyCodable("重复情绪"),
+                "confidence": AnyCodable(0.9)
+            ],
+            domainKey: "expense",
+            recentCompanionLines: ["重复主句", "重复情绪"]
+        )
+        XCTAssertNil(result.companionMessage)
+        XCTAssertNil(result.aiFeedback)
+
+        let empty = try LocalCompanionResultNormalizer.normalize(
+            companionMessage: "   ", aiFeedback: nil, domainKey: "expense", recentCompanionLines: []
+        )
+        XCTAssertNil(empty.companionMessage)
+        XCTAssertNil(empty.aiFeedback)
+    }
+
+    func testLOCALAI003KNormalizerAppliesLineCapsAndAllowedBand() throws {
+        let result = try LocalCompanionResultNormalizer.normalize(
+            companionMessage: String(repeating: "主", count: 40),
+            aiFeedback: [
+                "badge": AnyCodable(String(repeating: "标", count: 20)),
+                "icon": AnyCodable(String(repeating: "图", count: 10)),
+                "band": AnyCodable("unsupported"),
+                "emotion_line": AnyCodable(String(repeating: "情", count: 40)),
+                "utility_line": AnyCodable(String(repeating: "用", count: 40)),
+                "detail_reason": AnyCodable(String(repeating: "因", count: 80)),
+                "confidence": AnyCodable(0.7)
+            ],
+            domainKey: "expense",
+            recentCompanionLines: []
+        )
+        XCTAssertEqual(result.companionMessage?.count, 30)
+        let feedback = try XCTUnwrap(result.aiFeedback)
+        XCTAssertEqual(feedback.string("band"), "neutral")
+        XCTAssertEqual(feedback.string("badge")?.count, 10)
+        XCTAssertEqual(feedback.string("icon")?.count, 4)
+        XCTAssertEqual(feedback.string("emotion_line")?.count, 28)
+        XCTAssertEqual(feedback.string("utility_line")?.count, 30)
+        XCTAssertEqual(feedback.string("detail_reason")?.count, 60)
+    }
+
+    private func makeStubSession() throws -> URLSession {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [BYOKURLProtocolStub.self]
+        return URLSession(configuration: configuration)
+    }
+
+    private func makeContext(providerMode: LocalExpressionProviderMode) -> LocalExpressionContext {
+        let fact = LocalExpressionFact(id: "fact-provider-parity", domainKey: "expense", title: "便利店", summary: "日常用品", recordDate: "2026-11-14", recordTime: nil, amount: 12.8, category: "日用")
+        return LocalExpressionContext(
+            currentFact: fact,
+            recentFacts: [],
+            memoryContextJSON: nil,
+            plannerCandidates: LocalPlannerCandidateEngine.candidates(for: fact),
+            providerMode: providerMode,
+            recentCompanionLines: []
+        )
+    }
+
+    private func byokResponse(_ content: String) -> Data {
+        let object: [String: Any] = ["choices": [["message": ["content": content]]]]
+        return try! JSONSerialization.data(withJSONObject: object)
+    }
+
     func testLOCALAI003FHostedCompanionSendsCompactMemoryWhenProvided() async throws {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [BYOKURLProtocolStub.self]

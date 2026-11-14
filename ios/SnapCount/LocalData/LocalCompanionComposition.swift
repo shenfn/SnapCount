@@ -41,10 +41,16 @@ final class HostedAICompanionProvider: LocalCompanionProvider {
               envelope.ok != false else {
             throw QwenBYOKError.invalidResponse
         }
-        return LocalCompanionResult(
-            companionMessage: envelope.data?.companionMessage,
-            aiFeedback: envelope.data?.aiFeedback
-        )
+        do {
+            return try LocalCompanionResultNormalizer.normalize(
+                companionMessage: envelope.data?.companionMessage,
+                aiFeedback: envelope.data?.aiFeedback,
+                domainKey: context.currentFact.domainKey,
+                recentCompanionLines: context.recentCompanionLines
+            )
+        } catch {
+            throw QwenBYOKError.invalidResponse
+        }
     }
 
     static func factPayload(_ fact: LocalExpressionFact) -> [String: Any] {
@@ -186,54 +192,97 @@ final class QwenBYOKCompanionProvider: LocalCompanionProvider {
               let object = LocalCompanionCompositionSupport.jsonObject(from: content) else {
             throw QwenBYOKError.invalidResponse
         }
-        let companion = LocalCompanionCompositionSupport.clipped(object["companion_message"] as? String, max: 30)
-        let feedback: [String: AnyCodable]?
-        if let feedbackObject = object["ai_feedback"] as? [String: Any],
-           let emotion = LocalCompanionCompositionSupport.clipped(feedbackObject["emotion_line"] as? String, max: 28),
-           !emotion.isEmpty {
-            let confidence = LocalCompanionCompositionSupport.normalizedConfidence(feedbackObject["confidence"]) ?? 0.7
-            if confidence >= 0.5 {
-                let domain = context.currentFact.domainKey
-                let band = LocalCompanionCompositionSupport.allowedBands.contains(feedbackObject["band"] as? String ?? "")
-                    ? (feedbackObject["band"] as? String ?? "neutral")
-                    : "neutral"
-                feedback = [
-                    "version": AnyCodable("feedback-v1"),
-                    "domain_key": AnyCodable(domain),
-                    "badge": AnyCodable(LocalCompanionCompositionSupport.clipped(feedbackObject["badge"] as? String, max: 10) ?? "即时反馈"),
-                    "icon": AnyCodable(LocalCompanionCompositionSupport.clipped(feedbackObject["icon"] as? String, max: 4) ?? LocalCompanionCompositionSupport.icon(for: domain)),
-                    "band": AnyCodable(band),
-                    "tone": AnyCodable("ai_generated"),
-                    "emotion_line": AnyCodable(emotion),
-                    "utility_line": AnyCodable(LocalCompanionCompositionSupport.clipped(feedbackObject["utility_line"] as? String, max: 30) ?? NSNull()),
-                    "detail_reason": AnyCodable(LocalCompanionCompositionSupport.clipped(feedbackObject["detail_reason"] as? String, max: 60) ?? NSNull()),
-                    "confidence": AnyCodable(confidence),
-                    "internal_score": AnyCodable(Int((confidence * 100).rounded())),
-                    "source": AnyCodable("hybrid")
-                ]
-            } else {
-                feedback = nil
-            }
-        } else {
-            feedback = nil
+        do {
+            return try LocalCompanionResultNormalizer.normalize(
+                companionMessage: object["companion_message"],
+                aiFeedback: object["ai_feedback"],
+                domainKey: context.currentFact.domainKey,
+                recentCompanionLines: context.recentCompanionLines
+            )
+        } catch {
+            throw QwenBYOKError.invalidResponse
         }
-        guard companion != nil || feedback != nil else { throw QwenBYOKError.invalidResponse }
-        return LocalCompanionResult(companionMessage: companion, aiFeedback: feedback)
     }
 }
 
-private enum LocalCompanionCompositionSupport {
-    static let allowedBands: Set<String> = ["positive", "neutral", "watch", "recover", "ritual"]
+/// Normalizes provider output at the shared boundary so Hosted and BYOK have
+/// the same persistence schema and safety behavior.
+internal enum LocalCompanionResultNormalizer {
+    private static let allowedBands: Set<String> = ["positive", "neutral", "watch", "recover", "ritual"]
 
-    static func clipped(_ value: String?, max: Int) -> String? {
-        guard let value else { return nil }
-        let normalized = value.replacingOccurrences(of: "\n", with: " ")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !normalized.isEmpty else { return nil }
-        return normalized.count <= max ? normalized : String(normalized.prefix(max))
+    static func normalize(
+        companionMessage: Any?,
+        aiFeedback: Any?,
+        domainKey: String,
+        recentCompanionLines: [String]
+    ) throws -> LocalCompanionResult {
+        let recent = Set(recentCompanionLines.compactMap { try? normalizedText($0, max: nil) })
+        let companion = try normalizeCompanion(companionMessage, recent: recent)
+        let feedback = try normalizeFeedback(aiFeedback, domainKey: domainKey, recent: recent)
+        return LocalCompanionResult(companionMessage: companion, aiFeedback: feedback)
     }
 
-    static func normalizedConfidence(_ value: Any?) -> Double? {
+    private static func normalizeCompanion(_ value: Any?, recent: Set<String>) throws -> String? {
+        guard let raw = try normalizedText(value, max: nil) else { return nil }
+        guard !recent.contains(raw) else { return nil }
+        return String(raw.prefix(30))
+    }
+
+    private static func normalizeFeedback(_ value: Any?, domainKey: String, recent: Set<String>) throws -> [String: AnyCodable]? {
+        guard let value, !(value is NSNull) else { return nil }
+        guard let object = dictionary(value) else { throw LocalCompanionResultNormalizerError.malformedFeedback }
+        guard let confidenceValue = object["confidence"],
+              let confidence = normalizedConfidence(confidenceValue) else {
+            throw LocalCompanionResultNormalizerError.malformedFeedback
+        }
+        guard confidence >= 0.5 else { return nil }
+        guard let emotion = try normalizedText(object["emotion_line"], max: 28) else {
+            throw LocalCompanionResultNormalizerError.malformedFeedback
+        }
+        guard !recent.contains(emotion) else { return nil }
+
+        let badge = try normalizedText(object["badge"], max: 10) ?? "即时反馈"
+        let icon = try normalizedText(object["icon"], max: 4) ?? icon(for: domainKey)
+        let bandValue = try normalizedBand(object["band"])
+        let utility = try normalizedText(object["utility_line"], max: 30)
+        let detail = try normalizedText(object["detail_reason"], max: 60)
+        return [
+            "version": AnyCodable("feedback-v1"),
+            "domain_key": AnyCodable(domainKey),
+            "badge": AnyCodable(badge),
+            "icon": AnyCodable(icon),
+            "band": AnyCodable(bandValue),
+            "tone": AnyCodable("ai_generated"),
+            "emotion_line": AnyCodable(emotion),
+            "utility_line": AnyCodable(utility ?? NSNull()),
+            "detail_reason": AnyCodable(detail ?? NSNull()),
+            "confidence": AnyCodable(confidence),
+            "internal_score": AnyCodable(Int((confidence * 100).rounded())),
+            "source": AnyCodable("hybrid")
+        ]
+    }
+
+    private static func normalizedText(_ value: Any?, max: Int?) throws -> String? {
+        let value = unwrapped(value)
+        guard let value, !(value is NSNull) else { return nil }
+        guard let string = value as? String else { throw LocalCompanionResultNormalizerError.malformedFeedback }
+        let normalized = string.replacingOccurrences(of: "\n", with: " ")
+            .replacingOccurrences(of: "\r", with: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalized.isEmpty else { return nil }
+        guard let max else { return normalized }
+        return String(normalized.prefix(max))
+    }
+
+    private static func normalizedBand(_ value: Any?) throws -> String {
+        let value = unwrapped(value)
+        guard let value, !(value is NSNull) else { return "neutral" }
+        guard let band = value as? String else { throw LocalCompanionResultNormalizerError.malformedFeedback }
+        return allowedBands.contains(band) ? band : "neutral"
+    }
+
+    private static func normalizedConfidence(_ value: Any) -> Double? {
+        let value = unwrapped(value)
         let number: Double?
         if let value = value as? Double { number = value }
         else if let value = value as? NSNumber { number = value.doubleValue }
@@ -243,6 +292,35 @@ private enum LocalCompanionCompositionSupport {
         return min(1, max(0, number))
     }
 
+    private static func dictionary(_ value: Any) -> [String: Any]? {
+        if let object = value as? [String: Any] { return object }
+        if let object = value as? [String: AnyCodable] { return object.mapValues(\.value) }
+        return nil
+    }
+
+    private static func unwrapped(_ value: Any?) -> Any? {
+        if let value = value as? AnyCodable { return value.value }
+        return value
+    }
+
+    private static func icon(for domainKey: String) -> String {
+        switch domainKey {
+        case "sleep": return "🌙"
+        case "sport": return "🏃"
+        case "food": return "🍱"
+        case "reading": return "📚"
+        case "wallet": return "💳"
+        case "income": return "💰"
+        default: return "💸"
+        }
+    }
+}
+
+private enum LocalCompanionResultNormalizerError: Error {
+    case malformedFeedback
+}
+
+private enum LocalCompanionCompositionSupport {
     static func jsonObject(_ json: String?) -> Any? {
         guard let json, let data = json.data(using: .utf8) else { return nil }
         return try? JSONSerialization.jsonObject(with: data)
