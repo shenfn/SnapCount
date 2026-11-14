@@ -1472,11 +1472,16 @@ final class AppState: ObservableObject {
             providerMode: providerMode
         ) else { return outcome }
         let message = composed.companionMessage?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let feedback = composed.aiFeedback.flatMap { NativeAIFeedback(payload: $0) } ?? outcome.feedback
         return LocalImageIntakeOutcome(
             result: outcome.result,
             imageHash: outcome.imageHash,
-            notificationText: message?.isEmpty == false ? message : outcome.notificationText,
-            feedback: composed.aiFeedback.flatMap { NativeAIFeedback(payload: $0) } ?? outcome.feedback
+            notificationText: LocalIntakeNotificationText.merge(
+                baseText: outcome.notificationText,
+                companionMessage: message,
+                feedbackParts: feedback.map { LocalIntakeNotificationFeedback($0) }
+            ),
+            feedback: feedback
         )
     }
 

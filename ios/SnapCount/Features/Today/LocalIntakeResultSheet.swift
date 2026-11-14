@@ -13,10 +13,14 @@ struct LocalIntakeResultSheet: View {
 
     /// 按换行拆分逐行渲染，避免单个 Text 内换行的行距无法控制；空行丢弃以免出现双倍空隙。
     private var messageLines: [String] {
-        guard feedback == nil else { return [] }
         return notificationText
             .components(separatedBy: "\n")
             .filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
+    }
+
+    private var primaryMessage: String? {
+        guard feedback != nil else { return nil }
+        return messageLines.first
     }
 
     var body: some View {
@@ -29,7 +33,11 @@ struct LocalIntakeResultSheet: View {
                         messageBlock
                     }
                     if let feedback {
-                        NativeAIFeedbackCard(feedback: feedback, compact: true)
+                        NativeAIFeedbackCard(
+                            feedback: feedback,
+                            compact: true,
+                            primaryMessage: primaryMessage
+                        )
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)

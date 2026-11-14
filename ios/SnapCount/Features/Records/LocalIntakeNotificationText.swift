@@ -15,24 +15,135 @@ struct LocalIntakeNotificationInput {
     let isPending: Bool
 }
 
+/// The provider-independent expression fields used by every local delivery
+/// surface. Hosted and BYOK responses may use different transport models, but
+/// notification composition must apply the same precedence and de-duplication.
+struct LocalIntakeNotificationFeedback: Equatable {
+    let icon: String
+    let badge: String
+    let confidence: Double?
+    let emotionLine: String
+    let utilityLine: String
+
+    init(
+        icon: String,
+        badge: String,
+        confidence: Double? = nil,
+        emotionLine: String,
+        utilityLine: String
+    ) {
+        self.icon = icon
+        self.badge = badge
+        self.confidence = confidence
+        self.emotionLine = emotionLine
+        self.utilityLine = utilityLine
+    }
+
+    init(_ feedback: NativeAIFeedback, confidence: Double? = nil) {
+        self.init(
+            icon: feedback.icon,
+            badge: feedback.badge,
+            confidence: confidence,
+            emotionLine: feedback.emotionLine,
+            utilityLine: feedback.utilityLine
+        )
+    }
+
+    init(_ feedback: ShortcutAIFeedback) {
+        self.init(
+            icon: feedback.icon ?? "✨",
+            badge: feedback.badge ?? "即时反馈",
+            confidence: feedback.confidence,
+            emotionLine: feedback.emotionLine ?? "",
+            utilityLine: feedback.utilityLine ?? ""
+        )
+    }
+}
+
 /// 复刻 PWA 后端 ingest-receipt 的通知文案拼接：先算域 fallback，再叠 companion / AI 反馈。
 enum LocalIntakeNotificationText {
     static func compose(_ input: LocalIntakeNotificationInput) -> String {
         let fallback = fallbackText(input)
-        if let companionLine = compactFeedbackText(input.companionMessage, max: 34) {
-            return uniqueNotificationLines([companionLine] + fallbackLines(fallback)).joined(separator: "\n")
+        return merge(
+            baseText: fallback,
+            companionMessage: input.companionMessage,
+            feedbackParts: input.feedback.map { LocalIntakeNotificationFeedback($0, confidence: input.confidence) }
+        )
+    }
+
+    /// Composes one delivery block for AppState, Shortcut and the in-app
+    /// result sheet. Fixed receipt facts are always retained after an
+    /// expression, while duplicate lines are removed in their first-seen
+    /// order.
+    static func merge(
+        baseText: String?,
+        companionMessage: String?,
+        feedbackParts: LocalIntakeNotificationFeedback?
+    ) -> String {
+        let fallbackLines = fallbackLines(baseText ?? "")
+        if let companionLine = compactFeedbackText(companionMessage, max: 34) {
+            return uniqueNotificationLines([companionLine] + fallbackLines).joined(separator: "\n")
         }
-        if let feedback = input.feedback,
-           input.confidence == nil || input.confidence! >= 0.5 {
-            let fallbackLines = fallbackLines(fallback)
-            let feedbackLines: [String] = [
+        if let feedback = feedbackParts,
+           feedback.confidence == nil || feedback.confidence! >= 0.5 {
+            let feedbackLines: [String?] = [
                 "\(feedback.icon) \(feedback.badge)",
                 compactFeedbackText(feedback.emotionLine, max: 34),
                 compactFeedbackText(feedback.utilityLine, max: 34) ?? fallbackLines.first
-            ].compactMap { $0 } + fallbackLines
-            return uniqueNotificationLines(feedbackLines).joined(separator: "\n")
+            ]
+            return uniqueNotificationLines(feedbackLines.compactMap { $0 } + fallbackLines)
+                .joined(separator: "\n")
         }
-        return fallback
+        return fallbackLines.joined(separator: "\n")
+    }
+
+    /// Compatibility seam for existing local callers that already hold a
+    /// native feedback model and a separate confidence value.
+    /// Keeps the already-composed fixed receipt facts when a later local
+    /// Companion call finishes. This mirrors the PWA notification contract:
+    /// expression first, stable receipt facts after it.
+    static func merge(
+        baseText: String?,
+        companionMessage: String?,
+        feedback: NativeAIFeedback? = nil,
+        confidence: Double? = nil
+    ) -> String {
+        merge(
+            baseText: baseText,
+            companionMessage: companionMessage,
+            feedbackParts: feedback.map { LocalIntakeNotificationFeedback($0, confidence: confidence) }
+        )
+    }
+
+    static func compose(
+        baseText: String?,
+        companionMessage: String?,
+        feedback: LocalIntakeNotificationFeedback?
+    ) -> String {
+        merge(
+            baseText: baseText,
+            companionMessage: companionMessage,
+            feedbackParts: feedback
+        )
+    }
+
+    /// Keeps the system notification's line breaks while enforcing the
+    /// existing 160-character budget.
+    static func boundedNotificationText(_ text: String, maxCharacters: Int = 160) -> String {
+        guard maxCharacters > 0 else { return "" }
+        var lines: [String] = []
+        var remaining = maxCharacters
+        for raw in text.split(whereSeparator: \.isNewline) {
+            guard remaining > 0 else { break }
+            let line = raw.trimmingCharacters(in: .whitespaces)
+            guard !line.isEmpty else { continue }
+            let available = max(0, remaining - (lines.isEmpty ? 0 : 1))
+            guard available > 0 else { break }
+            let clipped = line.count > available ? String(line.prefix(available)) : line
+            lines.append(clipped)
+            remaining -= clipped.count + (lines.count == 1 ? 0 : 1)
+        }
+        return lines.joined(separator: "\n")
     }
 
     // MARK: - fallback
@@ -92,17 +203,6 @@ enum LocalIntakeNotificationText {
         case "wallet": return "钱包与待还"
         default: return nil
         }
-    }
-
-    // MARK: - feedback
-
-    private static func feedbackNotification(_ feedback: NativeAIFeedback) -> String {
-        return uniqueNotificationLines([
-            "\(feedback.icon) \(feedback.badge)",
-            compactFeedbackText(feedback.emotionLine, max: 34) ?? "",
-            compactFeedbackText(feedback.utilityLine, max: 34) ?? ""
-        ])
-            .joined(separator: "\n")
     }
 
     // MARK: - text helpers

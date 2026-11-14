@@ -146,6 +146,7 @@ final class SnapCountUploadService {
         localMemoryContext: [String: Any]?,
         expressionPreferences: [String: Any],
         clientLocalTime: String?,
+        clientCapturedAt: String?,
         weekday: String?,
         recentCompanionLines: [String],
         accessToken: String
@@ -171,6 +172,7 @@ final class SnapCountUploadService {
         if let plannerCandidate { body["planner_candidate"] = plannerCandidate }
         if let localMemoryContext { body["local_memory_context"] = localMemoryContext }
         if let clientLocalTime { body["client_local_time"] = clientLocalTime }
+        if let clientCapturedAt { body["client_captured_at"] = clientCapturedAt }
         if let weekday { body["weekday"] = weekday }
         var request = URLRequest(url: url)
         request.timeoutInterval = 60
@@ -342,20 +344,7 @@ struct ShortcutUploadResult {
     }
 
     var notificationBody: String {
-        // 保留换行：按域生成的文案本来就是多行，拍平会把 companion 与事实行糊成一句。
-        // 无 companion 时 PWA 会输出 5 行（反馈三行 + 域事实两行），这里不预裁行，
-        // 只守住 160 字预算，折叠/展开几行交给系统决定。
-        var lines: [String] = []
-        var budget = 160
-        for raw in notificationText.split(whereSeparator: \.isNewline) {
-            guard budget > 0 else { break }
-            let line = raw.trimmingCharacters(in: .whitespaces)
-            guard !line.isEmpty else { continue }
-            let clipped = line.count > budget ? String(line.prefix(budget)) : line
-            lines.append(clipped)
-            budget -= clipped.count + 1
-        }
-        return lines.joined(separator: "\n")
+        LocalIntakeNotificationText.boundedNotificationText(notificationText)
     }
 
     var compactDisplayText: String {
@@ -367,13 +356,10 @@ struct ShortcutUploadResult {
         companionMessage: String?,
         feedback: NativeAIFeedback?
     ) -> String {
-        expandedDisplayText(
+        LocalIntakeNotificationText.merge(
             baseText: baseText,
             companionMessage: companionMessage,
-            icon: feedback?.icon,
-            badge: feedback?.badge,
-            emotionLine: feedback?.emotionLine,
-            utilityLine: feedback?.utilityLine
+            feedbackParts: feedback.map { LocalIntakeNotificationFeedback($0) }
         )
     }
 
@@ -382,77 +368,19 @@ struct ShortcutUploadResult {
         companionMessage: String?,
         feedback: ShortcutAIFeedback?
     ) -> String {
-        expandedDisplayText(
+        LocalIntakeNotificationText.merge(
             baseText: baseText,
             companionMessage: companionMessage,
-            icon: feedback?.icon,
-            badge: feedback?.badge,
-            emotionLine: feedback?.emotionLine,
-            utilityLine: feedback?.utilityLine
+            feedbackParts: feedback.map { LocalIntakeNotificationFeedback($0) }
         )
     }
 
-    private static func expandedDisplayText(
-        baseText: String,
-        companionMessage: String?,
-        icon: String?,
-        badge: String?,
-        emotionLine: String?,
-        utilityLine: String?
-    ) -> String {
-        let fallbackLines = baseText
-            .split(whereSeparator: \.isNewline)
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
-        let expressionLines: [String?]
-        if companionMessage?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false {
-            expressionLines = [
-                compact(companionMessage, max: 34),
-                compact(emotionLine, max: 34),
-                compact(utilityLine, max: 34)
-            ]
-        } else {
-            expressionLines = [
-                "\(icon ?? "✨") \(badge ?? "即时反馈")",
-                compact(emotionLine, max: 34),
-                compact(utilityLine, max: 34)
-            ]
-        }
-        return unique(expressionLines + fallbackLines).joined(separator: "\n")
-    }
-
     private static func notificationText(baseText: String, payload: ShortcutUploadPayload) -> String {
-        let fallbackLines = baseText.split(whereSeparator: \.isNewline).map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
-        if let companion = compact(payload.companionMessage, max: 34) {
-            return unique([companion] + fallbackLines).joined(separator: "\n")
-        }
-        guard let feedback = payload.aiFeedback, feedback.confidence == nil || feedback.confidence! >= 0.5 else {
-            return unique(fallbackLines).joined(separator: "\n")
-        }
-        return unique([
-            "\(feedback.icon ?? "✨") \(feedback.badge ?? "即时反馈")",
-            compact(feedback.emotionLine, max: 34),
-            compact(feedback.utilityLine, max: 34) ?? fallbackLines.first
-        ] + fallbackLines).joined(separator: "\n")
-    }
-
-    private static func compact(_ value: String?, max: Int) -> String? {
-        guard let value = value?.replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression).trimmingCharacters(in: .whitespacesAndNewlines), !value.isEmpty else { return nil }
-        guard value.count > max else { return value }
-        let head = String(value.prefix(max))
-        let punctuation = ["。", "！", "？", "；", "，", ","]
-        let cut = punctuation.compactMap { head.lastIndex(of: Character($0)) }.map { head.distance(from: head.startIndex, to: $0) }.max() ?? -1
-        return cut >= max / 2 ? String(head.prefix(cut)) + "。" : String(head.prefix(max - 1)) + "…"
-    }
-
-    private static func unique(_ values: [String?]) -> [String] {
-        var seen = Set<String>()
-        return values.compactMap { value in
-            guard let line = value?.trimmingCharacters(in: .whitespacesAndNewlines), !line.isEmpty else { return nil }
-            let key = line.replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
-            guard seen.insert(key).inserted else { return nil }
-            return line
-        }
+        LocalIntakeNotificationText.merge(
+            baseText: baseText,
+            companionMessage: payload.companionMessage,
+            feedbackParts: payload.aiFeedback.map { LocalIntakeNotificationFeedback($0) }
+        )
     }
 }
 

@@ -232,3 +232,97 @@ final class LocalIntakeNotificationTextTests: XCTestCase {
         XCTAssertEqual(plain("sport"), "🏃 已归档到运动记录")
     }
 }
+
+extension LocalIntakeNotificationTextTests {
+    func testSharedCompositionKeepsCompanionAndFixedFactsAcrossAppStateAndShortcut() throws {
+        let native = try feedback(emotion: "这笔已记下。", utility: "今天继续稳住。")
+        let shortcut = ShortcutAIFeedback(
+            icon: native.icon,
+            badge: native.badge,
+            confidence: 0.92,
+            emotionLine: native.emotionLine,
+            utilityLine: native.utilityLine,
+            detailReason: nil
+        )
+        let base = "💸 -¥12.00 · 星巴克 · 餐饮\n今日尚无支出记录"
+        let appStateText = LocalIntakeNotificationText.compose(
+            baseText: base,
+            companionMessage: "这笔咖啡记下了",
+            feedback: LocalIntakeNotificationFeedback(native)
+        )
+        let shortcutText = LocalIntakeNotificationText.compose(
+            baseText: base,
+            companionMessage: "这笔咖啡记下了",
+            feedback: LocalIntakeNotificationFeedback(shortcut)
+        )
+        let shortcutResultText = ShortcutUploadResult.expandedDisplayText(
+            baseText: base,
+            companionMessage: "这笔咖啡记下了",
+            feedback: shortcut
+        )
+        XCTAssertEqual(appStateText, shortcutText)
+        XCTAssertEqual(appStateText, shortcutResultText)
+        XCTAssertEqual(appStateText, "这笔咖啡记下了\n💸 -¥12.00 · 星巴克 · 餐饮\n今日尚无支出记录")
+        XCTAssertFalse(appStateText.contains("这笔已记下。"))
+    }
+
+    func testSharedCompositionFallsBackWhenFeedbackIsLowConfidence() throws {
+        let lowConfidence = LocalIntakeNotificationFeedback(
+            icon: "✨",
+            badge: "今天很稳",
+            confidence: 0.49,
+            emotionLine: "不应显示",
+            utilityLine: "也不应显示"
+        )
+        let text = LocalIntakeNotificationText.compose(
+            baseText: "⚠️ -¥25.00 · 便利店 · 请打开 App 补全",
+            companionMessage: nil,
+            feedback: lowConfidence
+        )
+        XCTAssertEqual(text, "⚠️ -¥25.00 · 便利店 · 请打开 App 补全")
+    }
+
+    func testSharedCompositionDeDuplicatesCompanionEmotionAndFacts() throws {
+        let feedback = LocalIntakeNotificationFeedback(
+            icon: "✨",
+            badge: "今天很稳",
+            confidence: 0.9,
+            emotionLine: "这笔咖啡记下了",
+            utilityLine: "今日尚无支出记录"
+        )
+        let text = LocalIntakeNotificationText.compose(
+            baseText: "💸 -¥12.00 · 星巴克 · 餐饮\n今日尚无支出记录",
+            companionMessage: "这笔咖啡记下了",
+            feedback: feedback
+        )
+        XCTAssertEqual(text, "这笔咖啡记下了\n💸 -¥12.00 · 星巴克 · 餐饮\n今日尚无支出记录")
+        XCTAssertEqual(text.components(separatedBy: "\n").count, 3)
+    }
+
+    func testSharedCompositionPreservesFailureAndPendingBaseWording() {
+        let failure = LocalIntakeNotificationText.compose(
+            baseText: "识别失败，请重试",
+            companionMessage: "不应覆盖失败结果",
+            feedback: nil
+        )
+        XCTAssertEqual(failure, "不应覆盖失败结果\n识别失败，请重试")
+
+        let pending = LocalIntakeNotificationText.compose(
+            baseText: "⚠️ -¥25.00 · 便利店 · 请打开 App 补全",
+            companionMessage: nil,
+            feedback: nil
+        )
+        XCTAssertEqual(pending, "⚠️ -¥25.00 · 便利店 · 请打开 App 补全")
+    }
+
+    func testShortcutNotificationBodyRetainsLineBreaksWithinBudget() {
+        let base = String(repeating: "事实", count: 90)
+        let result = ShortcutUploadResult(
+            displayText: base,
+            notificationText: "第一行\n第二行\n\(base)",
+            route: "records"
+        )
+        XCTAssertLessThanOrEqual(result.notificationBody.count, 160)
+        XCTAssertTrue(result.notificationBody.contains("\n"))
+    }
+}

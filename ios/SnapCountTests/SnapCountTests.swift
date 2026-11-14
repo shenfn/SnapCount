@@ -1611,8 +1611,6 @@ final class SnapCountTests: XCTestCase {
             result.displayText.split(separator: "\n").map(String.init),
             [
                 "第一次见青集便利店，8元买份踏实。",
-                "初次遇见的小确幸，值得被温柔记录。",
-                "标记为首次光顾，方便日后回顾变化。",
                 "💸 -¥8.00 · 青集便利店 · life",
                 "今日已花 ¥117.06（10 笔）"
             ]
