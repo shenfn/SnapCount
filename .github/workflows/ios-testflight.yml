@@ -146,6 +146,14 @@ jobs:
             -exportPath "$RUNNER_TEMP/export" \
             -exportOptionsPlist "$RUNNER_TEMP/ExportOptions.plist"
 
+      - name: Upload IPA artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: SnapCount-ipa
+          path: ${{ runner.temp }}/export/*.ipa
+          if-no-files-found: warn
+
       - name: Upload to TestFlight
         env:
           APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
@@ -155,6 +163,7 @@ jobs:
           test -n "$IPA_PATH"
           APP_PLIST="$RUNNER_TEMP/AppInfo.plist"
           unzip -p "$IPA_PATH" "Payload/SnapCount.app/Info.plist" > "$APP_PLIST"
+          echo "bundle-id=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP_PLIST")"
           /usr/libexec/PlistBuddy -c "Print :CFBundleVersion" "$APP_PLIST"
           xcrun altool \
             --upload-app \
@@ -162,9 +171,3 @@ jobs:
             --file "$IPA_PATH" \
             --apiKey "$APPLE_API_KEY_ID" \
             --apiIssuer "$APPLE_API_ISSUER_ID"
-
-      - name: Upload IPA artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: SnapCount-ipa
-          path: ${{ runner.temp }}/export/*.ipa
