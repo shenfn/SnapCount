@@ -74,7 +74,7 @@ function isEvidenceReference(value: unknown): value is PlannerEvidenceReference 
 
 function sanitizeEvidenceReference(value: unknown): PlannerEvidenceReference | null {
   if (!isEvidenceReference(value)) return null;
-  const item = value as Record<string, unknown>;
+  const item = value as unknown as Record<string, unknown>;
   return {
     kind: item.kind as PlannerEvidenceKind,
     source: item.source as PlannerEvidenceSource,
@@ -196,7 +196,7 @@ export function validateLocalPlannerCandidate(
   const numberFacts = Array.isArray(rawNumberFacts)
     ? rawNumberFacts.flatMap((raw) => {
       if (!raw || typeof raw !== "object") return [];
-      const item = raw as Record<string, unknown>;
+      const item = raw as unknown as Record<string, unknown>;
       const value = typeof item.value === "number" && Number.isFinite(item.value) ? item.value : null;
       if (value === null || !["count", "measure"].includes(String(item.role))) return [];
       const rawNumberEvidence = Array.isArray(item.evidence) ? item.evidence : [];

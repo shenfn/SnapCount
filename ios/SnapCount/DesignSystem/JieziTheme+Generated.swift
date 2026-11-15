@@ -617,6 +617,7 @@ enum JieziFont {
 
 enum JieziFontFamily {
     static let sans = "system"
+    static let serif = "NotoSerifSC-ExtraLight"
     static let numeric = "Nunito-ExtraLight"
 }
 
@@ -624,9 +625,9 @@ enum JieziFontFamily {
 /// 注意：money 系列角色在使用处追加 .monospacedDigit()（SSOT numeric 规则）。
 enum JieziType {
     /// 页面主标题、品牌门面（如「个人数据平台」）
-    static let display = Font.system(.title, design: .serif).weight(.bold)
+    static let display = Font.custom(JieziFontFamily.serif, size: 28, relativeTo: .title).weight(.bold)
     /// 空态大标题、启动页书法字位
-    static let displayLarge = Font.system(.largeTitle, design: .serif).weight(.bold)
+    static let displayLarge = Font.custom(JieziFontFamily.serif, size: 34, relativeTo: .largeTitle).weight(.bold)
     /// 财务主数字（净额估算、大金额输入）
     static let moneyHero = Font.custom(JieziFontFamily.numeric, size: 34, relativeTo: .largeTitle).weight(.bold)
     /// 卡片级金额、日汇总数字
@@ -643,11 +644,11 @@ enum JieziType {
     static let chip = Font.system(.footnote).weight(.medium)
     /// 指标说明文字（如「可用现金」）
     static let metricLabel = Font.system(.caption).weight(.regular)
-    static let prototypeBrand = Font.system(.title2, design: .serif).weight(.bold)
+    static let prototypeBrand = Font.custom(JieziFontFamily.serif, size: 20, relativeTo: .title2).weight(.bold)
     static let prototypeHero = Font.custom(JieziFontFamily.numeric, size: 44, relativeTo: .largeTitle).weight(.bold)
     static let prototypeSleepHero = Font.custom(JieziFontFamily.numeric, size: 40, relativeTo: .largeTitle).weight(.bold)
-    static let prototypeBook = Font.system(.title, design: .serif).weight(.bold)
-    static let prototypeOnboarding = Font.system(.largeTitle, design: .serif).weight(.bold)
+    static let prototypeBook = Font.custom(JieziFontFamily.serif, size: 32, relativeTo: .title).weight(.bold)
+    static let prototypeOnboarding = Font.custom(JieziFontFamily.serif, size: 32, relativeTo: .largeTitle).weight(.bold)
 }
 
 // MARK: - 描边 Token（金线 0.5mm 为骨）

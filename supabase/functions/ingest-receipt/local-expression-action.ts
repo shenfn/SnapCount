@@ -66,21 +66,23 @@ function sanitizePayload(value: unknown): Record<string, unknown> | null {
     }
     if (key === "dishes" || key === "food_items") {
       if (!Array.isArray(raw)) continue;
-      const items = raw.slice(0, 8).flatMap((item) => {
+      const items: Array<string | Record<string, unknown>> = [];
+      for (const item of raw.slice(0, 8) as unknown[]) {
         if (typeof item === "string") {
           const normalized = boundedString(item);
-          return normalized ? [normalized] : [];
+          if (normalized) items.push(normalized);
+          continue;
         }
-        if (!isRecord(item)) return [];
+        if (!isRecord(item)) continue;
         const name = boundedString(item.name ?? item.dish_name ?? item.food_name);
-        if (!name) return [];
+        if (!name) continue;
         const entry: Record<string, unknown> = { name };
         const amount = boundedNumber(item.amount ?? item.grams);
         if (amount !== null) entry.amount = amount;
         const kcal = boundedNumber(item.kcal ?? item.calorie_kcal);
         if (kcal !== null) entry.kcal = kcal;
-        return [entry];
-      });
+        items.push(entry);
+      }
       if (items.length > 0) result[key] = items;
     }
   }
@@ -210,19 +212,12 @@ export function normalizeLocalExpressionAction(
     if (boundsReason) {
       plannerFallbackReason = boundsReason;
     }
-    const validation = boundsReason ? null : validateLocalPlannerCandidate({
-      candidate_id: candidateInput.candidate_id,
-      semantic_key: candidateInput.semantic_key,
-      canonical_text: candidateInput.canonical_text,
-      dimension: candidateInput.dimension,
-      claim_fingerprint: candidateInput.claim_fingerprint,
-      // Preserve the raw array so malformed entries cannot be filtered out
-      // before the public contract validator sees them.
-      evidence: candidateInput.evidence,
-      numbers: candidateInput.numbers,
-      count_numbers: candidateInput.count_numbers,
-      number_facts: candidateInput.number_facts,
-    }, {
+    // Preserve every raw field so malformed arrays cannot be filtered out
+    // before the public contract validator sees them.
+    const candidateForValidation: Partial<LocalPlannerCandidateContract> & Record<string, unknown> = {
+      ...candidateInput,
+    };
+    const validation = boundsReason ? null : validateLocalPlannerCandidate(candidateForValidation, {
       currentFactId: stringValue(currentFact.id) ?? "current_fact",
       currentFact,
       recentFactIds: recentFacts.flatMap((item) => {
