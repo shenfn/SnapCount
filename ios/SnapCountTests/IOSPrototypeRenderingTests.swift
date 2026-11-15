@@ -89,14 +89,27 @@ final class IOSPrototypeRenderingTests: XCTestCase {
         }
     }
 
+    /// The display face is the system serif design instead of a bundled
+    /// Noto Serif SC payload (~25 MB). `CTFontGetGlyphsForCharacters` never
+    /// consults the cascade list, so it reports "no glyph" for CJK even when
+    /// the rendered line is complete. Shape a real line and check the glyphs.
     func testIOSV2POLISH011SystemAndNumericFontsCoverRepresentativeText() throws {
-        let serif = UIFont.systemFont(ofSize: 24, weight: .bold)
+        let display = UIFont.systemFont(ofSize: 24, weight: .bold)
         let numeric = try XCTUnwrap(UIFont(name: JieziFontFamily.numeric, size: 44))
-        for (font, text) in [(serif, "芥子阅读记录收入书名"), (numeric, "0123456789¥.")] {
-            let characters = Array(text.utf16)
-            var glyphs = Array<CGGlyph>(repeating: 0, count: characters.count)
-            let coreFont = CTFontCreateWithName(font.fontName as CFString, font.pointSize, nil)
-            XCTAssertTrue(CTFontGetGlyphsForCharacters(coreFont, characters, &glyphs, characters.count))
+        for (font, text) in [(display, "芥子阅读记录收入书名"), (numeric, "0123456789¥.")] {
+            let line = CTLineCreateWithAttributedString(
+                NSAttributedString(string: text, attributes: [.font: font])
+            )
+            let runs = CTLineGetGlyphRuns(line) as! [CTRun]
+            var glyphs: [CGGlyph] = []
+            for run in runs {
+                let count = CTRunGetGlyphCount(run)
+                var buffer = [CGGlyph](repeating: 0, count: count)
+                CTRunGetGlyphs(run, CFRange(location: 0, length: count), &buffer)
+                glyphs.append(contentsOf: buffer)
+            }
+            XCTAssertEqual(glyphs.count, text.utf16.count, "\(font.fontName) dropped characters in \(text)")
+            XCTAssertFalse(glyphs.contains(0), "\(font.fontName) is missing a glyph for part of \(text)")
         }
     }
 

@@ -53,7 +53,10 @@ final class LocalAIIntegrationRegressionTests: XCTestCase {
         let currentFact = try XCTUnwrap(packet["current_fact"] as? [String: Any])
         XCTAssertEqual(currentFact["id"] as? String, current.id.uuidString)
         let candidate = try XCTUnwrap(packet["planner_candidate"] as? [String: Any])
-        XCTAssertEqual(candidate["dimension"] as? String, "current_fact")
+        // Both fixtures are 「便利店」 expenses, so the cross-record repeat
+        // candidate carries more concrete evidence than the bare current fact
+        // and legitimately wins the deterministic selection.
+        XCTAssertEqual(candidate["dimension"] as? String, "repeat_pattern")
         XCTAssertNotNil(packet["local_memory_context"] as? [String: Any])
         XCTAssertEqual((packet["expression_preferences"] as? [String: Any])?["persona"] as? String, "observer")
         XCTAssertEqual(packet["client_local_time"] as? String, "2026-11-14 20:00")
@@ -70,11 +73,18 @@ final class LocalAIIntegrationRegressionTests: XCTestCase {
         )
         let memoryFacts = ((packet["local_memory_context"] as? [String: Any])?["facts"] as? [[String: Any]]) ?? []
         let memoryKeys = Set(memoryFacts.compactMap { $0["key"] as? String })
+        let recentFactPayloads = (packet["recent_facts"] as? [[String: Any]]) ?? []
+        let recentIds = Set(recentFactPayloads.compactMap { $0["id"] as? String })
+        XCTAssertEqual(recentIds, [older.id.uuidString])
         let evidence = try XCTUnwrap(candidate["evidence"] as? [[String: Any]])
         for reference in evidence {
             switch reference["kind"] as? String {
             case "current_fact":
                 XCTAssertEqual(reference["reference"] as? String, current.id.uuidString)
+            case "recent_fact":
+                // Edge only accepts history evidence when the referenced id
+                // actually travels in `recent_facts`.
+                XCTAssertTrue(recentIds.contains(reference["reference"] as? String ?? ""))
             case "local_memory":
                 XCTAssertTrue(memoryKeys.contains(reference["reference"] as? String ?? ""))
             default:
@@ -82,11 +92,12 @@ final class LocalAIIntegrationRegressionTests: XCTestCase {
             }
         }
         let numberFactValues = ((candidate["number_facts"] as? [[String: Any]]) ?? []).compactMap { $0["value"] as? Double }
-        XCTAssertEqual(numberFactValues, [12.8])
-        XCTAssertEqual(candidate["numbers"] as? [Double], Optional([12.8]))
+        XCTAssertEqual(numberFactValues, [12.8, 8.0])
+        XCTAssertEqual(candidate["numbers"] as? [Double], Optional([12.8, 8.0]))
         XCTAssertNoThrow(try EdgePlannerValidatorMirror.validate(
             candidate,
             currentFact: currentFact,
+            recentFacts: recentFactPayloads,
             memoryFacts: memoryFacts
         ))
 
