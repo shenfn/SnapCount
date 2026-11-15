@@ -238,7 +238,7 @@ export function normalizeLocalExpressionAction(
   }
 
   const rawClientLocalTime = stringValue(input.clientLocalTime);
-  const clientLocalTime = rawClientLocalTime && /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/.test(rawClientLocalTime)
+  const suppliedClientLocalTime = rawClientLocalTime && /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/.test(rawClientLocalTime)
     ? rawClientLocalTime
     : null;
   const localPayload = isRecord(currentFact.payload_json) ? currentFact.payload_json : null;
@@ -247,10 +247,16 @@ export function normalizeLocalExpressionAction(
   const timeContext = buildTimeContext({
     occurredAt,
     orderFinishedAt,
-    clientCapturedAt: input.clientCapturedAt ?? clientLocalTime,
+    clientCapturedAt: input.clientCapturedAt ?? suppliedClientLocalTime,
     requestReceivedAt: input.requestReceivedAt,
     fallbackEventTime: recordEventFallback(currentFact),
   });
+  // The ISO capture instant is authoritative. Rebuild the prompt's display
+  // clock from the canonical Shanghai context so a stale UTC wall clock
+  // cannot turn a daytime record into a late-night expression.
+  const clientLocalTime = timeContext.client_local_date && timeContext.client_local_time
+    ? `${timeContext.client_local_date} ${timeContext.client_local_time.slice(0, 5)}`
+    : suppliedClientLocalTime;
   return {
     currentFact,
     domainKey,

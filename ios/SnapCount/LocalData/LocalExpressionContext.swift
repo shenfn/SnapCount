@@ -209,6 +209,10 @@ struct LocalCompanionExpressionPreferences: Equatable {
 /// Deterministic local Planner seed. It supplies stable, evidence-backed
 /// candidates while Hosted/BYOK composition is still optional.
 enum LocalPlannerCandidateEngine {
+    /// User-facing expression time is always rendered in the product's
+    /// canonical wall-clock zone. Stored ISO timestamps remain instants.
+    static let expressionTimeZone = TimeZone(identifier: "Asia/Shanghai") ?? .current
+
     static let supportedDomains: Set<String> = [
         "expense", "income", "food", "sleep", "sport", "reading", "wallet"
     ]
@@ -226,7 +230,7 @@ enum LocalPlannerCandidateEngine {
         weekday: String? = nil,
         recentCompanionLines: [String] = [],
         now: Date = Date(),
-        timeZone: TimeZone = .current
+        timeZone: TimeZone = expressionTimeZone
     ) -> LocalExpressionContext {
         let currentFact = LocalExpressionFact(detail: detail)
         let localTime = Self.localTimeContext(for: now, timeZone: timeZone)

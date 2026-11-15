@@ -229,6 +229,17 @@ Deno.test("Hosted action derives event time from record date/time after invalid 
   assertEquals(result.timeContext.client_captured_at, "2026-11-14T09:00:00+08:00", "capture time remains separate");
 });
 
+Deno.test("Hosted action derives the prompt upload clock from canonical capture time", () => {
+  const result = normalizeLocalExpressionAction({
+    ...baseInput(null),
+    // A UTC device clock may still arrive in the legacy display field. The
+    // canonical ISO capture instant is authoritative for the prompt clock.
+    clientLocalTime: "2026-11-14 03:00",
+    clientCapturedAt: "2026-11-14T09:00:00+08:00",
+  });
+  assertEquals(result.clientLocalTime, "2026-11-14 09:00", "prompt clock should use Shanghai capture time");
+});
+
 Deno.test("Hosted action falls back to capture/reference context when event and record time are absent", () => {
   const result = normalizeLocalExpressionAction({
     ...baseInput(null),

@@ -354,4 +354,42 @@ final class LocalExpressionContextTests: XCTestCase {
         XCTAssertEqual(restored.companionMessage, "这一笔也稳稳记下了。")
         XCTAssertTrue(restored.aiFeedbackJSON?.contains("消费事实已经保存") == true)
     }
+
+    func testProductionDefaultExpressionTimeUsesShanghaiWallClock() throws {
+        let fact = LocalExpressionFact(
+            id: "fact-time-default", domainKey: "expense", title: "午餐", summary: "记录",
+            recordDate: "2026-11-15", recordTime: nil, amount: 22, category: "餐饮"
+        )
+        let context = LocalPlannerCandidateEngine.makeContext(
+            for: NativeRecordDetail(
+                id: fact.id,
+                rawId: fact.id,
+                kind: fact.domainKey,
+                title: fact.title,
+                subtitle: fact.summary,
+                value: fact.summary,
+                detailRows: [],
+                imageURL: nil,
+                imageLoadError: false,
+                imagePath: nil,
+                imageHash: nil,
+                amount: fact.amount,
+                merchantName: fact.title,
+                platform: nil,
+                category: fact.category,
+                paymentMethod: nil,
+                recordDate: fact.recordDate,
+                note: nil,
+                companionMessage: nil,
+                accountId: nil,
+                systemImage: "cart",
+                payload: nil,
+                domainKey: fact.domainKey,
+                source: nil
+            ),
+            now: ISO8601DateFormatter().date(from: "2026-11-15T03:00:00Z")!
+        )
+
+        XCTAssertEqual(context.clientLocalTime, "2026-11-15 11:00")
+    }
 }
