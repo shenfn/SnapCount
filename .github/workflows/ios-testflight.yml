@@ -6,7 +6,7 @@ on:
 jobs:
   testflight:
     name: Archive and upload
-    runs-on: macos-15
+    runs-on: macos-26
 
     steps:
       - name: Checkout
@@ -14,6 +14,31 @@ jobs:
 
       - name: Show Xcode version
         run: xcodebuild -version
+
+      - name: Validate Swift source encoding
+        run: |
+          python3 - <<'PY'
+          import subprocess, sys
+
+          files = [
+              f for f in subprocess.run(
+                  ["git", "ls-files", "ios"], capture_output=True, text=True
+              ).stdout.splitlines()
+              if f.endswith(".swift")
+          ]
+          bad = []
+          for f in files:
+              try:
+                  with open(f, "rb") as fh:
+                      fh.read().decode("utf-8")
+              except (UnicodeDecodeError, OSError) as exc:
+                  bad.append((f, exc))
+
+          for f, exc in bad:
+              print(f"::error file={f}::Swift source is not valid UTF-8 ({exc})")
+          print(f"checked {len(files)} Swift files, {len(bad)} invalid")
+          sys.exit(1 if bad else 0)
+          PY
 
       - name: Install XcodeGen
         run: brew install xcodegen
