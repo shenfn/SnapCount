@@ -121,16 +121,24 @@ final class IOSPrototypeRenderingTests: XCTestCase {
                 let record = NativeDayRecord(
                     id: "fixture-\(domain.rawValue)", reference: "fixture/\(domain.rawValue)",
                     dateKey: date, kind: NativeDayRecordKind(rawValue: domain.rawValue)!,
-                    domainKey: domain.rawValue, title: domain == .expense ? "示例咖啡店" : domain.title,
-                    subtitle: "", value: domain == .expense ? "¥42.00" : "",
+                    domainKey: domain.rawValue, title: domain == .expense ? "瑞幸咖啡（软件园店）" : domain.title,
+                    subtitle: domain == .expense ? "工作日午间 · 餐饮" : "", value: domain == .expense ? "¥42.00" : "",
                     timeLabel: "12:30", systemImage: domain.systemImage, status: "done"
                 )
                 let detail = NativeRecordDetail(
                     id: record.reference, rawId: record.id, kind: domain == .expense ? "expense" : "data",
-                    title: record.title, subtitle: "", value: record.value, detailRows: [], imageURL: nil,
+                    title: record.title, subtitle: record.subtitle, value: record.value,
+                    detailRows: domain == .expense ? [
+                        NativeDetailRow(label: "消费分类", value: "餐饮美食"),
+                        NativeDetailRow(label: "支付方式", value: "微信支付"),
+                        NativeDetailRow(label: "记录来源", value: "截图识别")
+                    ] : [], imageURL: nil,
                     imageLoadError: false, imagePath: nil, imageHash: nil,
                     amount: domain == .expense ? 42 : nil, merchantName: domain == .expense ? record.title : nil,
-                    platform: nil, category: nil, paymentMethod: nil, recordDate: date, note: nil,
+                    platform: domain == .expense ? "微信" : nil,
+                    category: domain == .expense ? "餐饮" : nil,
+                    paymentMethod: domain == .expense ? "微信支付" : nil, recordDate: date,
+                    note: domain == .expense ? "午休路过，少糖拿铁" : nil,
                     companionMessage: nil, accountId: nil, systemImage: domain.systemImage,
                     payload: [
                         "sleep_minutes": AnyCodable(480),
