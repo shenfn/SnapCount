@@ -1,7 +1,7 @@
 import SwiftUI
 
 // 芥子按钮族：主 / 次 / 危险 / 幽灵 四态。
-// 全部消费 JieziTheme+Generated.swift 的 Token（JieziType.button / JieziRadius.Semantic.button / JieziShadows / JieziGradient）。
+// 全部消费 JieziTheme+Generated.swift 的 Token（JieziType.button / JieziRadius.Semantic.button）。
 // 按压反馈复用手写 JieziPressableButtonStyle（JieziTheme.swift）。
 
 struct JieziPrimaryButton: View {
@@ -28,14 +28,9 @@ struct JieziPrimaryButton: View {
         .buttonStyle(JieziPressableButtonStyle())
         .foregroundStyle(.white)
         .background(
-            JieziGradient.brandWash(palette: palette),
+            palette.brand,
             in: RoundedRectangle(cornerRadius: JieziRadius.Semantic.button, style: .continuous)
         )
-        .overlay {
-            RoundedRectangle(cornerRadius: JieziRadius.Semantic.button, style: .continuous)
-                .stroke(.white.opacity(0.18), lineWidth: 1)
-        }
-        .jieziShadow(JieziShadows.Semantic.primary_button(palette))
     }
 }
 

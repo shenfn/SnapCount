@@ -6,9 +6,26 @@ enum LocalStagingReadModel {
     static func native(
         from record: LocalStagingRecord,
         imageStore: LocalImageStore?,
-        domainName: String? = nil
+        domainName: String? = nil,
+        plannerEnabled: Bool = true
     ) -> NativeStagingRecord {
-        let payload = (try? LocalRecordCodec.decode(record.payloadJSON)) ?? [:]
+        var payload = (try? LocalRecordCodec.decode(record.payloadJSON)) ?? [:]
+        if plannerEnabled,
+           payload.dictionary("ai_feedback") == nil,
+           let feedback = LocalPlannerCandidateEngine.candidates(
+               for: LocalExpressionFact(
+                   id: record.id,
+                   domainKey: record.domainKey,
+                   title: record.title,
+                   summary: record.summary,
+                   recordDate: record.recordDate,
+                   recordTime: record.recordTime,
+                   amount: payload.double("amount_minor").map { $0 / 100 },
+                   category: payload.string("category")
+               )
+           ).first {
+            payload["ai_feedback"] = AnyCodable(feedback.localPayload.mapValues(\.value))
+        }
         let occurredAt = NativeLocalDate.financeOccurredAt(
             dateKey: record.recordDate,
             timeKey: record.recordTime
@@ -29,7 +46,9 @@ enum LocalStagingReadModel {
             confidencePercent: record.confidence.map { max(0, min(100, Int(($0 * 100).rounded()))) },
             lastErrorMessage: record.status == .failed ? "本地候选处理失败" : nil,
             retryCount: 0,
-            systemImage: NativeDayRecordKind(rawValue: record.domainKey)?.systemImage ?? "sparkles",
+            systemImage: record.domainKey == "wallet"
+                ? "creditcard"
+                : (NativeDayRecordKind(rawValue: record.domainKey)?.systemImage ?? "sparkles"),
             imagePath: record.imagePath,
             imageURL: imageURL,
             imageLoadError: record.imagePath != nil && imageURL == nil,
@@ -37,7 +56,7 @@ enum LocalStagingReadModel {
             domainKey: record.domainKey,
             domainName: domainName ?? fallbackDomainName(for: record.domainKey),
             extracted: payload,
-            companionMessage: nil,
+            companionMessage: payload.string("companion_message"),
             targetRecordId: record.targetRecordID?.uuidString,
             imageHash: record.imageHash
         )
@@ -72,6 +91,7 @@ enum LocalStagingReadModel {
         case "sleep": return "睡眠"
         case "sport": return "运动"
         case "reading": return "阅读"
+        case "wallet": return "还款证据"
         default: return "本地记录"
         }
     }

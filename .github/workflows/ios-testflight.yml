@@ -15,6 +15,31 @@ jobs:
       - name: Show Xcode version
         run: xcodebuild -version
 
+      - name: Validate Swift source encoding
+        run: |
+          python3 - <<'PY'
+          import subprocess, sys
+
+          files = [
+              f for f in subprocess.run(
+                  ["git", "ls-files", "ios"], capture_output=True, text=True
+              ).stdout.splitlines()
+              if f.endswith(".swift")
+          ]
+          bad = []
+          for f in files:
+              try:
+                  with open(f, "rb") as fh:
+                      fh.read().decode("utf-8")
+              except (UnicodeDecodeError, OSError) as exc:
+                  bad.append((f, exc))
+
+          for f, exc in bad:
+              print(f"::error file={f}::Swift source is not valid UTF-8 ({exc})")
+          print(f"checked {len(files)} Swift files, {len(bad)} invalid")
+          sys.exit(1 if bad else 0)
+          PY
+
       - name: Install XcodeGen
         run: brew install xcodegen
 
@@ -146,6 +171,14 @@ jobs:
             -exportPath "$RUNNER_TEMP/export" \
             -exportOptionsPlist "$RUNNER_TEMP/ExportOptions.plist"
 
+      - name: Upload IPA artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: SnapCount-ipa
+          path: ${{ runner.temp }}/export/*.ipa
+          if-no-files-found: warn
+
       - name: Upload to TestFlight
         env:
           APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
@@ -155,6 +188,7 @@ jobs:
           test -n "$IPA_PATH"
           APP_PLIST="$RUNNER_TEMP/AppInfo.plist"
           unzip -p "$IPA_PATH" "Payload/SnapCount.app/Info.plist" > "$APP_PLIST"
+          echo "bundle-id=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP_PLIST")"
           /usr/libexec/PlistBuddy -c "Print :CFBundleVersion" "$APP_PLIST"
           xcrun altool \
             --upload-app \
@@ -162,9 +196,3 @@ jobs:
             --file "$IPA_PATH" \
             --apiKey "$APPLE_API_KEY_ID" \
             --apiIssuer "$APPLE_API_ISSUER_ID"
-
-      - name: Upload IPA artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: SnapCount-ipa
-          path: ${{ runner.temp }}/export/*.ipa

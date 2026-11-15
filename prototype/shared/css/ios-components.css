@@ -230,8 +230,8 @@
   width: var(--jiezi-icon-semantic-list-row-block);
   height: var(--jiezi-icon-semantic-list-row-block);
   border-radius: var(--jiezi-radius-md);
-  color: var(--jiezi-color-brand);
-  background: var(--jiezi-color-brand-alpha-8);
+  color: var(--domain, var(--jiezi-color-brand));
+  background: color-mix(in srgb, var(--domain, var(--jiezi-color-brand)) 10%, transparent);
 }
 
 .jz-row-icon svg {
@@ -244,29 +244,45 @@
   stroke-linejoin: round;
 }
 
-.jz-row-icon[data-domain="expense"] {
-  color: var(--jiezi-domain-expense);
-  background: color-mix(in srgb, var(--jiezi-domain-expense) 10%, transparent);
+/* 数据域着色：一处定义，行图标块与快捷入口共用 */
+.jz-row-icon[data-domain],
+.domain-quick-icon[data-domain] {
+  --domain: var(--jiezi-color-brand);
 }
 
-.jz-row-icon[data-domain="food"] {
-  color: var(--jiezi-domain-food);
-  background: color-mix(in srgb, var(--jiezi-domain-food) 10%, transparent);
+.jz-row-icon[data-domain="expense"],
+.domain-quick-icon[data-domain="expense"] {
+  --domain: var(--jiezi-domain-expense);
 }
 
-.jz-row-icon[data-domain="sport"] {
-  color: var(--jiezi-domain-sport);
-  background: color-mix(in srgb, var(--jiezi-domain-sport) 10%, transparent);
+.jz-row-icon[data-domain="income"],
+.domain-quick-icon[data-domain="income"] {
+  --domain: var(--jiezi-domain-income);
 }
 
-.jz-row-icon[data-domain="reading"] {
-  color: var(--jiezi-domain-reading);
-  background: color-mix(in srgb, var(--jiezi-domain-reading) 10%, transparent);
+.jz-row-icon[data-domain="wallet"],
+.domain-quick-icon[data-domain="wallet"] {
+  --domain: var(--jiezi-domain-wallet);
 }
 
-.jz-row-icon[data-domain="sleep"] {
-  color: var(--jiezi-domain-sleep);
-  background: color-mix(in srgb, var(--jiezi-domain-sleep) 10%, transparent);
+.jz-row-icon[data-domain="food"],
+.domain-quick-icon[data-domain="food"] {
+  --domain: var(--jiezi-domain-food);
+}
+
+.jz-row-icon[data-domain="sport"],
+.domain-quick-icon[data-domain="sport"] {
+  --domain: var(--jiezi-domain-sport);
+}
+
+.jz-row-icon[data-domain="reading"],
+.domain-quick-icon[data-domain="reading"] {
+  --domain: var(--jiezi-domain-reading);
+}
+
+.jz-row-icon[data-domain="sleep"],
+.domain-quick-icon[data-domain="sleep"] {
+  --domain: var(--jiezi-domain-sleep);
 }
 
 .jz-row-main {
@@ -518,6 +534,17 @@
   background: var(--jiezi-color-brand-alpha-8);
 }
 
+/* 状态行间距变体（收编自 index.html 内联 margin） */
+.jz-status-line.is-trailing { margin: 14px 0 0; }
+.jz-status-line.is-flush { margin: 0; }
+.jz-status-line.is-panel-intro { margin: 0 0 12px; }
+
+/* 面板内全宽主按钮（收编自内联样式） */
+.export-submit { margin-top: 12px; }
+
+/* 陈列页紧凑 hero 字号 */
+.jz-metric-value--hero.is-compact { font-size: 28px; }
+
 /* ========== 状态条 / 同步 ========== */
 
 .jz-status-line {
@@ -557,20 +584,7 @@
   background: color-mix(in srgb, var(--jiezi-color-coral) 10%, transparent);
 }
 
-/* ========== 财务 Hero 卡（示意） ========== */
-
-.finance-hero {
-  display: flex;
-  flex-direction: column;
-  gap: 18px;
-}
-
-.finance-hero-top {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 12px;
-}
+/* ========== 财务 Hero 字型（分析页数值展示） ========== */
 
 .finance-hero-value {
   font: var(--ios-type-money-hero);
@@ -635,7 +649,7 @@
 
 .lab-label {
   margin: 8px 0 0;
-  font: 600 11px/1 var(--jiezi-font-family-sans);
+  font: 600 12px/1 var(--jiezi-font-family-sans);
   letter-spacing: 0.1em;
   text-transform: uppercase;
   color: var(--jiezi-color-muted);
@@ -690,7 +704,7 @@
 }
 
 .home-layout-kicker {
-  font: 600 10px/1.2 var(--jiezi-font-family-sans);
+  font: 600 12px/1.2 var(--jiezi-font-family-sans);
   letter-spacing: 0.12em;
   color: var(--jiezi-color-muted);
 }
@@ -793,7 +807,10 @@
   text-align: left;
   background: color-mix(in srgb, var(--jiezi-color-light) 8%, transparent);
   border: 1px solid color-mix(in srgb, var(--jiezi-color-light) 16%, transparent);
+  transition: transform var(--jiezi-duration-fast) var(--jiezi-easing-standard);
 }
+
+.finance-due-row:active { transform: var(--ios-press); }
 
 .finance-due-label {
   font: var(--ios-type-caption);
@@ -858,10 +875,13 @@
   align-items: center;
   gap: 6px;
   min-width: 0;
+  transition: transform var(--jiezi-duration-fast) var(--jiezi-easing-standard);
 }
 
+.finance-bar-col:active { transform: var(--ios-press); }
+
 .finance-bar-amount {
-  font: 500 10px/1 var(--jiezi-font-family-sans);
+  font: 500 12px/1 var(--jiezi-font-family-sans);
   color: var(--jiezi-color-muted);
   font-variant-numeric: tabular-nums;
 }
@@ -879,6 +899,7 @@
 .finance-bar {
   width: 58%;
   min-height: 4px;
+  height: calc(var(--bar-h, 50) * 1%);
   border-radius: var(--jiezi-radius-pill) var(--jiezi-radius-pill) 4px 4px;
   background: color-mix(in srgb, var(--jiezi-color-brand) 55%, transparent);
   transition: height 0.2s ease, background 0.15s ease;
@@ -926,9 +947,24 @@
   width: 36px;
   height: 36px;
   border-radius: var(--jiezi-radius-md);
-  font-size: 16px;
-  background: color-mix(in srgb, var(--jiezi-color-brand) 8%, transparent);
+  background: color-mix(in srgb, var(--domain, var(--jiezi-color-brand)) 10%, transparent);
+  color: var(--domain, var(--jiezi-color-brand));
 }
+
+.today-overview-icon svg {
+  width: 17px;
+  height: 17px;
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.today-overview-icon[data-domain="expense"] { --domain: var(--jiezi-domain-expense); }
+.today-overview-icon[data-domain="food"] { --domain: var(--jiezi-domain-food); }
+.today-overview-icon[data-domain="sport"] { --domain: var(--jiezi-domain-sport); }
+.today-overview-icon[data-domain="pending"] { --domain: var(--jiezi-color-light); }
 
 .today-overview-content { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
 
@@ -966,7 +1002,10 @@
   text-align: left;
   background: color-mix(in srgb, var(--jiezi-color-coral) 8%, var(--jiezi-color-paper));
   border: 1px solid color-mix(in srgb, var(--jiezi-color-coral) 18%, transparent);
+  transition: transform var(--jiezi-duration-fast) var(--jiezi-easing-standard);
 }
+
+.home-pending-alert:active { transform: var(--ios-press); }
 
 .pending-alert-icon {
   position: relative;
@@ -1026,16 +1065,29 @@
   background: color-mix(in srgb, var(--jiezi-color-paper) 86%, transparent);
   border: 1px solid color-mix(in srgb, var(--jiezi-color-brand) 10%, transparent);
   box-shadow: 0 4px 10px color-mix(in srgb, var(--jiezi-color-space) 4%, transparent);
+  transition: transform var(--jiezi-duration-fast) var(--jiezi-easing-standard);
 }
+
+.domain-quick-card:active { transform: var(--ios-press); }
 
 .domain-quick-icon {
   display: grid;
   place-items: center;
-  width: 34px;
-  height: 34px;
+  width: var(--jiezi-icon-semantic-domain-block);
+  height: var(--jiezi-icon-semantic-domain-block);
   border-radius: var(--jiezi-radius-md);
-  font-size: 16px;
-  background: color-mix(in srgb, var(--jiezi-color-brand) 10%, transparent);
+  color: var(--domain, var(--jiezi-color-brand));
+  background: color-mix(in srgb, var(--domain, var(--jiezi-color-brand)) 10%, transparent);
+}
+
+.domain-quick-icon svg {
+  width: 17px;
+  height: 17px;
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 
 .domain-quick-name {
@@ -1063,7 +1115,10 @@
   text-align: left;
   background: color-mix(in srgb, var(--jiezi-color-paper) 88%, transparent);
   border: 1px solid color-mix(in srgb, var(--jiezi-color-brand) 10%, transparent);
+  transition: transform var(--jiezi-duration-fast) var(--jiezi-easing-standard);
 }
+
+.home-daily-card:active { transform: var(--ios-press); }
 
 .home-daily-card.is-empty {
   opacity: 0.72;
@@ -1117,6 +1172,10 @@
   height: 8px;
   border-radius: 50%;
 }
+
+.home-daily-dot.is-coral { background: var(--jiezi-color-coral); }
+.home-daily-dot.is-brand { background: var(--jiezi-color-brand); }
+.home-daily-dot.is-gold { background: var(--jiezi-color-light); }
 
 .home-daily-empty {
   font: var(--ios-type-caption);
@@ -1531,26 +1590,7 @@
   background: color-mix(in srgb, var(--jiezi-color-coral) 10%, transparent);
 }
 
-.badge {
-  display: inline-flex;
-  align-items: center;
-  min-height: 24px;
-  padding: 0 8px;
-  border-radius: var(--jiezi-radius-pill);
-  font: 600 12px/1 var(--jiezi-font-family-sans);
-  color: var(--jiezi-color-brand);
-  background: var(--jiezi-color-brand-alpha-8);
-}
-
-.badge-warning {
-  color: color-mix(in srgb, var(--jiezi-color-light) 40%, var(--jiezi-color-ink));
-  background: color-mix(in srgb, var(--jiezi-color-light) 16%, transparent);
-}
-
-.badge-success {
-  color: var(--jiezi-color-brand);
-  background: var(--jiezi-color-brand-alpha-8);
-}
+.record-detail-btn--block { width: 100%; margin-top: 10px; }
 
 .jz-row-value.is-income { color: var(--jiezi-color-brand); }
 
@@ -1644,7 +1684,10 @@
   background: color-mix(in srgb, var(--jiezi-color-paper) 90%, transparent);
   border: 1px solid color-mix(in srgb, var(--jiezi-color-brand) 10%, transparent);
   box-shadow: 0 4px 12px color-mix(in srgb, var(--jiezi-color-space) 5%, transparent);
+  transition: transform var(--jiezi-duration-fast) var(--jiezi-easing-standard);
 }
+
+.pending-film-card:active { transform: var(--ios-press); }
 
 .pending-film-visual {
   position: relative;
@@ -1696,6 +1739,11 @@
   color: var(--jiezi-color-muted);
 }
 
+.pending-film-visual-wrap {
+  position: relative;
+  display: block;
+}
+
 .pending-film-state {
   position: absolute;
   top: 8px;
@@ -1707,7 +1755,7 @@
   min-height: 22px;
   padding: 0 8px;
   border-radius: var(--jiezi-radius-pill);
-  font: 600 11px/1 var(--jiezi-font-family-sans);
+  font: 600 12px/1 var(--jiezi-font-family-sans);
   color: #fff;
   background: color-mix(in srgb, var(--jiezi-color-brand) 88%, transparent);
 }
@@ -1741,7 +1789,7 @@
 }
 
 .pending-film-scrim small {
-  font: 400 11px/1.3 var(--jiezi-font-family-sans);
+  font: 400 12px/1.3 var(--jiezi-font-family-sans);
   opacity: 0.9;
 }
 
@@ -1766,7 +1814,7 @@
   display: flex;
   flex-direction: column;
   gap: 2px;
-  font: 400 11px/1.35 var(--jiezi-font-family-sans);
+  font: 400 12px/1.35 var(--jiezi-font-family-sans);
   color: var(--jiezi-color-muted);
 }
 
@@ -2183,7 +2231,7 @@ button.home-layout-switch input {
 }
 
 .account-hero-kicker {
-  font: 600 10px/1.2 var(--jiezi-font-family-sans);
+  font: 600 12px/1.2 var(--jiezi-font-family-sans);
   letter-spacing: 0.12em;
   color: var(--jiezi-color-muted);
 }

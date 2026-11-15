@@ -53,6 +53,7 @@ struct AccountsView: View {
             }
             .scrollContentBackground(.hidden)
             .listStyle(.insetGrouped)
+            .tint(JieziTheme.brand)
             .refreshable { await appState.loadAccounts() }
         }
         .navigationTitle("账户与钱包")
@@ -95,17 +96,22 @@ struct AccountsView: View {
 }
 
 private struct AccountRowView: View {
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     let account: NativeAccount
 
     var body: some View {
-        HStack(spacing: 12) {
+        let layout = dynamicTypeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 12))
+            : AnyLayout(HStackLayout(spacing: 12))
+        return layout {
             Image(systemName: account.type.systemImage)
                 .foregroundStyle(account.type.isLiability ? JieziTheme.coral : JieziTheme.brand)
                 .frame(width: 34, height: 34)
-                .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 10))
+                .background(JieziTheme.brand.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 6) {
-                    Text(account.title).font(.subheadline.weight(.semibold))
+                    Text(account.title).font(JieziType.cardTitle)
+                        .fixedSize(horizontal: false, vertical: true)
                     if account.isDefaultExpense { Image(systemName: "arrow.up.circle.fill") }
                     if account.isDefaultIncome { Image(systemName: "arrow.down.circle.fill") }
                 }
@@ -115,7 +121,7 @@ private struct AccountRowView: View {
             }
             Spacer()
             Text(String(format: "¥%.2f", account.currentBalance))
-                .font(.subheadline.monospacedDigit())
+                .font(JieziType.moneyInline.monospacedDigit())
         }
     }
 }
@@ -153,7 +159,8 @@ struct AccountDetailView: View {
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                             Text(String(format: "¥%.2f", account.currentBalance))
-                                .font(.largeTitle.bold().monospacedDigit())
+                                .font(JieziType.prototypeHero.monospacedDigit())
+                                .fixedSize(horizontal: false, vertical: true)
                             Text(account.type.title + (account.institution.isEmpty ? "" : " · \(account.institution)"))
                                 .foregroundStyle(.secondary)
                         }
@@ -163,6 +170,7 @@ struct AccountDetailView: View {
                         Section("还款设置") {
                             LabeledContent("账单日", value: account.billDay.map { "每月\($0)日" } ?? "未设置")
                             LabeledContent("还款日", value: account.paymentDueDay.map { "每月\($0)日" } ?? "未设置")
+                            LabeledContent("宽限期", value: "\(account.gracePeriodDays) 天")
                             LabeledContent("自动确认", value: account.autoConfirmRepayment ? "已开启" : "需手动确认")
                         }
 
@@ -253,7 +261,7 @@ struct AccountDetailView: View {
                                 HStack {
                                     VStack(alignment: .leading) {
                                         Text(entry.note.isEmpty ? entry.entryType : entry.note).font(.subheadline)
-                                        Text(entry.occurredAt).font(.caption2).foregroundStyle(.secondary)
+                                        Text(entry.occurredAt.isEmpty ? "时间未记录" : entry.occurredAt).font(.caption2).foregroundStyle(.secondary)
                                     }
                                     Spacer()
                                     Text((entry.direction == "in" ? "+" : "-") + "¥" + amount(entry.amount))
@@ -308,6 +316,7 @@ struct AccountDetailView: View {
                 }
                 .scrollContentBackground(.hidden)
                 .listStyle(.insetGrouped)
+                .tint(JieziTheme.brand)
                 .navigationTitle(account.title)
                 .toolbar {
                     Button {
@@ -560,6 +569,9 @@ private struct RepaymentConfirmationSheet: View {
                     Section { Text(message).foregroundStyle(JieziTheme.coral) }
                 }
             }
+            .scrollContentBackground(.hidden)
+            .background(JieziTheme.pageBackground)
+            .tint(JieziTheme.brand)
             .navigationTitle("确认还款")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -636,6 +648,7 @@ struct AccountEditSheet: View {
                     Section("负债设置") {
                         TextField("账单日（1-31）", text: $draft.billDayText).keyboardType(.numberPad)
                         TextField("还款日（1-31）", text: $draft.paymentDueDayText).keyboardType(.numberPad)
+                        TextField("宽限期（天）", text: $draft.gracePeriodDaysText).keyboardType(.numberPad)
                         Picker("自动扣款账户", selection: $draft.autoDebitAccountId) {
                             Text("不设置").tag(String?.none)
                             ForEach(debitAccounts) { account in
@@ -658,6 +671,9 @@ struct AccountEditSheet: View {
                     Section { Text(message).foregroundStyle(JieziTheme.coral) }
                 }
             }
+            .scrollContentBackground(.hidden)
+            .background(JieziTheme.pageBackground)
+            .tint(JieziTheme.brand)
             .navigationTitle(draft.isCreating ? "新建账户" : "编辑账户")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {

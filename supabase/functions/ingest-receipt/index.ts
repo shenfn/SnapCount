@@ -21,6 +21,7 @@ import {
   isRecordExpressionOwnerEnabled,
 } from "./expression-delivery.ts";
 import type { PlannerVoiceBrief } from "./expression-delivery.ts";
+import { normalizeLocalExpressionAction } from "./local-expression-action.ts";
 import {
   loadDomainProfiles,
   selectSignals,
@@ -1970,7 +1971,7 @@ type CompanionContext = {
 
 const DEFAULT_COMPANION_SETTINGS: CompanionSettings = {
   enabled: true,
-  memoryEnabled: true,
+  memoryEnabled: false,
   persona: "observer",
   memoryStrength: "balanced",
   expressionStyle: "plain",
@@ -2034,7 +2035,7 @@ async function loadCompanionContext(
   const settingsRaw = (raw.settings || {}) as Record<string, unknown>;
   const settings: CompanionSettings = {
     enabled: settingsRaw.enabled !== false,
-    memoryEnabled: settingsRaw.memory_enabled !== false,
+    memoryEnabled: settingsRaw.memory_enabled === true,
     persona: typeof settingsRaw.persona === "string" ? settingsRaw.persona : "observer",
     memoryStrength: typeof settingsRaw.memory_strength === "string" ? settingsRaw.memory_strength : "balanced",
     expressionStyle: typeof settingsRaw.expression_style === "string" ? settingsRaw.expression_style : "plain",
@@ -2770,7 +2771,11 @@ function buildExpenseAIFeedback(
       emotion_line: aiLine ?? (merchant
         ? `${merchant} ${fmtYuan(amount)}，这笔小额已落账。`
         : `${fmtYuan(amount)} 的小额支出已落账。`),
-      utility_line: categoryLabel ? `分类记到${categoryLabel}，后面看一周频率。` : "先把这笔收住，后面再看频率。",
+      // Voice 已经提供陪伴句时，不再把固定的小额消费模板作为第二句拼进同一张卡；
+      // 没有 Voice 内容时仍保留原规则反馈，确保降级路径可用。
+      utility_line: aiLine
+        ? null
+        : (categoryLabel ? `分类记到${categoryLabel}，后面看一周频率。` : "先把这笔收住，后面再看频率。"),
       detail_reason: `本笔支出 ${fmtYuan(amount)}，属于小额消费，价值在于频率追踪。`,
       internal_score: 62,
       confidence: 0.7,
@@ -3532,6 +3537,7 @@ function plannerBriefContextCandidate(brief: PlannerVoiceBrief): ContextPacketCa
     numbers: brief.numbers,
     count_numbers: brief.count_numbers,
     number_facts: brief.number_facts,
+    evidence: brief.evidence,
     source: "expression_planner",
     source_surface: brief.source_surface,
     planner_version: brief.planner_version,
@@ -3949,6 +3955,7 @@ async function generateVoiceFeedback(opts: {
   customNote?: string | null;
   recentCompanionLines?: string[];
   memory?: Record<string, unknown> | null;
+  localMemoryContext?: unknown;
   textProvider: ProviderConfig | null;
   plannerBrief?: PlannerVoiceBrief | null;
   plannerFallbackReason?: string | null;
@@ -3980,6 +3987,7 @@ async function generateVoiceFeedback(opts: {
       ? { selectedCandidates: [plannerBriefContextCandidate(opts.plannerBrief)] }
       : {}),
     memory: opts.memory ?? null,
+    localMemoryContext: opts.localMemoryContext ?? null,
     expressionPreferences: {
       persona: opts.persona ?? null,
       memory_strength: opts.memoryStrength ?? null,
@@ -5527,6 +5535,137 @@ Deno.serve(async (req) => {
       const jsonBody = await req.json().catch(() => ({}));
       const action = jsonBody?.action;
 
+      // Local-first Companion composition. This action is intentionally
+      // read-only: it accepts the current local fact, a bounded Planner
+      // candidate, and optional compact same-domain memory context, calls the
+      // hosted text provider, and never writes a business row, memory row, or
+      // sync outbox item.
+      if (action === "generate_local_expression") {
+        const actionUserId = await authenticatedUserId(req);
+        if (!actionUserId || !textProvider) {
+          return new Response(JSON.stringify({ ok: false, error: "未授权或 Hosted Companion 不可用" }), {
+            status: 401, headers: { "Content-Type": "application/json", ...corsHeaders },
+          });
+        }
+        const normalizedAction = normalizeLocalExpressionAction({
+          currentFact: jsonBody?.current_fact,
+          plannerCandidate: jsonBody?.planner_candidate,
+          localMemoryContext: jsonBody?.local_memory_context,
+          recentFacts: jsonBody?.recent_facts,
+          clientLocalTime: jsonBody?.client_local_time,
+          clientCapturedAt: jsonBody?.client_captured_at,
+          requestReceivedAt: new Date().toISOString(),
+        });
+        const currentFact = normalizedAction.currentFact;
+        const rawPreferences = isRecordValue(jsonBody?.expression_preferences)
+          ? jsonBody.expression_preferences
+          : {};
+        const allowedPersonas = new Set(["observer", "warm", "sharp", "minimal"]);
+        const allowedMemoryStrengths = new Set(["light", "balanced", "bold"]);
+        const allowedExpressionStyles = new Set(["plain", "emoji", "kaomoji"]);
+        const persona = typeof rawPreferences.persona === "string" && allowedPersonas.has(rawPreferences.persona)
+          ? rawPreferences.persona
+          : "observer";
+        const memoryStrength = typeof rawPreferences.memory_strength === "string"
+            && allowedMemoryStrengths.has(rawPreferences.memory_strength)
+          ? rawPreferences.memory_strength
+          : "balanced";
+        const expressionStyle = typeof rawPreferences.expression_style === "string"
+            && allowedExpressionStyles.has(rawPreferences.expression_style)
+          ? rawPreferences.expression_style
+          : "plain";
+        const customNote = typeof rawPreferences.custom_note === "string"
+          ? rawPreferences.custom_note.trim().slice(0, 80) || null
+          : null;
+        const clientLocalTime = normalizedAction.clientLocalTime;
+        const weekdayValue = typeof jsonBody?.weekday === "string" ? jsonBody.weekday : "";
+        const weekday = new Set(["周一", "周二", "周三", "周四", "周五", "周六", "周日"]).has(weekdayValue)
+          ? weekdayValue
+          : null;
+        const timeContext = normalizedAction.timeContext;
+        const recentCompanionLines = Array.isArray(jsonBody?.recent_companion_lines)
+          ? (jsonBody.recent_companion_lines as unknown[])
+            .filter((line): line is string => typeof line === "string")
+            .map((line) => line.trim().slice(0, 80))
+            .filter((line) => line.length > 0)
+            .slice(0, 5)
+          : [];
+        const domainKey = normalizedAction.domainKey;
+        const amount = typeof currentFact.amount === "number" && Number.isFinite(currentFact.amount)
+          ? currentFact.amount
+          : null;
+        const payload = currentFact.payload_json && typeof currentFact.payload_json === "object"
+          ? currentFact.payload_json as Record<string, unknown>
+          : null;
+        const ai: AIResult = {
+          image_type: "local_fact",
+          record_type: domainKey as RecordType,
+          domain_key: domainKey === "expense" || domainKey === "income"
+            ? null
+            : domainKey as BuiltinDomainKey,
+          title: typeof currentFact.title === "string" ? currentFact.title.slice(0, 120) : null,
+          summary: typeof currentFact.summary === "string" ? currentFact.summary.slice(0, 500) : null,
+          amount,
+          merchant_name: typeof currentFact.merchant_name === "string" ? currentFact.merchant_name.slice(0, 120) : null,
+          platform: typeof currentFact.platform === "string" ? currentFact.platform.slice(0, 120) : null,
+          category: typeof currentFact.category === "string" ? currentFact.category.slice(0, 120) : null,
+          payment_method: typeof currentFact.payment_method === "string" ? currentFact.payment_method.slice(0, 120) : null,
+          source_name: typeof currentFact.source_name === "string" ? currentFact.source_name.slice(0, 120) : null,
+          occurred_at: typeof currentFact.occurred_at === "string" ? currentFact.occurred_at.slice(0, 64) : null,
+          payload_jsonb: payload,
+          confidence: 1,
+          companion_message: null,
+        };
+        const plannerCandidate = normalizedAction.candidate;
+        const plannerBrief: PlannerVoiceBrief | undefined = plannerCandidate
+          ? {
+            candidate_id: plannerCandidate.candidate_id.slice(0, 200),
+            semantic_key: plannerCandidate.semantic_key.slice(0, 200),
+            dimension: plannerCandidate.dimension.slice(0, 100),
+            canonical_text: plannerCandidate.canonical_text,
+            source_surface: "record_detail",
+            planner_version: normalizedAction.plannerVersion,
+            numbers: plannerCandidate.number_facts.map((item) => item.value),
+            count_numbers: plannerCandidate.number_facts.filter((item) => item.role === "count").map((item) => item.value),
+            number_facts: plannerCandidate.number_facts,
+            evidence: plannerCandidate.evidence,
+            claim_fingerprint: plannerCandidate.claim_fingerprint,
+          }
+          : undefined;
+        const result = await generateVoiceFeedback({
+          ai,
+          domainKey,
+          builtPayload: payload,
+          normalizedAmount: amount,
+          domainProfiles: {},
+          timingSignal: timingSignalFor(domainKey, timeContext),
+          timeContext,
+          clientLocalTime,
+          weekday,
+          persona,
+          memoryStrength,
+          expressionStyle,
+          customNote,
+          recentCompanionLines,
+          memory: null,
+          localMemoryContext: normalizedAction.localMemoryContext,
+          textProvider,
+          plannerBrief,
+          plannerFallbackReason: normalizedAction.plannerFallbackReason,
+        });
+        return new Response(JSON.stringify({
+          ok: true,
+          data: {
+            companion_message: result.companion_message,
+            ai_feedback: result.ai_feedback,
+            error: normalizedAction.plannerFallbackReason ?? result.error ?? null,
+            planner_fallback_reason: normalizedAction.plannerFallbackReason,
+          },
+        }), {
+          headers: { "Content-Type": "application/json", ...corsHeaders },
+        });
+      }
+
       if (action === "list_companion_memories" || action === "delete_companion_memory") {
         const actionUserId = await authenticatedUserId(req);
         const userClient = authenticatedSupabaseClient(req);
@@ -5988,7 +6127,7 @@ Deno.serve(async (req) => {
       photoVisionPrimary = prefRow?.photo_vision_primary ?? "qwen";
       companionSettings = {
         enabled: prefRow?.companion_enabled ?? true,
-        memoryEnabled: prefRow?.companion_memory_enabled ?? true,
+        memoryEnabled: prefRow?.companion_memory_enabled ?? false,
         persona: prefRow?.companion_persona ?? "observer",
         memoryStrength: prefRow?.companion_memory_strength ?? "balanced",
         expressionStyle: prefRow?.companion_expression_style ?? "plain",
@@ -6009,8 +6148,10 @@ Deno.serve(async (req) => {
             : qwenCfg.photoEnableThinking,
         };
       }
-      companionContextPromise = loadCompanionContext(supabase, userId, companionSettings);
-      domainProfilesPromise = loadDomainProfiles(supabase, userId);
+      if (!recognizeOnly) {
+        companionContextPromise = loadCompanionContext(supabase, userId, companionSettings);
+        domainProfilesPromise = loadDomainProfiles(supabase, userId);
+      }
     }
 
     const respondWithExpressionShadow = (
@@ -6408,6 +6549,18 @@ Deno.serve(async (req) => {
     ai.category = ai.category
       ? normalizeExpenseCategory(ai.category) ?? "other"
       : null;
+    // 渠道缺省时按截图类型和明确平台特征兜底：收单机构写"财付通"、页面带"支付宝"
+    // 这类证据已经唯一确定渠道，不该因为页面没写出"微信"两个字就降级成待补全。
+    if (!ai.platform) {
+      const platformHaystack = `${visionRawText ?? ""} ${ai.payment_method ?? ""}`;
+      if (ai.image_type === "alipay_bill" || platformHaystack.includes("支付宝")) {
+        ai.platform = "支付宝";
+      } else if (ai.image_type === "wechat_bill"
+        || platformHaystack.includes("财付通")
+        || platformHaystack.includes("微信支付")) {
+        ai.platform = "微信";
+      }
+    }
     timings.mark("vision_total");
     const storageUpload = await storageUploadPromise;
     timings.record("storage_upload", storageUpload.durationMs);
@@ -6429,15 +6582,113 @@ Deno.serve(async (req) => {
           : normalizeString(ai.domain_key) ?? normalizeString(ai.record_type) ?? "uncertain";
       const built = buildBuiltinPayload(ai, visionRawText);
       const payload = built?.payload ?? cleanPayload(ai);
+      if (["expense", "income"].includes(domainKey)) {
+        // Finance AI responses keep amount at the top level. The local iOS
+        // candidate contract reads payload.amount, so copy the normalized
+        // value before returning instead of allowing a missing value to turn
+        // into a zero-dollar local transaction.
+        payload.amount = normalizeAmount(payload.amount) ?? normalizeAmount(ai.amount);
+        payload.merchant_name = normalizeString(payload.merchant_name) ?? normalizeString(ai.merchant_name);
+        payload.source_name = normalizeString(payload.source_name) ?? normalizeString(ai.source_name);
+        payload.platform = normalizeString(payload.platform) ?? normalizeString(ai.platform);
+        payload.category = normalizeString(payload.category) ?? normalizeString(ai.category);
+        payload.payment_method = normalizeString(payload.payment_method) ?? normalizeString(ai.payment_method);
+        payload.income_category = normalizeString(payload.income_category) ?? normalizeString(ai.income_category);
+      }
+      const candidateTimeContext = buildTimeContext({
+        occurredAt: exactNormalizedIso(candidateReference),
+        orderFinishedAt: exactNormalizedIso(candidateOrderFinished),
+        clientCapturedAt,
+        requestReceivedAt,
+      });
+      let candidateCompanion = !recognizeOnly && companionSettings.enabled
+        ? sanitizeCompanionMessageForTime(
+          sanitizeCompanionMessageForContent(
+            typeof ai.companion_message === "string" ? ai.companion_message : null,
+            ai,
+          ),
+          ai,
+          candidateTimeContext,
+        )
+        : null;
+      const candidateAmount = normalizeAmount(payload.amount) ?? normalizeAmount(ai.amount);
+      let candidateFeedback: AIFeedback | null = null;
+      if (!recognizeOnly && companionSettings.enabled && aiOk) {
+        if (domainKey === "expense") {
+          candidateFeedback = buildExpenseAIFeedback(ai, candidateAmount, candidateTimeContext, false);
+        } else if (domainKey === "income") {
+          candidateFeedback = buildIncomeAIFeedback(ai, candidateAmount, candidateTimeContext);
+        } else if (isBuiltinDomain(domainKey) && built && built.missingFields.length === 0 && (ai.confidence ?? 0) >= 0.75) {
+          candidateFeedback = buildBuiltinAIFeedback(domainKey, built, candidateTimeContext, candidateCompanion);
+        }
+
+        // The local-first Hosted AI path used to stop after the vision call.
+        // That meant local records only received the deterministic templates
+        // above, while the regular cloud archive path received a second Voice
+        // call with a real model-generated expression. Keep both paths on the
+        // same expression pipeline and retain the deterministic result only
+        // when Voice is unavailable or fails validation.
+        const canGenerateVoice = Boolean(
+          !recognizeOnly
+          && textProvider
+          && (
+            domainKey === "expense" ||
+            domainKey === "income" ||
+            (isBuiltinDomain(domainKey)
+              && built
+              && built.missingFields.length === 0
+              && (ai.confidence ?? 0) >= 0.75)
+          )
+        );
+        if (canGenerateVoice) {
+          const voiceResult = await generateVoiceFeedback({
+            ai,
+            domainKey,
+            builtPayload: built?.payload ?? null,
+            normalizedAmount: candidateAmount,
+            domainProfiles,
+            timingSignal: timingSignalFor(domainKey, candidateTimeContext),
+            timeContext: candidateTimeContext,
+            clientLocalTime,
+            weekday: _weekdayCN,
+            persona: companionSettings.persona,
+            memoryStrength: companionSettings.memoryStrength,
+            expressionStyle: companionSettings.expressionStyle,
+            customNote: companionSettings.customNote,
+            recentCompanionLines: recentCompanionLinesFromContext(companionContext.memory),
+            memory: companionContext.memory,
+            textProvider,
+          });
+          if (voiceResult.companion_message) {
+            candidateCompanion = voiceResult.companion_message;
+          }
+          if (voiceResult.ai_feedback) {
+            candidateFeedback = voiceResult.ai_feedback;
+          }
+        }
+      }
+      if (recognizeOnly) {
+        // The local-first client composes the single Companion after the fact
+        // is saved, with on-device context. The image call returns facts only.
+        delete payload.companion_message;
+        delete payload.ai_feedback;
+        delete payload.planner_ai_feedback;
+      }
+      if (candidateCompanion) payload.companion_message = candidateCompanion;
+      if (candidateFeedback) payload.ai_feedback = candidateFeedback;
       const evidenceFields = Object.entries(payload)
         .filter(([, value]) => value !== null && value !== undefined && value !== "")
         .map(([key]) => key)
         .sort();
-      const missingFields = built?.missingFields ?? ["domain_key"];
+      const missingFields = [...(built?.missingFields ?? [])];
+      if (domainKey === "uncertain" && !missingFields.includes("domain_key")) missingFields.push("domain_key");
+      if (["expense", "income"].includes(domainKey) && candidateAmount === null && !missingFields.includes("amount")) {
+        missingFields.push("amount");
+      }
       const responseCandidate = {
         id: `hosted-${hash}`,
         domain_key: domainKey,
-        title: built?.title ?? normalizeString(ai.title) ?? "待确认记录",
+        title: built?.title ?? normalizeString(ai.title) ?? normalizeString(ai.merchant_name ?? ai.source_name) ?? "待确认记录",
         summary: built?.summary ?? normalizeString(ai.summary) ?? "图片识别候选",
         confidence: Number.isFinite(ai.confidence) ? ai.confidence : null,
         payload,
@@ -6447,6 +6698,8 @@ Deno.serve(async (req) => {
         missing_fields: missingFields,
         evidence_fields: evidenceFields,
         image_hash: hash,
+        companion_message: candidateCompanion,
+        ai_feedback: candidateFeedback,
       };
       if (!aiOk) {
         return respondShortcut({

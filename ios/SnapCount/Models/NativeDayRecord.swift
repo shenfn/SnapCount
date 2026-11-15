@@ -20,6 +20,7 @@ struct NativeDayRecord: Identifiable {
     let systemImage: String
     let transactionType: String?
     let status: String?
+    let amount: Double?
 
     init(
         id: String,
@@ -33,7 +34,8 @@ struct NativeDayRecord: Identifiable {
         timeLabel: String?,
         systemImage: String,
         transactionType: String? = nil,
-        status: String? = nil
+        status: String? = nil,
+        amount: Double? = nil
     ) {
         self.id = id
         self.reference = reference
@@ -47,6 +49,7 @@ struct NativeDayRecord: Identifiable {
         self.systemImage = systemImage
         self.transactionType = transactionType
         self.status = status
+        self.amount = amount
     }
 }
 
@@ -117,7 +120,9 @@ extension DashboardSnapshot {
         let preservedRecords = previous.dayRecordGroups.flatMap(\.records).filter { shouldPreserve($0.kind) }
         let records = currentRecords + preservedRecords
         return Dictionary(grouping: records, by: \.dateKey)
-            .map { NativeDayRecordGroup(dateKey: $0.key, records: $0.value.sorted { ($0.timeLabel ?? "") > ($1.timeLabel ?? "") }) }
+            .map { NativeDayRecordGroup(dateKey: $0.key, records: $0.value.sorted {
+                NativeLocalDate.listTimeSortKey($0.timeLabel) > NativeLocalDate.listTimeSortKey($1.timeLabel)
+            }) }
             .sorted { $0.dateKey > $1.dateKey }
     }
 

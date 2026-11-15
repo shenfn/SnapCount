@@ -1,6 +1,20 @@
 import Foundation
 
 struct NativeAIFeedback: Equatable {
+    struct EvidenceReference: Equatable {
+        let kind: String
+        let source: String
+        let reference: String
+        let field: String?
+    }
+
+    struct NumberFact: Equatable {
+        let value: Double
+        let meaning: String
+        let role: String
+        let evidence: [EvidenceReference]
+    }
+
     let exposureEventId: String?
     let candidateId: String?
     let semanticKey: String
@@ -19,6 +33,8 @@ struct NativeAIFeedback: Equatable {
     let timingLabel: String
     let expressionCoverageSemanticKeys: [String]
     let expressionCoverageClaimFingerprint: String?
+    let evidence: [EvidenceReference]
+    let numberFacts: [NumberFact]
 
     init?(payload: [String: AnyCodable]?) {
         guard let payload else { return nil }
@@ -83,6 +99,40 @@ struct NativeAIFeedback: Equatable {
         self.expressionCoverageClaimFingerprint = coverageIsCurrent
             ? rawCoverageClaimFingerprint
             : nil
+        self.evidence = (payload.array("evidence") ?? []).compactMap(Self.evidenceReference(from:))
+        self.numberFacts = (payload.array("number_facts") ?? []).compactMap { value in
+            guard let object = Self.object(from: value),
+                  let number = object["value"].flatMap(Self.number(from:)),
+                  number.isFinite,
+                  let meaning = object["meaning"] as? String,
+                  let role = object["role"] as? String,
+                  let rawEvidence = object["evidence"] as? [Any] else { return nil }
+            let evidence = rawEvidence.compactMap(Self.evidenceReference(from:))
+            guard !meaning.isEmpty, !role.isEmpty, !evidence.isEmpty else { return nil }
+            return NumberFact(value: number, meaning: meaning, role: role, evidence: evidence)
+        }
+    }
+
+    private static func object(from value: Any) -> [String: Any]? {
+        if let object = value as? [String: Any] { return object }
+        if let object = value as? [String: AnyCodable] { return object.mapValues(\.value) }
+        return nil
+    }
+
+    private static func number(from value: Any) -> Double? {
+        if let number = value as? NSNumber { return number.doubleValue }
+        if let number = value as? Double { return number }
+        if let number = value as? Int { return Double(number) }
+        return nil
+    }
+
+    private static func evidenceReference(from value: Any) -> EvidenceReference? {
+        guard let object = object(from: value),
+              let kind = object["kind"] as? String,
+              let source = object["source"] as? String,
+              let reference = object["reference"] as? String,
+              !kind.isEmpty, !source.isEmpty, !reference.isEmpty else { return nil }
+        return EvidenceReference(kind: kind, source: source, reference: reference, field: object["field"] as? String)
     }
 
     var bandLabel: String {
@@ -101,6 +151,12 @@ struct NativeAIFeedback: Equatable {
 
     var requiresExposureAcknowledgement: Bool {
         source == "expression_planner" && exposureEventId == nil
+    }
+
+    var isLocalPlannerFeedback: Bool {
+        source == "expression_planner"
+            && (exposureEventId?.lowercased().hasPrefix("local:") == true
+                || candidateId?.lowercased().hasPrefix("local-planner-") == true)
     }
 
     var isAcknowledgedPlannerFeedback: Bool {
@@ -186,9 +242,11 @@ enum NativeRecordExpressionFeedbackPolicy {
         companionMessage: String? = nil
     ) -> NativeAIFeedback? {
         guard let plannerPreview else { return existingVoice }
-        if plannerPreview.source == "expression_planner",
-           plannerPreview.presentationTarget == "feedback_card" {
-            return existingVoice ?? plannerPreview
+        if plannerPreview.isLocalPlannerFeedback {
+            // Local Planner candidates stay internal context for Companion.
+            // The record detail shows the generated Companion, not a second
+            // standalone card that repeats the same local analysis.
+            return existingVoice
         }
         return feedbackToDisplay(
             existing: existingVoice,
@@ -217,11 +275,15 @@ enum NativeRecordExpressionFeedbackPolicy {
         guard let plannerFeedback else { return cards }
         if plannerFeedback.source == "expression_planner",
            plannerFeedback.presentationTarget == "feedback_card" {
+            if plannerFeedback.isLocalPlannerFeedback { return cards }
             let alreadyRendered = cards.contains {
                 $0.visibleContentIdentity == plannerFeedback.visibleContentIdentity
                     || $0.hasSameDeliveryIdentity(as: plannerFeedback)
             }
             if !alreadyRendered { cards.append(plannerFeedback) }
+            // The candidate has already served its purpose in local
+            // composition when it came from this device. Remote Planner
+            // feedback keeps its existing presentation behavior.
             return cards
         }
 
@@ -262,6 +324,7 @@ enum NativeRecordExpressionFeedbackPolicy {
         companionMessage: String? = nil
     ) -> NativeAIFeedback? {
         guard let preview else { return existing }
+        if preview.isLocalPlannerFeedback { return existing }
         if existing?.isAcknowledgedPlannerFeedback == true {
             return existing
         }
@@ -296,6 +359,7 @@ enum NativeRecordExpressionFeedbackPolicy {
         companionFeedback: NativeAIFeedback? = nil
     ) -> NativeAIFeedback? {
         guard let feedback else { return nil }
+        if feedback.isLocalPlannerFeedback { return nil }
         if feedback.hasExplicitPresentationTarget {
             return feedback.presentationTarget == "feedback_card" ? feedback : nil
         }
@@ -324,6 +388,7 @@ enum NativeRecordExpressionFeedbackPolicy {
         feedback: NativeAIFeedback?
     ) -> NativeAIFeedback? {
         guard let feedback else { return nil }
+        if feedback.isLocalPlannerFeedback { return nil }
         if feedback.source == "expression_planner" {
             return feedback.matchesVisibleCompanionMessage(companionMessage) ? feedback : nil
         }
@@ -338,6 +403,7 @@ enum NativeRecordExpressionFeedbackPolicy {
         feedback: NativeAIFeedback?
     ) -> NativeAIFeedback? {
         guard let feedback,
+              !feedback.isLocalPlannerFeedback,
               companionMessage?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false else {
             return nil
         }

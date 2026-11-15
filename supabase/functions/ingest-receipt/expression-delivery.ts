@@ -16,6 +16,7 @@ import {
 import type { ShadowExpenseTransaction } from "./expression-shadow-planner.ts";
 import { resolveExpressedSemanticKey } from "./context-packet.ts";
 import type { ContextPacketCandidate } from "./context-packet.ts";
+import type { PlannerEvidenceReference } from "./local-expression-contract.ts";
 // @ts-ignore Production-owned render version is shared with the offline lab.
 import { SURFACE_RENDER_CONTRACT_VERSION } from "../_shared/expression-core/render-contract.mjs";
 
@@ -47,7 +48,9 @@ export interface PlannerVoiceBrief {
     value: number;
     meaning: string | null;
     role: "count" | "measure";
+    evidence: PlannerEvidenceReference[];
   }>;
+  evidence: PlannerEvidenceReference[];
   claim_fingerprint: string;
 }
 
@@ -92,7 +95,10 @@ function plannerNumberFacts(candidate: Record<string, unknown>): PlannerVoiceBri
       || /(?:count|occurrence|session|streak|consecutive)/i.test(meaning ?? "")
       ? "count"
       : "measure";
-    return [{ value, meaning, role }];
+    const evidence = Array.isArray(descriptor.evidence)
+      ? descriptor.evidence.filter((item): item is PlannerEvidenceReference => !!item && typeof item === "object")
+      : [];
+    return [{ value, meaning, role, evidence }];
   });
 }
 
@@ -112,6 +118,10 @@ export function plannerVoiceBriefFromPlan(plan: Record<string, unknown>): Planne
   const canonicalText = text(selectedItem.canonical_text ?? claim.canonical_text, 1000);
   if (!candidateId || !semanticKey || !canonicalText) return null;
   const numberFacts = plannerNumberFacts(candidate);
+  const evidence = Array.isArray(candidate.evidence)
+    ? candidate.evidence.filter((item): item is PlannerEvidenceReference => !!item && typeof item === "object")
+    : [];
+  if (evidence.length === 0 || numberFacts.some((item) => item.evidence.length === 0)) return null;
   return {
     candidate_id: candidateId,
     semantic_key: semanticKey,
@@ -122,6 +132,7 @@ export function plannerVoiceBriefFromPlan(plan: Record<string, unknown>): Planne
     numbers: numberFacts.map((item) => item.value),
     count_numbers: numberFacts.filter((item) => item.role === "count").map((item) => item.value),
     number_facts: numberFacts,
+    evidence,
     claim_fingerprint: plannerClaimFingerprint(semanticKey, canonicalText),
   };
 }
@@ -182,6 +193,10 @@ function plannerContextCandidate(candidate: Record<string, unknown>): ContextPac
   const canonicalText = text(claim.canonical_text, 2000);
   if (!candidateId || !semanticKey || !canonicalText) return null;
   const numberFacts = plannerNumberFacts(candidate);
+  const evidence = Array.isArray(candidate.evidence)
+    ? candidate.evidence.filter((item): item is PlannerEvidenceReference => !!item && typeof item === "object")
+    : [];
+  if (evidence.length === 0 || numberFacts.some((item) => item.evidence.length === 0)) return null;
   return {
     candidate_id: candidateId,
     semantic_key: semanticKey,
@@ -191,6 +206,7 @@ function plannerContextCandidate(candidate: Record<string, unknown>): ContextPac
     numbers: numberFacts.map((item) => item.value),
     count_numbers: numberFacts.filter((item) => item.role === "count").map((item) => item.value),
     number_facts: numberFacts,
+    evidence,
     source: "expression_planner",
     source_surface: "record_detail",
     planner_version: EXPRESSION_PLANNER_VERSION,

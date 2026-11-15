@@ -19,18 +19,6 @@ function showToast(message) {
   const toast = document.createElement('div');
   toast.className = 'toast';
   toast.textContent = message;
-  Object.assign(toast.style, {
-    position: 'fixed',
-    right: '20px',
-    bottom: '20px',
-    zIndex: '100000',
-    padding: '10px 14px',
-    borderRadius: '18px',
-    color: 'var(--jiezi-color-ink)',
-    background: 'var(--jiezi-color-paper)',
-    boxShadow: '0 12px 22px color-mix(in srgb, var(--jiezi-color-space) 12%, transparent)',
-    font: '400 13px/1.4 system-ui, sans-serif',
-  });
   toastRegion.append(toast);
   window.setTimeout(() => toast.remove(), 2000);
 }
@@ -134,6 +122,9 @@ document.querySelectorAll('[data-toast]').forEach((el) => {
 });
 
 const trendSummary = document.querySelector('[data-bind="trend-summary"]');
+document.querySelectorAll('.finance-bar[data-height]').forEach((bar) => {
+  bar.style.setProperty('--bar-h', bar.dataset.height);
+});
 document.querySelectorAll('.finance-bar-col').forEach((col) => {
   col.addEventListener('click', () => {
     const selected = col.classList.contains('is-selected');
@@ -189,7 +180,6 @@ const RECORD_FIXTURES = {
   'exp-lunch': {
     kind: 'expense',
     domainLabel: '消费',
-    domainBadge: 'badge',
     amount: '-¥28.00',
     amountClass: 'is-expense',
     title: '午餐 · 巷口食堂',
@@ -442,9 +432,11 @@ function renderRecordDetail(id) {
   const basic = rec.basic
     .map(([label, value, badge]) => {
       if (badge) {
+        const tone =
+          badge === 'badge-warning' ? 'jz-badge--gold' : badge === 'badge-success' ? '' : '';
         return `<div class="record-detail-field">
           <span class="field-label">${label}</span>
-          <span class="field-value"><span class="badge ${badge === 'badge' ? '' : badge}">${value}</span></span>
+          <span class="field-value"><span class="jz-badge ${tone}">${value}</span></span>
         </div>`;
       }
       return fieldRow(label, value);
@@ -472,7 +464,7 @@ function renderRecordDetail(id) {
   let dishes = '';
   if (rec.dishes?.length) {
     dishes = `<div class="record-detail-section">
-      <div class="record-detail-section-title">菜品明细 <span class="badge badge-warning">估算值</span></div>
+      <div class="record-detail-section-title">菜品明细 <span class="jz-badge jz-badge--gold">估算值</span></div>
       ${rec.dishes
         .map(
           (d) => `<div class="record-detail-field stacked food-dish-field">
@@ -703,7 +695,7 @@ function renderInboxList() {
                      </span>
                    </span>`;
               return `<button class="pending-film-card" type="button" data-open-verdict="${item.id}">
-                <span class="pending-film-visual-wrap" style="position:relative;display:block">
+                <span class="pending-film-visual-wrap">
                   ${visual}
                   <span class="pending-film-state ${st.tone}"><i></i>${st.label}</span>
                 </span>
@@ -1088,8 +1080,8 @@ function openAccountDetail(id) {
 
   const manage = `<section class="account-source-card">
     <div class="wallet-account-section-title">账户使用状态</div>
-    <p class="jz-status-line" style="margin:0">${rec.archived ? '恢复不会自动还原默认项或自动扣款关系。' : '归档会保留余额、流水和还款历史，并清除默认项。'}</p>
-    <button class="record-detail-btn secondary" type="button" style="margin-top:10px;width:100%" data-toast="${rec.archived ? '恢复账户' : '归档账户'} · 后续接线">${rec.archived ? '恢复账户' : '归档账户'}</button>
+    <p class="jz-status-line is-flush">${rec.archived ? '恢复不会自动还原默认项或自动扣款关系。' : '归档会保留余额、流水和还款历史，并清除默认项。'}</p>
+    <button class="record-detail-btn secondary record-detail-btn--block" type="button" data-toast="${rec.archived ? '恢复账户' : '归档账户'} · 后续接线">${rec.archived ? '恢复账户' : '归档账户'}</button>
   </section>`;
 
   const stats = `<section class="account-detail-grid">${rec.stats

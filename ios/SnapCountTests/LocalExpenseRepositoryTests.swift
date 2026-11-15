@@ -3,6 +3,62 @@ import XCTest
 @testable import SnapCount
 
 final class LocalExpenseRepositoryTests: XCTestCase {
+    func testLF037UnboundExpenseHasNoLedgerUntilBoundAndUnbindRestoresBalance() throws {
+        let url = temporaryLocalDatabaseURL()
+        defer { removeLocalDatabase(at: url) }
+        let database = try LocalDatabase(databaseURL: url)
+        let repository = try LocalExpenseRepository(database: database)
+        let fixture = try makeFixture(repository: repository)
+        let draft = LocalExpenseDraft(id: UUID(), profileID: fixture.profile.id, accountID: nil,
+            amountMinor: 2000, currency: "CNY", merchantName: "合成消费", platform: "",
+            category: "餐饮", paymentMethod: "现金", transactionDate: "2026-10-25",
+            transactionTime: nil, note: nil, createdAt: Date())
+        let original = try repository.createExpense(draft, operationID: UUID())
+        XCTAssertNil(original.accountID)
+        XCTAssertTrue(try repository.accountEntries(sourceID: draft.id).isEmpty)
+        let bound = try repository.updateExpense(LocalExpenseUpdate(id: draft.id, expectedVersion: 1,
+            accountID: fixture.account.id, amountMinor: 2000, currency: "CNY", merchantName: "合成消费",
+            platform: "", category: "餐饮", paymentMethod: "现金", transactionDate: "2026-10-25",
+            transactionTime: nil, note: nil, updatedAt: Date()), operationID: UUID())
+        XCTAssertEqual(try repository.accountBalanceMinor(accountID: fixture.account.id), 8000)
+        _ = try repository.updateExpense(LocalExpenseUpdate(id: draft.id, expectedVersion: bound.localVersion,
+            accountID: nil, amountMinor: 2000, currency: "CNY", merchantName: "合成消费", platform: "",
+            category: "餐饮", paymentMethod: "现金", transactionDate: "2026-10-25", transactionTime: nil,
+            note: nil, updatedAt: Date()), operationID: UUID())
+        XCTAssertEqual(try repository.accountBalanceMinor(accountID: fixture.account.id), 10000)
+        XCTAssertTrue(try repository.accountEntries(sourceID: draft.id).allSatisfy { $0.voidedAt != nil })
+        try database.writer.close()
+        let reopened = try LocalExpenseRepository(database: LocalDatabase(databaseURL: url))
+        XCTAssertNil(try reopened.expense(id: draft.id)?.accountID)
+    }
+
+    func testLF04004EqualVersionLiveSnapshotCannotChargeDeletedExpenseAgain() throws {
+        let url = temporaryLocalDatabaseURL()
+        defer { removeLocalDatabase(at: url) }
+        let repository = try LocalExpenseRepository(database: LocalDatabase(databaseURL: url))
+        let fixture = try makeFixture(repository: repository)
+        let id = UUID()
+        let draft = expenseDraft(id: id, profileID: fixture.profile.id,
+                                 accountID: fixture.account.id, amountMinor: 2_680)
+        _ = try repository.createExpense(draft, operationID: UUID())
+        let deleted = try repository.deleteExpense(id: id, expectedVersion: 1,
+                                                   deletedAt: editedDate, operationID: UUID())
+        let snapshot = LocalRemoteSnapshot(accounts: [], expenses: [LocalRemoteExpense(
+            id: id, accountID: fixture.account.id, amountMinor: draft.amountMinor,
+            currency: draft.currency, merchantName: draft.merchantName, platform: draft.platform,
+            category: draft.category, paymentMethod: draft.paymentMethod,
+            transactionDate: draft.transactionDate, transactionTime: draft.transactionTime,
+            note: draft.note, version: deleted.localVersion, deletedAt: nil
+        )], accountEntries: [])
+        for _ in 0..<2 {
+            _ = try repository.applyRemoteSnapshot(snapshot, profileID: fixture.profile.id)
+            XCTAssertNil(try repository.expense(id: id))
+            XCTAssertEqual(try repository.expenseTombstone(id: id), deleted)
+            XCTAssertTrue(try repository.accountEntries(sourceID: id).allSatisfy { $0.voidedAt != nil })
+            XCTAssertEqual(try repository.accountBalanceMinor(accountID: fixture.account.id), 10_000)
+        }
+    }
+
     func testLOCAL003ProjectionImportsCloudFactsWithoutCreatingOutbox() throws {
         let databaseURL = temporaryLocalDatabaseURL()
         defer { removeLocalDatabase(at: databaseURL) }
@@ -45,6 +101,43 @@ final class LocalExpenseRepositoryTests: XCTestCase {
         XCTAssertEqual(try repository.pendingOutboxOperations().count, 0)
     }
 
+    func testLOCAL003E1RemoteSnapshotSkipsExpenseOfDeletedAccountWithoutLosingBatch() throws {
+        let databaseURL = temporaryLocalDatabaseURL()
+        defer { removeLocalDatabase(at: databaseURL) }
+        let repository = try LocalExpenseRepository(database: LocalDatabase(databaseURL: databaseURL))
+        let profile = try repository.createProfile(id: UUID(), createdAt: fixedDate)
+        let keptAccountID = UUID()
+        let deletedAccountID = UUID()
+        let orphanExpenseID = UUID()
+        let keptExpenseID = UUID()
+
+        let snapshot = LocalRemoteSnapshot(
+            accounts: [
+                LocalRemoteAccount(
+                    id: keptAccountID, name: "仍存在的账户", kind: "debit_card", currency: "CNY",
+                    openingBalanceMinor: 20_000, version: 1, deletedAt: nil
+                ),
+                LocalRemoteAccount(
+                    id: deletedAccountID, name: "远端已删除账户", kind: "debit_card", currency: "CNY",
+                    openingBalanceMinor: 5_000, version: 2, deletedAt: editedDate
+                )
+            ],
+            expenses: [
+                remoteExpense(id: orphanExpenseID, accountID: deletedAccountID, amountMinor: 3_000),
+                remoteExpense(id: keptExpenseID, accountID: keptAccountID, amountMinor: 1_280)
+            ]
+        )
+
+        XCTAssertNoThrow(try repository.applyRemoteSnapshot(snapshot, profileID: profile.id))
+
+        XCTAssertEqual(try repository.accounts(profileID: profile.id).map(\.id), [keptAccountID])
+        XCTAssertNil(try repository.expense(id: orphanExpenseID))
+        XCTAssertTrue(try repository.accountEntries(sourceID: orphanExpenseID).isEmpty)
+        XCTAssertEqual(try repository.expense(id: keptExpenseID)?.amountMinor, 1_280)
+        XCTAssertEqual(try repository.accountEntries(sourceID: keptExpenseID).count, 1)
+        XCTAssertEqual(try repository.accountBalanceMinor(accountID: keptAccountID), 18_720)
+    }
+
     func testLOCAL002A1CreatesProfileAccountAndExpenseWithoutCloudSession() throws {
         let databaseURL = temporaryLocalDatabaseURL()
         defer { removeLocalDatabase(at: databaseURL) }
@@ -76,6 +169,58 @@ final class LocalExpenseRepositoryTests: XCTestCase {
         XCTAssertEqual(payload["source"] as? String, "manual")
         XCTAssertNotNil(payload["platform"])
         XCTAssertNotNil(payload["note"])
+    }
+
+    func testLF03709ArchivedLocalAccountKeepsBalanceAndHistoryAcrossReopenAndRestore() throws {
+        let databaseURL = temporaryLocalDatabaseURL()
+        defer { removeLocalDatabase(at: databaseURL) }
+        let repository = try LocalExpenseRepository(database: LocalDatabase(databaseURL: databaseURL))
+        let profile = try repository.createProfile(id: UUID(), createdAt: fixedDate)
+        let accountID = UUID()
+        _ = try repository.createAccount(LocalAccountDraft(
+            id: accountID, profileID: profile.id, name: "本地现金", kind: "cash", currency: "CNY",
+            openingBalanceMinor: 10_000, createdAt: fixedDate, isDefaultExpense: true
+        ))
+        let expenseID = UUID()
+        _ = try repository.createExpense(
+            expenseDraft(id: expenseID, profileID: profile.id, accountID: accountID, amountMinor: 1_280),
+            operationID: UUID()
+        )
+        let beforeArchive = try XCTUnwrap(repository.accounts(profileID: profile.id).first { $0.id == accountID })
+        _ = try repository.updateAccount(LocalAccountUpdate(
+            id: accountID, profileID: profile.id, expectedVersion: beforeArchive.localVersion,
+            name: beforeArchive.name, kind: beforeArchive.kind, institution: beforeArchive.institution,
+            last4: beforeArchive.last4, billDay: nil, paymentDueDay: nil, autoDebitAccountID: nil,
+            autoConfirmRepayment: false, gracePeriodDays: 0, isDefaultExpense: false,
+            isDefaultIncome: false, isArchived: true, sortOrder: beforeArchive.sortOrder, updatedAt: editedDate
+        ))
+
+        let reopened = try LocalExpenseRepository(database: LocalDatabase(databaseURL: databaseURL))
+        let archived = try XCTUnwrap(reopened.accounts(profileID: profile.id).first { $0.id == accountID })
+        XCTAssertTrue(archived.isArchived)
+        XCTAssertFalse(archived.isDefaultExpense)
+        XCTAssertEqual(try reopened.accountBalanceMinor(accountID: accountID), 8_720)
+        XCTAssertEqual(try reopened.expense(id: expenseID)?.amountMinor, 1_280)
+        let archivedEntrySourceIDs = try reopened.accountEntries(accountID: accountID).map(\.sourceID)
+        XCTAssertEqual(archivedEntrySourceIDs, [expenseID])
+        XCTAssertThrowsError(try reopened.createExpense(
+            expenseDraft(id: UUID(), profileID: profile.id, accountID: accountID, amountMinor: 100),
+            operationID: UUID()
+        ))
+
+        _ = try reopened.updateAccount(LocalAccountUpdate(
+            id: accountID, profileID: profile.id, expectedVersion: archived.localVersion,
+            name: archived.name, kind: archived.kind, institution: archived.institution,
+            last4: archived.last4, billDay: nil, paymentDueDay: nil, autoDebitAccountID: nil,
+            autoConfirmRepayment: false, gracePeriodDays: 0, isDefaultExpense: false,
+            isDefaultIncome: false, isArchived: false, sortOrder: archived.sortOrder, updatedAt: editedDate
+        ))
+        let restored = try LocalExpenseRepository(database: LocalDatabase(databaseURL: databaseURL))
+        let active = try XCTUnwrap(restored.accounts(profileID: profile.id).first { $0.id == accountID })
+        XCTAssertFalse(active.isArchived)
+        XCTAssertFalse(active.isDefaultExpense, "恢复不自动重建归档前默认项")
+        XCTAssertEqual(try restored.accountBalanceMinor(accountID: accountID), 8_720)
+        XCTAssertEqual(try restored.accountEntries(accountID: accountID).count, 1)
     }
 
     func testLOCALDATA004AOutboxConflictRollsBackExpenseAndEntry() throws {
@@ -539,6 +684,28 @@ final class LocalExpenseRepositoryTests: XCTestCase {
             transactionTime: "12:30:00",
             note: "午餐",
             createdAt: fixedDate
+        )
+    }
+
+    private func remoteExpense(
+        id: UUID,
+        accountID: UUID,
+        amountMinor: Int64
+    ) -> LocalRemoteExpense {
+        LocalRemoteExpense(
+            id: id,
+            accountID: accountID,
+            amountMinor: amountMinor,
+            currency: "CNY",
+            merchantName: "全家便利店",
+            platform: "线下消费",
+            category: "food",
+            paymentMethod: "微信支付",
+            transactionDate: "2026-08-23",
+            transactionTime: "12:30:00",
+            note: "午餐",
+            version: 1,
+            deletedAt: nil
         )
     }
 

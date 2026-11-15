@@ -13,8 +13,29 @@ struct UploadScreenshotIntent: AppIntent {
         Summary("上传 \(\.$image) 到芥子")
     }
 
+    static func normalizedShortcutFeedback(
+        outcomeFeedback: NativeAIFeedback?,
+        outcomeConfidence: Double?,
+        composedResult: LocalCompanionResult?
+    ) -> NativeAIFeedback? {
+        guard let composedResult else {
+            guard outcomeConfidence == nil || outcomeConfidence! >= 0.5 else { return nil }
+            return outcomeFeedback
+        }
+        guard let feedbackPayload = composedResult.aiFeedback,
+              let feedback = NativeAIFeedback(payload: feedbackPayload) else {
+            return nil
+        }
+        guard let confidence = feedbackPayload.double("confidence"), confidence >= 0.5 else {
+            return nil
+        }
+        return feedback
+    }
+
     func perform() async throws -> some IntentResult & ReturnsValue<String> {
+        let trialID = await ShortcutTrialStore.shared.claim()
         guard let image else {
+            if let trialID { await ShortcutTrialStore.shared.complete(id: trialID, outcome: .failed) }
             let message = "请把“转换后的图像”或上一部 JPEG 变量传给芥子。"
             return .result(value: message)
         }
@@ -23,51 +44,172 @@ struct UploadScreenshotIntent: AppIntent {
             do {
                 let rawImageData = try await image.data(contentType: .image)
                 let imageData = try ImageUploadPreprocessor.jpegData(from: rawImageData)
-                let uploadToken = try? KeychainStore.shared.string(for: KeychainKeys.uploadToken)
+                let mode = LocalVisionModeStore().mode
+                let uploadToken: String?
+                if mode == .hosted {
+                    uploadToken = try? KeychainStore.shared.string(for: KeychainKeys.uploadToken)
+                } else {
+                    uploadToken = nil
+                }
+                let provider: LocalImageRecognitionProvider
+                var isRecognitionRequestCurrent: () -> Bool = { true }
+                switch mode {
+                case .disabled, .hosted:
+                    provider = HostedAIImageRecognitionProvider()
+                case .byok:
+                    let credentialStore = KeychainStore.shared
+                    let apiKey = (try? credentialStore.string(for: KeychainKeys.byokQwenAPIKey)) ?? ""
+                    provider = QwenBYOKImageRecognitionProvider(
+                        apiKey: apiKey
+                    )
+                    isRecognitionRequestCurrent = {
+                        (try? credentialStore.string(for: KeychainKeys.byokQwenAPIKey)) == apiKey
+                    }
+                }
                 let recognition = try LocalImageRecognitionUseCase.makeDefault(
-                    provider: HostedAIImageRecognitionProvider()
+                    provider: provider,
+                    isRecognitionRequestCurrent: isRecognitionRequestCurrent
                 )
                 let result: ShortcutUploadResult
+                let trialOutcome: ShortcutTrialOutcome
                 do {
-                    let outcome = try await recognition.ingest(
-                        imageData: imageData,
-                        captureKind: "screenshot",
-                        filename: "shortcut-jpeg.jpg",
-                        uploadToken: uploadToken
-                    )
-                    switch outcome.result {
-                    case .archived:
-                        result = ShortcutUploadResult(
-                            displayText: "AI 识别结果已自动记录到本机。",
-                            notificationText: "AI 识别结果已自动记录到本机。",
-                            route: "records"
+                    if mode == .disabled {
+                        _ = try recognition.receiveForManual(
+                            imageData: imageData, captureKind: "screenshot", filename: "shortcut-jpeg.jpg"
                         )
-                    case .staged:
                         result = ShortcutUploadResult(
-                            displayText: "AI 识别结果已保存到本地收件箱，请打开芥子确认。",
-                            notificationText: "AI 识别结果已保存到本地收件箱，请打开芥子确认。",
+                            displayText: "AI 识别已关闭；图片仅保存在本机，请打开芥子手动处理。",
+                            notificationText: "图片已保存在本机，请打开芥子手动处理。",
                             route: "inbox"
                         )
+                        trialOutcome = .staged
+                    } else {
+                        let outcome = try await recognition.ingest(
+                            imageData: imageData,
+                            captureKind: "screenshot",
+                            filename: "shortcut-jpeg.jpg",
+                            uploadToken: uploadToken
+                        )
+                        let localSettings = LocalUserSettingsStore().load()
+                        switch outcome.result {
+                        case .archived, .financialArchived:
+                            trialOutcome = .archived
+                            let text = outcome.notificationText ?? "AI 识别结果已自动记录到本机。"
+                            var companionMessage: String?
+                            var deliveryFeedback = Self.normalizedShortcutFeedback(
+                                outcomeFeedback: outcome.feedback,
+                                outcomeConfidence: outcome.feedbackConfidence,
+                                composedResult: nil
+                            )
+                            if let companionProvider = await companionProvider(for: mode) {
+                                let providerMode: LocalExpressionProviderMode = mode == .hosted ? .hosted : .byok
+                                if let composed = await recognition.composeCompanion(
+                                    for: outcome.result,
+                                    provider: companionProvider,
+                                    settings: localSettings,
+                                    providerMode: providerMode
+                                ) {
+                                    if let message = composed.companionMessage?.trimmingCharacters(in: .whitespacesAndNewlines),
+                                       !message.isEmpty {
+                                        companionMessage = message
+                                    }
+                                    deliveryFeedback = Self.normalizedShortcutFeedback(
+                                        outcomeFeedback: outcome.feedback,
+                                        outcomeConfidence: outcome.feedbackConfidence,
+                                        composedResult: composed
+                                    )
+                                }
+                            }
+                            result = ShortcutUploadResult.archived(
+                                notificationText: text,
+                                companionMessage: companionMessage,
+                                feedback: deliveryFeedback
+                            )
+                        case .staged, .financialPending:
+                            trialOutcome = .staged
+                            let text = outcome.notificationText ?? "AI 识别结果已保存到本地收件箱，请打开芥子确认。"
+                            result = ShortcutUploadResult(
+                                displayText: ShortcutUploadResult.expandedDisplayText(
+                                    baseText: text,
+                                    companionMessage: nil,
+                                    feedback: Self.normalizedShortcutFeedback(
+                                        outcomeFeedback: outcome.feedback,
+                                        outcomeConfidence: outcome.feedbackConfidence,
+                                        composedResult: nil
+                                    )
+                                ),
+                                notificationText: text,
+                                route: "inbox"
+                            )
+                        }
                     }
-                } catch LocalImageRecognitionError.unsupportedDomain(_) where uploadToken?.isEmpty == false {
-                    result = try await SnapCountUploadService().uploadShortcutImageResult(
-                        data: imageData,
-                        uploadToken: uploadToken!,
-                        captureKind: "screenshot",
-                        filename: "shortcut-jpeg.jpg"
+                } catch {
+                    trialOutcome = .failed
+                    let persisted = recognition.hasPersistedOriginal(imageData: imageData)
+                    let failureMessage = LocalImageRecognitionFailureMessage.result(
+                        for: error,
+                        persisted: persisted
+                    )
+                    result = ShortcutUploadResult(
+                        displayText: failureMessage,
+                        notificationText: failureMessage,
+                        route: "inbox"
                     )
                 }
+                if let trialID { await ShortcutTrialStore.shared.complete(id: trialID, outcome: trialOutcome) }
                 await ShortcutNotificationService.shared.notifyUploadResult(result)
                 let value = ShortcutFeedbackPreferences.resultCardEnabled ? result.displayText : result.compactDisplayText
                 return .result(value: value)
             } catch {
+                if let trialID { await ShortcutTrialStore.shared.complete(id: trialID, outcome: .failed) }
                 let message = "上传失败：\(error.localizedDescription)"
                 return .result(value: message)
             }
         }
 
         let message = "快捷指令图片上传需要 iOS 18 或更高版本。"
+        if let trialID { await ShortcutTrialStore.shared.complete(id: trialID, outcome: .failed) }
         return .result(value: message)
+    }
+
+    private func companionProvider(for mode: LocalVisionMode) async -> LocalCompanionProvider? {
+        guard LocalUserSettingsStore().load().companionEnabled else { return nil }
+        switch mode {
+        case .hosted:
+            guard let accessToken = await currentHostedAccessToken() else { return nil }
+            return HostedAICompanionProvider(accessToken: accessToken)
+        case .byok:
+            guard let apiKey = try? KeychainStore.shared.string(for: KeychainKeys.byokQwenAPIKey),
+                  !apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+            return QwenBYOKCompanionProvider(apiKey: apiKey)
+        case .disabled:
+            return nil
+        }
+    }
+
+    /// The Shortcut upload token is deliberately not accepted here. Hosted
+    /// Companion composition requires the user's short-lived Supabase JWT.
+    private func currentHostedAccessToken() async -> String? {
+        let keychain = KeychainStore.shared
+        guard let json = try? keychain.string(for: KeychainKeys.authSession),
+              let data = json.data(using: .utf8),
+              let storedSession = try? JSONDecoder().decode(SupabaseAuthSession.self, from: data) else {
+            return nil
+        }
+        if let expiration = storedSession.expirationEpoch,
+           expiration > Int(Date().timeIntervalSince1970) + 60 {
+            return storedSession.accessToken
+        }
+        guard let refreshToken = storedSession.refreshToken, !refreshToken.isEmpty,
+              let refreshed = try? await SupabaseAuthService().refreshSession(refreshToken: refreshToken),
+              let refreshedJSON = try? JSONEncoder().encode(refreshed),
+              let refreshedText = String(data: refreshedJSON, encoding: .utf8) else {
+            return nil
+        }
+        try? keychain.setString(refreshedText, for: KeychainKeys.authSession)
+        guard let expiration = refreshed.expirationEpoch,
+              expiration > Int(Date().timeIntervalSince1970) else { return nil }
+        return refreshed.accessToken
     }
 }
 

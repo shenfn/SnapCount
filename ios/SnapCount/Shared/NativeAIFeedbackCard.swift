@@ -148,6 +148,7 @@ extension View {
 struct NativeAIFeedbackCard: View {
     let feedback: NativeAIFeedback
     var compact = false
+    var primaryMessage: String? = nil
     var reviewOnly = false
     var reviewable = false
     var reviewState: NativeAIFeedbackReviewState = .idle
@@ -182,7 +183,11 @@ struct NativeAIFeedbackCard: View {
                         .background(bandColor.opacity(0.1), in: Capsule())
                 }
 
-                NativeAIFeedbackSupportingContent(feedback: feedback, compact: compact)
+                NativeAIFeedbackSupportingContent(
+                    feedback: feedback,
+                    primaryMessage: primaryMessage,
+                    compact: compact
+                )
             }
 
             if NativeAIFeedbackReviewPresentation.shouldShowSection(

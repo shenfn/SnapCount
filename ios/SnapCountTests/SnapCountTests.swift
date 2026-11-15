@@ -3,6 +3,98 @@ import UIKit
 @testable import SnapCount
 
 final class SnapCountTests: XCTestCase {
+    @MainActor
+    func testLF03408LocalStorageInitializationFailureNeverFallsBackToRemoteSave() async {
+        let repository = RecordRepositoryStub()
+        let state = AppState(
+            recordRepository: repository,
+            localStorageInitializationMessage: "本地数据库无法打开",
+            sessionProvider: { _ in Self.expressionTestSession }
+        )
+        var draft = NativeManualRecordDraft(kind: .expense)
+        draft.amountText = "12.30"
+        draft.title = "合成商户"
+        draft.category = "food"
+        draft.accountId = UUID().uuidString
+
+        let saved = await state.createManualRecord(draft, domain: nil)
+
+        XCTAssertFalse(saved)
+        XCTAssertEqual(repository.createCount, 0, "本地存储失败不能把核心记录写到云端")
+        XCTAssertTrue(state.manualRecordMessage?.contains("本地数据库无法打开") == true)
+        XCTAssertEqual(state.localStorageInitializationMessage, "本地数据库无法打开")
+    }
+
+    @MainActor
+    func testIOSV2POLISH002P1DateWindowLoadsSelectedMonthBeforeHistory() async {
+        let repository = RecordRepositoryStub()
+        let state = makeRemoteExpressionState(
+            recordRepository: repository,
+            localBindingRepository: TestLocalBindingRepositoryStub(userID: Self.expressionTestSession.user.id),
+            sessionProvider: { _ in Self.expressionTestSession }
+        )
+        state.isSignedIn = true
+        state.currentUserId = Self.expressionTestSession.user.id
+        authorizeRemoteReads(for: state.currentUserId, in: state)
+        await state.loadRecordDateWindow(around: "2000-01-05")
+        XCTAssertEqual(repository.fetchMonthKeys, ["2000-01", "1999-12"], "先展示所选月，历史基准不能排在前面")
+    }
+
+    func testIOSV2POLISH003MerchantMissingAmountIsNotPresentedAsZeroOrPartialTotal() {
+        let records = [
+            NativeDayRecord(id: "known", reference: "expense/known", dateKey: "2026-10-17", kind: .expense,
+                domainKey: nil, title: "示例商户 A", subtitle: "", value: "¥12.00", timeLabel: nil, systemImage: "creditcard", status: "done"),
+            NativeDayRecord(id: "missing", reference: "expense/missing", dateKey: "2026-10-17", kind: .expense,
+                domainKey: nil, title: "示例商户 A", subtitle: "", value: "", timeLabel: nil, systemImage: "creditcard", status: "done")
+        ]
+        let result = NativeDomainScenePresentation.make(
+            domain: .expense, dateKey: "2026-10-17",
+            weekGroups: [NativeDayRecordGroup(dateKey: "2026-10-17", records: records)], details: [:],
+            isSignedIn: false, isLoading: false, errorMessage: nil, todayKey: "2026-10-17"
+        )
+        XCTAssertEqual(result.merchants.count, 1)
+        XCTAssertEqual(result.merchants.first?.records.count, 2)
+        XCTAssertNil(result.merchants.first?.total)
+        XCTAssertNil(result.knownPrimaryTotal)
+    }
+
+    func testIOSV2POLISH003MerchantRankingUsesOnlySameDayFormalExpenses() throws {
+        func record(_ id: String, _ merchant: String, _ value: String, kind: NativeDayRecordKind = .expense) -> NativeDayRecord {
+            NativeDayRecord(
+                id: id, reference: "\(kind.rawValue)/\(id)", dateKey: "2026-10-17", kind: kind,
+                domainKey: nil, title: merchant, subtitle: "", value: value,
+                timeLabel: nil, systemImage: "creditcard", status: "done"
+            )
+        }
+        let records = [
+            record("a1", "示例商户 A", "¥12.00"), record("a2", "示例商户 A", "¥3.20"),
+            record("b1", "示例商户 B", "¥8.00"), record("income", "示例商户 A", "¥100.00", kind: .income),
+            record("candidate", "示例商户 A", "¥999.00", kind: .staging)
+        ]
+        let result = NativeDomainScenePresentation.make(
+            domain: .expense, dateKey: "2026-10-17",
+            weekGroups: [NativeDayRecordGroup(dateKey: "2026-10-17", records: records)], details: [:],
+            isSignedIn: false, isLoading: false, errorMessage: nil, todayKey: "2026-10-17"
+        )
+        XCTAssertEqual(result.merchants.map(\.name), ["示例商户 A", "示例商户 B"])
+        XCTAssertEqual(try XCTUnwrap(result.merchants.first?.total), 15.2, accuracy: 0.001)
+        XCTAssertEqual(result.merchants.first?.records.map(\.id), ["a1", "a2"])
+        XCTAssertEqual(try XCTUnwrap(result.merchants.last?.total), 8, accuracy: 0.001)
+    }
+
+    func testIOSV2POLISH004SleepSevenNightsEndOnSelectedMondayAcrossMonth() {
+        // 2026-10-05 为周一：近七夜必须包括九月末，不能变成 10/05～10/11。
+        let result = NativeDomainScenePresentation.make(
+            domain: .sleep, dateKey: "2026-10-05", weekGroups: [], details: [:],
+            isSignedIn: false, isLoading: false, errorMessage: nil, todayKey: "2026-10-05"
+        )
+        XCTAssertEqual(result.weeklyValues.map(\.dateKey), [
+            "2026-09-29", "2026-09-30", "2026-10-01", "2026-10-02",
+            "2026-10-03", "2026-10-04", "2026-10-05"
+        ])
+        XCTAssertTrue(result.weeklyValues.allSatisfy { $0.value == nil })
+    }
+
     func testLocalDateKeyUsesShanghaiCalendarDay() {
         XCTAssertEqual(NativeLocalDate.dateKey("2026-07-17T16:30:00Z"), "2026-07-18")
         XCTAssertEqual(NativeLocalDate.dateKey("2026-07-18T00:30:00+08:00"), "2026-07-18")
@@ -21,9 +113,208 @@ final class SnapCountTests: XCTestCase {
         )
     }
 
-    func testAppTabsHaveTitles() {
-        XCTAssertEqual(AppTab.allCases.count, 5)
-        XCTAssertTrue(AppTab.allCases.allSatisfy { !$0.title.isEmpty })
+    @MainActor
+    func testAppShellDomainsMatchFiveDomainContract() {
+        XCTAssertEqual(AppDomain.allCases.map(\.rawValue), ["expense", "sleep", "food", "sport", "reading"])
+        XCTAssertEqual(AppDomain.allCases.map(\.title), ["记账", "睡眠", "饮食", "运动", "阅读"])
+        XCTAssertTrue(AppDomain.allCases.allSatisfy { !$0.title.isEmpty })
+    }
+
+    @MainActor
+    func testAppShellOverlaysMatchMenuContract() {
+        XCTAssertEqual(AppOverlay.allCases.map(\.rawValue), ["none", "inbox", "records", "insights", "wallet", "settings"])
+        XCTAssertEqual(AppOverlay.allCases.filter { $0 != .none }.map(\.title), ["收件箱", "记录", "观察", "钱包", "设置"])
+    }
+
+    func testIOSV2POLISH005F01PagerPositionsRespectHitAreasAndClampFiniteEdges() {
+        XCTAssertEqual(JieziPrototypeLayout.page_dot_hit_width, 44)
+        XCTAssertEqual(AppDomain.pagerDomain(at: -100), .expense)
+        XCTAssertEqual(AppDomain.pagerDomain(at: 0), .expense)
+        XCTAssertEqual(AppDomain.pagerDomain(at: 43.99), .expense)
+        XCTAssertEqual(AppDomain.pagerDomain(at: 44), .sleep)
+        XCTAssertEqual(AppDomain.pagerDomain(at: 88), .food)
+        XCTAssertEqual(AppDomain.pagerDomain(at: 132), .sport)
+        XCTAssertEqual(AppDomain.pagerDomain(at: 176), .reading)
+        XCTAssertEqual(AppDomain.pagerDomain(at: 220), .reading)
+        XCTAssertEqual(AppDomain.pagerDomain(at: 10_000), .reading)
+        XCTAssertNil(AppDomain.pagerDomain(at: .nan))
+        XCTAssertNil(AppDomain.pagerDomain(at: .infinity))
+    }
+
+    func testExpenseTimelineScrubberMapsFiniteTrackCoordinatesToMinutes() {
+        XCTAssertEqual(NativeExpenseTimelineSelection.minute(for: 0, width: 300), 0)
+        XCTAssertEqual(NativeExpenseTimelineSelection.minute(for: 150, width: 300), 720)
+        XCTAssertEqual(NativeExpenseTimelineSelection.minute(for: 300, width: 300), 1440)
+        XCTAssertEqual(NativeExpenseTimelineSelection.minute(for: -20, width: 300), 0)
+        XCTAssertEqual(NativeExpenseTimelineSelection.minute(for: 340, width: 300), 1440)
+        XCTAssertNil(NativeExpenseTimelineSelection.minute(for: .nan, width: 300))
+        XCTAssertNil(NativeExpenseTimelineSelection.minute(for: 100, width: 0))
+    }
+
+    func testExpenseTimelineScrubberSelectsNearestExpenseWithStableTieBreak() {
+        func entry(_ id: String, minute: Int) -> NativeTimelineEntry {
+            NativeTimelineEntry(
+                record: NativeDayRecord(
+                    id: id, reference: "expense/\(id)", dateKey: "2026-10-17", kind: .expense,
+                    domainKey: nil, title: id, subtitle: "", value: "¥1.00", timeLabel: nil,
+                    systemImage: "creditcard", status: "done"
+                ), minute: minute
+            )
+        }
+
+        let entries = [entry("early", minute: 600), entry("late", minute: 660)]
+        XCTAssertEqual(NativeExpenseTimelineSelection.nearestEntry(in: entries, to: 610)?.record.id, "early")
+        XCTAssertEqual(NativeExpenseTimelineSelection.nearestEntry(in: entries, to: 630)?.record.id, "early")
+        XCTAssertEqual(NativeExpenseTimelineSelection.nearestEntry(in: entries, to: 650)?.record.id, "late")
+        XCTAssertNil(NativeExpenseTimelineSelection.nearestEntry(in: [], to: 630))
+    }
+
+    func testSleepTimelineUsesNightAxisAndShowsCrossMidnightDuration() throws {
+        let start = try XCTUnwrap(ISO8601DateFormatter().date(from: "2026-10-17T23:00:00+08:00"))
+        let end = try XCTUnwrap(ISO8601DateFormatter().date(from: "2026-10-18T07:30:00+08:00"))
+        let record = NativeDayRecord(
+            id: "sleep-1", reference: "sleep/sleep-1", dateKey: "2026-10-18", kind: .sleep,
+            domainKey: "sleep", title: "睡眠", subtitle: "", value: "", timeLabel: nil,
+            systemImage: "moon.zzz", status: "done"
+        )
+        let interval = NativeSleepInterval(record: record, start: start, end: end)
+
+        let axis = try XCTUnwrap(NativeSleepTimelineAxis.value(for: interval))
+        XCTAssertEqual(axis.startMinute, 1_380, accuracy: 0.001)
+        XCTAssertEqual(axis.endMinute, 1_890, accuracy: 0.001)
+        XCTAssertEqual(axis.durationMinutes, 510, accuracy: 0.001)
+        XCTAssertEqual(NativeSleepTimelineAxis.label(for: 1_380), "23:00")
+        XCTAssertEqual(NativeSleepTimelineAxis.label(for: 1_890), "07:30")
+    }
+
+    func testLF03805SleepTimelinePreservesNoonAndMultiDayDateDuration() throws {
+        func interval(id: String, startValue: String, endValue: String) throws -> NativeSleepInterval {
+            let formatter = ISO8601DateFormatter()
+            let start = try XCTUnwrap(formatter.date(from: startValue))
+            let end = try XCTUnwrap(formatter.date(from: endValue))
+            let record = NativeDayRecord(
+                id: id, reference: "sleep/\(id)", dateKey: "2026-10-19", kind: .sleep,
+                domainKey: "sleep", title: "睡眠", subtitle: "", value: "", timeLabel: nil,
+                systemImage: "moon.zzz", status: "done"
+            )
+            return NativeSleepInterval(record: record, start: start, end: end)
+        }
+
+        let noon = try XCTUnwrap(NativeSleepTimelineAxis.value(for: interval(
+            id: "noon", startValue: "2026-10-17T11:00:00+08:00", endValue: "2026-10-17T13:00:00+08:00"
+        )))
+        XCTAssertEqual(noon.durationMinutes, 120, accuracy: 0.001)
+        XCTAssertEqual(noon.startDateKey, "2026-10-17")
+        XCTAssertEqual(noon.endDateKey, "2026-10-17")
+
+        let multiDay = try XCTUnwrap(NativeSleepTimelineAxis.value(for: interval(
+            id: "multi-day", startValue: "2026-10-17T23:00:00+08:00", endValue: "2026-10-19T07:30:00+08:00"
+        )))
+        XCTAssertEqual(multiDay.durationMinutes, 1_950, accuracy: 0.001)
+        XCTAssertEqual(multiDay.startDateKey, "2026-10-17")
+        XCTAssertEqual(multiDay.endDateKey, "2026-10-19")
+    }
+
+    func testSleepTimelineAxisKeepsPrototypeNightWindowButExpandsForOutOfWindowData() {
+        let normal = NativeSleepTimelineAxis.bounds(for: [1_380...1_890])
+        XCTAssertEqual(normal.lowerBound, 1_260, accuracy: 0.001)
+        XCTAssertEqual(normal.upperBound, 1_980, accuracy: 0.001)
+
+        let late = NativeSleepTimelineAxis.bounds(for: [1_200...1_950])
+        XCTAssertEqual(late.lowerBound, 1_200, accuracy: 0.001)
+        XCTAssertEqual(late.upperBound, 1_980, accuracy: 0.001)
+    }
+
+    @MainActor
+    func testDomainPageEmptyStateAndFinanceHeroContract() {
+        let dateKey = "2026-10-17"
+        let empty = NativeDomainScenePresentation.make(
+            domain: .expense, dateKey: dateKey, weekGroups: [], details: [:],
+            isSignedIn: false, isLoading: false, errorMessage: nil, todayKey: dateKey
+        )
+        XCTAssertTrue(empty.records.isEmpty)
+        XCTAssertEqual(empty.primaryValue, "¥0.00")
+        XCTAssertEqual(empty.secondaryValue, "本地暂不可读取")
+
+        let financeRecords = [
+            NativeDayRecord(
+                id: "expense", reference: "expense/expense", dateKey: dateKey,
+                kind: .expense, domainKey: nil, title: "消费", subtitle: "", value: "¥1200.50",
+                timeLabel: nil, systemImage: "creditcard", status: "done"
+            ),
+            NativeDayRecord(
+                id: "income", reference: "income/income", dateKey: dateKey,
+                kind: .income, domainKey: nil, title: "收入", subtitle: "", value: "¥7000.00",
+                timeLabel: nil, systemImage: "arrow.down.circle", status: "done"
+            )
+        ]
+        let finance = NativeDomainScenePresentation.make(
+            domain: .expense, dateKey: dateKey,
+            weekGroups: [NativeDayRecordGroup(dateKey: dateKey, records: financeRecords)], details: [:],
+            isSignedIn: true, isLoading: false, errorMessage: nil, todayKey: dateKey
+        )
+        XCTAssertEqual(finance.primaryValue, "¥1200.50")
+        XCTAssertEqual(finance.secondaryValue, "¥7000.00")
+
+        let readingGroups = [NativeDayRecordGroup(
+            dateKey: dateKey,
+            records: (1...3).map { index in
+                NativeDayRecord(
+                    id: "reading-\(index)", reference: "data/reading-\(index)",
+                    dateKey: dateKey, kind: .reading, domainKey: "reading",
+                    title: "阅读记录", subtitle: "25 分钟", value: "",
+                    timeLabel: nil, systemImage: "book", status: "local"
+                )
+            }
+        )]
+        let reading = NativeDomainScenePresentation.make(
+            domain: .reading, dateKey: dateKey, weekGroups: readingGroups, details: [:],
+            isSignedIn: false, isLoading: false, errorMessage: nil, todayKey: dateKey
+        )
+        XCTAssertEqual(reading.records.count, 3)
+        XCTAssertEqual(reading.primaryValue, "记录字段缺失")
+        let sleep = NativeDomainScenePresentation.make(
+            domain: .sleep, dateKey: dateKey, weekGroups: readingGroups, details: [:],
+            isSignedIn: false, isLoading: false, errorMessage: nil, todayKey: dateKey
+        )
+        XCTAssertTrue(sleep.records.isEmpty)
+        XCTAssertEqual(sleep.primaryValue, "暂无睡眠记录")
+    }
+
+    @MainActor
+    func testDeepLinkRoutesToNewShellOverlays() {
+        let state = AppState()
+
+        state.handleDeepLink(URL(string: "jiezi://inbox")!)
+        XCTAssertEqual(state.presentedOverlay, .inbox)
+
+        state.handleDeepLink(URL(string: "jiezi://records")!)
+        XCTAssertEqual(state.presentedOverlay, .records)
+
+        state.handleDeepLink(URL(string: "jiezi://settings")!)
+        XCTAssertEqual(state.presentedOverlay, .settings)
+
+        state.handleDeepLink(URL(string: "jiezi://today")!)
+        XCTAssertEqual(state.presentedOverlay, .none)
+    }
+
+    @MainActor
+    func testShortcutNotificationRouteMapsToNewShellOverlays() {
+        let state = AppState()
+
+        state.handleShortcutNotificationRoute("inbox/staging-1")
+        XCTAssertEqual(state.presentedOverlay, .inbox)
+        XCTAssertEqual(state.inboxPath.count, 1)
+
+        state.handleShortcutNotificationRoute("records/expense/record-1")
+        XCTAssertEqual(state.presentedOverlay, .records)
+        XCTAssertEqual(state.recordsPath.count, 1)
+
+        state.handleShortcutNotificationRoute("settings")
+        XCTAssertEqual(state.presentedOverlay, .settings)
+
+        state.handleShortcutNotificationRoute(nil)
+        XCTAssertEqual(state.presentedOverlay, .none)
     }
 
     func testInboxCategoriesKeepActionOrderAndHideEmptyGroups() {
@@ -74,10 +365,104 @@ final class SnapCountTests: XCTestCase {
         XCTAssertEqual(store.completion(for: "user-b"), .skipped)
     }
 
+    func testOnboardingDeviceAndAccountScopesStaySeparate() throws {
+        let suiteName = "SnapCountTests.OnboardingScopes.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let store = OnboardingProgressStore(defaults: defaults)
+
+        store.mark(.completed, for: .account("user-a"))
+        XCTAssertEqual(store.completion(for: .account("user-a")), .completed)
+        XCTAssertNil(store.completion(for: .account("user-b")))
+        XCTAssertNil(store.completion(for: .device))
+
+        store.mark(.skipped, for: .device)
+        XCTAssertEqual(store.completion(for: .device), .skipped)
+        XCTAssertEqual(store.completion(for: .account("user-a")), .completed)
+        XCTAssertNil(store.completion(for: .account("user-b")))
+    }
+
+    @MainActor
+    func testGuestOnboardingCanPresentAndPersistsDeviceProgress() throws {
+        let suiteName = "SnapCountTests.GuestOnboarding.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let store = OnboardingProgressStore(defaults: defaults)
+        let state = AppState(onboardingProgressStore: store)
+
+        state.presentOnboardingIfNeeded()
+        XCTAssertTrue(state.isOnboardingPresented)
+        state.finishOnboarding(skipped: true)
+
+        XCTAssertFalse(state.isOnboardingPresented)
+        XCTAssertEqual(store.completion(for: .device), .skipped)
+        XCTAssertNil(store.completion(for: .account("")))
+    }
+
+    @MainActor
+    func testGuestProgressBridgesToFirstAccountWithoutLeakingToAnother() throws {
+        let suiteName = "SnapCountTests.OnboardingBridge.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let store = OnboardingProgressStore(defaults: defaults)
+        let state = AppState(onboardingProgressStore: store)
+
+        state.finishOnboarding(skipped: true)
+        state.currentUserId = "user-a"
+        state.isSignedIn = true
+        state.presentOnboardingIfNeeded()
+
+        XCTAssertFalse(state.isOnboardingPresented)
+        XCTAssertEqual(store.completion(for: .account("user-a")), .skipped)
+        XCTAssertEqual(store.linkedAccountIDForDeviceProgress(), "user-a")
+
+        let secondAccount = AppState(onboardingProgressStore: store)
+        secondAccount.currentUserId = "user-b"
+        secondAccount.isSignedIn = true
+        secondAccount.presentOnboardingIfNeeded()
+
+        XCTAssertTrue(secondAccount.isOnboardingPresented)
+        XCTAssertNil(store.completion(for: .account("user-b")))
+
+        secondAccount.finishOnboarding(skipped: false)
+        XCTAssertEqual(store.completion(for: .account("user-a")), .skipped)
+        XCTAssertEqual(store.completion(for: .account("user-b")), .completed)
+        XCTAssertEqual(store.completion(for: .device), .skipped)
+        XCTAssertEqual(store.linkedAccountIDForDeviceProgress(), "user-a")
+    }
+
+    @MainActor
+    func testSkippingManualOnboardingReplayPreservesCompletedStatus() throws {
+        let suiteName = "SnapCountTests.OnboardingReplay.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let store = OnboardingProgressStore(defaults: defaults)
+        let state = AppState(onboardingProgressStore: store)
+        state.currentUserId = "user-a"
+        state.isSignedIn = true
+        store.mark(.completed, for: .device)
+        store.mark(.completed, for: .account("user-a"))
+
+        state.presentOnboarding()
+        state.finishOnboarding(skipped: true)
+
+        XCTAssertFalse(state.isOnboardingPresented)
+        XCTAssertEqual(store.completion(for: .device), .completed)
+        XCTAssertEqual(store.completion(for: .account("user-a")), .completed)
+    }
+
+    @MainActor
+    func testExternalRecordRouteDefersAutomaticOnboarding() {
+        let state = AppState()
+        state.handleDeepLink(URL(string: "jiezi://records")!)
+        state.presentOnboardingIfNeeded()
+        XCTAssertFalse(state.isOnboardingPresented)
+    }
+
     @MainActor
     func testResetUserScopedStateClearsNavigationAndDetails() {
         let state = AppState()
-        state.selectedTab = .records
+        state.presentedOverlay = .records
         state.dashboard = DashboardSnapshot(todayCount: 3)
         state.todayPath.append(NativeDayDetailRoute(dateKey: "2026-07-17", kind: .all))
         state.inboxPath.append(NativeInboxRoute.staging(recordId: "staging-1"))
@@ -107,7 +492,8 @@ final class SnapCountTests: XCTestCase {
 
         state.resetUserScopedState()
 
-        XCTAssertEqual(state.selectedTab, .today)
+        XCTAssertEqual(state.presentedOverlay, .none)
+        XCTAssertEqual(state.selectedDomain, .expense)
         XCTAssertEqual(state.dashboard.todayCount, 0)
         XCTAssertTrue(state.todayPath.isEmpty)
         XCTAssertEqual(state.inboxPath.count, 0)
@@ -119,12 +505,12 @@ final class SnapCountTests: XCTestCase {
     }
 
     @MainActor
-    func testOpeningInboxCategorySwitchesTabAndCreatesOneRoute() {
+    func testOpeningInboxCategoryPresentsOverlayAndCreatesOneRoute() {
         let state = AppState()
 
         state.openInbox(filter: .failed)
 
-        XCTAssertEqual(state.selectedTab, .inbox)
+        XCTAssertEqual(state.presentedOverlay, .inbox)
         XCTAssertEqual(state.inboxPath.count, 1)
     }
 
@@ -293,7 +679,7 @@ final class SnapCountTests: XCTestCase {
 
         XCTAssertEqual(
             financeFilter,
-            "(and(occurred_at.gte.2026-07-31T16:00:00Z,occurred_at.lte.2026-08-31T15:59:59Z),and(occurred_at.is.null,transaction_date.gte.2026-08-01,transaction_date.lte.2026-08-31))"
+            "(and(occurred_at.gte.2026-07-31T16:00:00Z,occurred_at.lte.2026-08-31T15:59:59Z),and(occurred_at.is.null,transaction_date.gte.2026-08-01,transaction_date.lte.2026-08-31),and(occurred_at.is.null,transaction_date.is.null,created_at.gte.2026-07-31T16:00:00Z,created_at.lte.2026-08-31T15:59:59Z))"
         )
         XCTAssertTrue(financeFilter.hasPrefix("(and("))
         XCTAssertTrue(financeFilter.hasSuffix("))"))
@@ -749,11 +1135,11 @@ final class SnapCountTests: XCTestCase {
             companionMessage: "第一次遇见这家店。"
         )
 
-        XCTAssertEqual(selected, voice)
-        XCTAssertNotEqual(selected, planner)
+        XCTAssertEqual(selected, planner)
+        XCTAssertNotEqual(selected, voice)
     }
 
-    func testEXP008FeedbackCardsAppendPlannerWithoutReplacingVoice() throws {
+    func testEXP008FeedbackCardsKeepRemotePlannerAndVoice() throws {
         let voice = try XCTUnwrap(NativeAIFeedback(payload: [
             "source": AnyCodable("hybrid"),
             "presentation_target": AnyCodable("feedback_card"),
@@ -774,9 +1160,51 @@ final class SnapCountTests: XCTestCase {
             plannerFeedback: planner
         )
 
-        XCTAssertEqual(cards.count, 2)
-        XCTAssertEqual(cards.first, voice)
-        XCTAssertEqual(cards.last, planner)
+        XCTAssertEqual(cards, [voice, planner])
+    }
+
+    func testLOCALAI003FPlannerFeedbackIsNotShownAsStandaloneCard() throws {
+        let planner = try XCTUnwrap(NativeAIFeedback(payload: [
+            "source": AnyCodable("expression_planner"),
+            "presentation_target": AnyCodable("feedback_card"),
+            "candidate_id": AnyCodable("local-planner-expense-memory"),
+            "exposure_event_id": AnyCodable("local:local-planner-fingerprint"),
+            "emotion_line": AnyCodable("结合近期记录，慢慢记下就好。")
+        ]))
+        let voice = try XCTUnwrap(NativeAIFeedback(payload: [
+            "source": AnyCodable("hybrid"),
+            "presentation_target": AnyCodable("feedback_card"),
+            "emotion_line": AnyCodable("当前记录已经整理好。")
+        ]))
+
+        XCTAssertEqual(
+            NativeRecordExpressionFeedbackPolicy.plannerFeedbackToDisplayWithoutReplacingVoice(
+                existingVoice: voice,
+                plannerPreview: planner
+            ),
+            voice
+        )
+        XCTAssertEqual(NativeRecordExpressionFeedbackPolicy.feedbackCardsToRender(
+            companionMessage: nil,
+            voiceFeedback: voice,
+            plannerFeedback: planner
+        ), [voice])
+
+        XCTAssertTrue(NativeRecordExpressionFeedbackPolicy.feedbackCardsToRender(
+            companionMessage: "这笔也已经记下了。",
+            voiceFeedback: nil,
+            plannerFeedback: planner
+        ).isEmpty)
+        XCTAssertNil(NativeRecordExpressionFeedbackPolicy.companionFeedbackToReview(
+            companionMessage: "结合近期记录，慢慢记下就好。",
+            feedback: planner
+        ))
+
+        XCTAssertTrue(NativeRecordExpressionFeedbackPolicy.feedbackCardsToRender(
+            companionMessage: nil,
+            voiceFeedback: nil,
+            plannerFeedback: planner
+        ).isEmpty)
     }
 
     func testEXP008ReviewTargetsTheCardTheUserActuallySelected() throws {
@@ -1179,7 +1607,14 @@ final class SnapCountTests: XCTestCase {
                 "今日已花 ¥117.06（10 笔）"
             ]
         )
-        XCTAssertTrue(result.displayText.contains("观察：标记为首次光顾，方便日后回顾变化。"))
+        XCTAssertEqual(
+            result.displayText.split(separator: "\n").map(String.init),
+            [
+                "第一次见青集便利店，8元买份踏实。",
+                "💸 -¥8.00 · 青集便利店 · life",
+                "今日已花 ¥117.06（10 笔）"
+            ]
+        )
     }
 
     func testShortcutNotificationUsesFeedbackEmotionWhenCompanionIsMissing() throws {
@@ -1196,7 +1631,14 @@ final class SnapCountTests: XCTestCase {
         let payload = try JSONDecoder().decode(ShortcutUploadPayload.self, from: Data(json.utf8))
         let result = ShortcutUploadResult(payload: payload)
 
-        XCTAssertTrue(result.notificationText.hasPrefix("睡了5.73小时，比平时短些。下午补个觉吧。\n"))
+        XCTAssertEqual(
+            result.notificationText.split(separator: "\n").map(String.init),
+            [
+                "✨ 即时反馈",
+                "睡了5.73小时，比平时短些。下午补个觉吧。",
+                "🌙 已归档到睡眠记录"
+            ]
+        )
     }
 
     func testEXP012NativeUploadRequestsStructuredResultAndPreservesFoodVoice() async throws {
@@ -1221,7 +1663,11 @@ final class SnapCountTests: XCTestCase {
             UploadResultURLProtocolStub.responseData = Data()
         }
 
-        let notification = try await SnapCountUploadService(session: session).uploadNativeImage(
+        let notification = try await SnapCountUploadService(
+            session: session,
+            functionsURL: "https://example.test/functions/v1",
+            anonKey: "test-publishable-key"
+        ).uploadNativeImage(
             data: Data([0x01, 0x02]),
             uploadToken: "test-upload-token",
             captureKind: "photo_library",
@@ -1454,7 +1900,7 @@ final class SnapCountTests: XCTestCase {
             ))],
             acknowledgedFeedback: acknowledgedFeedback
         )
-        let state = AppState(
+        let state = makeRemoteExpressionState(
             recordRepository: repository,
             sessionProvider: { _ in Self.expressionTestSession }
         )
@@ -1517,7 +1963,7 @@ final class SnapCountTests: XCTestCase {
                 feedback: plannerPreview
             ))]
         )
-        let state = AppState(
+        let state = makeRemoteExpressionState(
             recordRepository: repository,
             sessionProvider: { _ in Self.expressionTestSession }
         )
@@ -1573,7 +2019,7 @@ final class SnapCountTests: XCTestCase {
             ))],
             acknowledgedFeedback: mismatchedAcknowledgement
         )
-        let state = AppState(
+        let state = makeRemoteExpressionState(
             recordRepository: repository,
             sessionProvider: { _ in Self.expressionTestSession }
         )
@@ -1639,7 +2085,7 @@ final class SnapCountTests: XCTestCase {
             ],
             acknowledgedFeedback: acknowledged
         )
-        let state = AppState(
+        let state = makeRemoteExpressionState(
             recordRepository: repository,
             sessionProvider: { _ in Self.expressionTestSession }
         )
@@ -1693,7 +2139,7 @@ final class SnapCountTests: XCTestCase {
             acknowledgedFeedback: acknowledgedFeedback,
             acknowledgementFailuresRemaining: 4
         )
-        let state = AppState(
+        let state = makeRemoteExpressionState(
             recordRepository: repository,
             sessionProvider: { _ in Self.expressionTestSession },
             expressionPlanAcknowledgementSleep: { _ in }
@@ -1744,7 +2190,7 @@ final class SnapCountTests: XCTestCase {
             acknowledgementFailuresRemaining: 1
         )
         var stateReference: AppState?
-        let state = AppState(
+        let state = makeRemoteExpressionState(
             recordRepository: repository,
             sessionProvider: { _ in Self.expressionTestSession },
             expressionPlanAcknowledgementSleep: { _ in
@@ -1784,7 +2230,7 @@ final class SnapCountTests: XCTestCase {
             expressionRecordDetail(feedback: acknowledgedFeedback),
             expressionRecordDetail(feedback: legacyFeedback)
         ])
-        let state = AppState(
+        let state = makeRemoteExpressionState(
             recordRepository: repository,
             sessionProvider: { _ in Self.expressionTestSession }
         )
@@ -1817,7 +2263,7 @@ final class SnapCountTests: XCTestCase {
                 feedback: previewFeedback
             ))]
         )
-        let state = AppState(
+        let state = makeRemoteExpressionState(
             recordRepository: repository,
             sessionProvider: { _ in Self.expressionTestSession }
         )
@@ -1870,7 +2316,7 @@ final class SnapCountTests: XCTestCase {
                 )
             }
         )
-        let state = AppState(
+        let state = makeRemoteExpressionState(
             recordRepository: repository,
             sessionProvider: { _ in Self.expressionTestSession }
         )
@@ -1912,7 +2358,7 @@ final class SnapCountTests: XCTestCase {
                 .unavailable(reason: "no_selected_candidate")
             ]
         )
-        let state = AppState(
+        let state = makeRemoteExpressionState(
             recordRepository: repository,
             sessionProvider: { _ in Self.expressionTestSession },
             expressionPlanAcknowledgementSleep: { _ in }
@@ -1970,7 +2416,7 @@ final class SnapCountTests: XCTestCase {
             ))],
             createReference: "data/record-1"
         )
-        let state = AppState(
+        let state = makeRemoteExpressionState(
             dashboardRepository: DashboardRepositoryStub(snapshot: DashboardSnapshot()),
             recordRepository: repository,
             sessionProvider: { _ in Self.expressionTestSession }
@@ -2019,7 +2465,7 @@ final class SnapCountTests: XCTestCase {
             ],
             createReference: "data/record-1"
         )
-        let state = AppState(
+        let state = makeRemoteExpressionState(
             dashboardRepository: DashboardRepositoryStub(snapshot: DashboardSnapshot()),
             recordRepository: repository,
             sessionProvider: { _ in Self.expressionTestSession }
@@ -2254,6 +2700,15 @@ final class SnapCountTests: XCTestCase {
         XCTAssertEqual(NativeManualRecordDraft.expenseCategories.map(\.id), ["food", "shopping", "transport", "entertainment", "life", "health", "education", "other"])
     }
 
+    func testManualUniversalValidationInterpolatesDomainLabels() {
+        var draft = NativeManualRecordDraft(kind: .universal, domainKey: "reading")
+        XCTAssertEqual(draft.validationMessage(domain: nil), "请输入有效阅读时长（分钟）")
+        draft.primaryValueText = "45"
+        XCTAssertEqual(draft.validationMessage(domain: nil), "请填写书名")
+        draft.dimension = "三体"
+        XCTAssertNil(draft.validationMessage(domain: nil))
+    }
+
     func testFinanceVocabularyKeepsDynamicValuesAndStablePrimaryCategories() {
         let vocabulary = [
             NativeFinanceVocabularyEntry(
@@ -2433,6 +2888,237 @@ final class SnapCountTests: XCTestCase {
         XCTAssertEqual(result.flatMap(\.records).map(\.reference), ["tx-1"])
     }
 
+    func testIOSV2POLISH002ARecordQueryIncludesCrossMonthDateWindowAndExcludesCandidates() {
+        let groups = [
+            NativeDayRecordGroup(dateKey: "2026-08-03", records: [
+                NativeDayRecord(id: "sport-1", reference: "data/sport-1", dateKey: "2026-08-03", kind: .sport, domainKey: "sport", title: "散步", subtitle: "30 分钟", value: "", timeLabel: nil, systemImage: "figure.run"),
+                NativeDayRecord(id: "staging-1", reference: "staging/staging-1", dateKey: "2026-08-03", kind: .staging, domainKey: "sport", title: "待确认", subtitle: "", value: "", timeLabel: nil, systemImage: "tray"),
+                NativeDayRecord(id: "pending-1", reference: "expense/pending-1", dateKey: "2026-08-03", kind: .expense, domainKey: "expense", title: "待补全", subtitle: "", value: "¥999", timeLabel: nil, systemImage: "clock", status: "pending")
+            ]),
+            NativeDayRecordGroup(dateKey: "2026-07-31", records: [
+                NativeDayRecord(id: "expense-1", reference: "expense/expense-1", dateKey: "2026-07-31", kind: .expense, domainKey: "expense", title: "晚餐", subtitle: "", value: "¥36.00", timeLabel: "19:10", systemImage: "creditcard")
+            ]),
+            NativeDayRecordGroup(dateKey: "2026-08-04", records: [
+                NativeDayRecord(id: "outside-1", reference: "data/outside-1", dateKey: "2026-08-04", kind: .reading, domainKey: "reading", title: "阅读", subtitle: "20 分钟", value: "", timeLabel: nil, systemImage: "book")
+            ]),
+            NativeDayRecordGroup(dateKey: "2026-07-29", records: [
+                NativeDayRecord(id: "outside-2", reference: "expense/outside-2", dateKey: "2026-07-29", kind: .expense, domainKey: "expense", title: "范围外", subtitle: "", value: "¥1.00", timeLabel: nil, systemImage: "creditcard")
+            ])
+        ]
+
+        let result = NativeRecordQuery.groups(
+            from: groups,
+            startingOn: "2026-07-31",
+            through: "2026-08-03"
+        )
+
+        XCTAssertEqual(result.map(\.dateKey), ["2026-08-03", "2026-07-31"])
+        XCTAssertEqual(result.flatMap(\.records).map(\.reference), ["data/sport-1", "expense/pending-1", "expense/expense-1"])
+        XCTAssertFalse(NativeRecordQuery.isFormal(groups[0].records[2]))
+        XCTAssertTrue(NativeRecordQuery.groups(
+            from: groups,
+            startingOn: "2026-08-03",
+            through: "2026-07-31"
+        ).isEmpty)
+    }
+
+    @MainActor
+    func testIOSV2POLISH002AF03CancelledPageAndSameMonthReentryAwaitReadableRecords() async {
+        let started = expectation(description: "历史月请求已开始")
+        var releaseFetch: CheckedContinuation<Void, Never>?
+        var requestCount = 0
+        let remote = NativeDayRecord(
+            id: "reentry-sport", reference: "data/reentry-sport", dateKey: "2000-01-05",
+            kind: .sport, domainKey: "sport", title: "散步", subtitle: "30 分钟", value: "",
+            timeLabel: "09:00", systemImage: "figure.walk", status: "done"
+        )
+        let repository = RecordRepositoryStub(onMonthFetch: { _ in
+            requestCount += 1
+            if requestCount == 1 {
+                await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+                    releaseFetch = continuation
+                    started.fulfill()
+                }
+            }
+            try Task.checkCancellation()
+            return NativeRecordMonthSnapshot(
+                groups: [NativeDayRecordGroup(dateKey: remote.dateKey, records: [remote])], details: [:]
+            )
+        })
+        let state = makeRemoteExpressionState(
+            recordRepository: repository,
+            localBindingRepository: TestLocalBindingRepositoryStub(userID: Self.expressionTestSession.user.id),
+            sessionProvider: { _ in Self.expressionTestSession }
+        )
+        state.isSignedIn = true
+        state.currentUserId = Self.expressionTestSession.user.id
+        authorizeRemoteReads(for: state.currentUserId, in: state)
+        let firstPage = Task { @MainActor in await state.loadRecordMonth("2000-01") }
+        await fulfillment(of: [started], timeout: 5)
+        guard releaseFetch != nil else { firstPage.cancel(); return }
+        firstPage.cancel()
+
+        let secondEntered = expectation(description: "新页面已进入同月读取")
+        let returnedBeforeFetch = expectation(description: "读取完成前不能提前返回")
+        returnedBeforeFetch.isInverted = true
+        var fetchReleased = false
+        let secondPage = Task { @MainActor in
+            secondEntered.fulfill()
+            await state.loadRecordMonth("2000-01")
+            if !fetchReleased { returnedBeforeFetch.fulfill() }
+        }
+        await fulfillment(of: [secondEntered], timeout: 5)
+        await fulfillment(of: [returnedBeforeFetch], timeout: 0.1)
+        fetchReleased = true
+        releaseFetch?.resume()
+        releaseFetch = nil
+        await secondPage.value
+        XCTAssertTrue(state.recordGroups(monthKey: "2000-01").flatMap(\.records).contains { $0.reference == remote.reference })
+        await firstPage.value
+        XCTAssertNil(state.recordMonthMessages["2000-01"], "页面取消不是业务读取失败")
+        XCTAssertNil(state.loadingRecordMonthKey)
+        XCTAssertEqual(repository.fetchMonthCount, 1, "同月重入复用正在执行的读取")
+    }
+
+    @MainActor
+    func testIOSV2POLISH002RetryReloadsCachedDateWindowAndClearsError() async {
+        let repository = RecordRepositoryStub()
+        let state = makeRemoteExpressionState(
+            recordRepository: repository,
+            localBindingRepository: TestLocalBindingRepositoryStub(userID: Self.expressionTestSession.user.id),
+            sessionProvider: { _ in Self.expressionTestSession }
+        )
+        state.isSignedIn = true
+        state.currentUserId = Self.expressionTestSession.user.id
+        authorizeRemoteReads(for: state.currentUserId, in: state)
+        await state.loadRecordDateWindow(around: "2000-01-05")
+        XCTAssertEqual(repository.fetchMonthKeys, ["2000-01", "1999-12"])
+        XCTAssertEqual(repository.fetchMonthCount, 2)
+
+        state.recordMonthMessages["1999-12"] = "暂时读取失败"
+        state.recordMonthMessages["2000-01"] = "暂时读取失败"
+        await state.loadRecordDateWindow(around: "2000-01-05", force: true)
+
+        XCTAssertEqual(repository.fetchMonthKeys, ["2000-01", "1999-12", "2000-01", "1999-12"])
+        XCTAssertEqual(repository.fetchMonthCount, 4)
+        XCTAssertNil(state.recordMonthMessages["1999-12"])
+        XCTAssertNil(state.recordMonthMessages["2000-01"])
+    }
+
+    func testIOSV2POLISH004DomainSceneKeepsMissingMeasurementsOutOfTotals() {
+        let measured = NativeDayRecord(
+            id: "sport-1", reference: "data/sport-1", dateKey: "2026-08-03", kind: .sport,
+            domainKey: "sport", title: "散步", subtitle: "", value: "", timeLabel: nil, systemImage: "figure.run"
+        )
+        let missing = NativeDayRecord(
+            id: "sport-2", reference: "data/sport-2", dateKey: "2026-08-03", kind: .sport,
+            domainKey: "sport", title: "拉伸", subtitle: "", value: "", timeLabel: nil, systemImage: "figure.run"
+        )
+        let candidate = NativeDayRecord(
+            id: "candidate-1", reference: "staging/candidate-1", dateKey: "2026-08-03", kind: .staging,
+            domainKey: "sport", title: "待确认", subtitle: "", value: "", timeLabel: nil, systemImage: "tray"
+        )
+        let measuredDetail = NativeRecordDetail(
+            id: measured.reference, rawId: measured.id, kind: "data", title: measured.title, subtitle: "",
+            value: "", detailRows: [], imageURL: nil, imageLoadError: false, imagePath: nil, imageHash: nil,
+            amount: nil, merchantName: nil, platform: nil, category: nil, paymentMethod: nil, recordDate: measured.dateKey,
+            note: nil, companionMessage: nil, accountId: nil, systemImage: "figure.run",
+            payload: ["duration_minutes": AnyCodable(30)], domainKey: "sport"
+        )
+        let missingDetail = NativeRecordDetail(
+            id: missing.reference, rawId: missing.id, kind: "data", title: missing.title, subtitle: "",
+            value: "", detailRows: [], imageURL: nil, imageLoadError: false, imagePath: nil, imageHash: nil,
+            amount: nil, merchantName: nil, platform: nil, category: nil, paymentMethod: nil, recordDate: missing.dateKey,
+            note: nil, companionMessage: nil, accountId: nil, systemImage: "figure.run", payload: [:], domainKey: "sport"
+        )
+
+        let result = NativeDomainScenePresentation.make(
+            domain: .sport,
+            dateKey: "2026-08-03",
+            weekGroups: [NativeDayRecordGroup(dateKey: "2026-08-03", records: [measured, missing, candidate])],
+            details: [measured.reference: measuredDetail, missing.reference: missingDetail],
+            isSignedIn: false,
+            isLoading: false,
+            errorMessage: nil,
+            todayKey: "2026-08-04"
+        )
+
+        XCTAssertEqual(result.records.map(\.reference), [measured.reference, missing.reference])
+        XCTAssertEqual(result.primaryValue, "记录字段缺失")
+        XCTAssertEqual(result.measurementNote, "1 条记录未提供运动时长")
+        XCTAssertNil(result.weeklyValues.first(where: { $0.dateKey == "2026-08-03" })?.value)
+    }
+
+    func testIOSV2POLISH004UnrecordedNonFinancialDaysAreNotPresentedAsZero() {
+        let food = NativeDomainScenePresentation.make(
+            domain: .food,
+            dateKey: "2026-08-03",
+            weekGroups: [],
+            details: [:],
+            isSignedIn: false,
+            isLoading: false,
+            errorMessage: nil,
+            todayKey: "2026-08-04"
+        )
+        let expense = NativeDomainScenePresentation.make(
+            domain: .expense,
+            dateKey: "2026-08-03",
+            weekGroups: [],
+            details: [:],
+            isSignedIn: false,
+            isLoading: false,
+            errorMessage: nil,
+            todayKey: "2026-08-04"
+        )
+
+        XCTAssertNil(food.weeklyValues.first(where: { $0.dateKey == "2026-08-03" })?.value)
+        XCTAssertEqual(expense.weeklyValues.first(where: { $0.dateKey == "2026-08-03" })?.value, 0)
+    }
+
+    func testIOSV2POLISH003ExpensePresentationDoesNotInventLocalIncomeZero() {
+        let expense = NativeDayRecord(
+            id: "expense-1", reference: "expense/expense-1", dateKey: "2026-08-03", kind: .expense,
+            domainKey: "expense", title: "晚餐", subtitle: "", value: "¥36.00", timeLabel: "19:10", systemImage: "creditcard"
+        )
+        let income = NativeDayRecord(
+            id: "income-1", reference: "income/income-1", dateKey: "2026-08-03", kind: .income,
+            domainKey: "income", title: "工资", subtitle: "", value: "¥100.00", timeLabel: nil, systemImage: "arrow.down.circle"
+        )
+        let pending = NativeDayRecord(
+            id: "expense-pending", reference: "expense/pending", dateKey: "2026-08-03", kind: .expense,
+            domainKey: "expense", title: "待补全", subtitle: "", value: "¥999.00", timeLabel: nil,
+            systemImage: "clock", transactionType: "expense", status: "pending"
+        )
+        let legacyIncome = NativeDayRecord(
+            id: "legacy-income", reference: "expense/legacy-income", dateKey: "2026-08-03", kind: .expense,
+            domainKey: "expense", title: "旧收入", subtitle: "", value: "¥500.00", timeLabel: nil,
+            systemImage: "arrow.down.circle", transactionType: "income", status: "done"
+        )
+        let result = NativeDomainScenePresentation.make(
+            domain: .expense,
+            dateKey: "2026-08-03",
+            weekGroups: [NativeDayRecordGroup(dateKey: "2026-08-03", records: [expense, income, pending, legacyIncome])],
+            details: [:],
+            isSignedIn: false,
+            isLoading: false,
+            errorMessage: nil,
+            todayKey: "2026-08-04"
+        )
+
+        XCTAssertEqual(result.primaryValue, "¥36.00")
+        XCTAssertEqual(result.secondaryValue, "本地暂不可读取")
+        XCTAssertEqual(result.records.map(\.reference), ["expense/expense-1", "expense/legacy-income", "income/income-1"])
+    }
+
+    @MainActor
+    func testIOSV2POLISH005AllDomainsMapToTheirOwnSceneAndCatPose() {
+        for domain in AppDomain.allCases {
+            let scene = JieziScene.tokens(for: domain.rawValue)
+            XCTAssertGreaterThanOrEqual(scene.background.count, 2, domain.rawValue)
+            XCTAssertEqual(JieziCatPose.forDomain(domain.rawValue).rawValue, domain.rawValue)
+        }
+    }
+
     func testDomainRepositoryProtocolSupportsStubInjection() async throws {
         let repository: DomainRepositoryProtocol = DomainRepositoryStub()
         let domains = try await repository.fetchDefinitions(accessToken: "test-token")
@@ -2513,7 +3199,7 @@ final class SnapCountTests: XCTestCase {
             today: "2026-07-26"
         )
 
-        XCTAssertEqual(todayItems.map(\.id), ["staging-today"])
+        XCTAssertEqual(todayItems.map(\.id), ["staging-unknown", "staging-today"])
         XCTAssertEqual(allItems.count, 3)
     }
 
@@ -3300,7 +3986,7 @@ final class SnapCountTests: XCTestCase {
     func testRegistrationConsentUsesCurrentLegalVersions() {
         let consent = NativeRegistrationConsent.current(at: Date(timeIntervalSince1970: 0))
         XCTAssertEqual(consent.termsVersion, "2026-07-19")
-        XCTAssertEqual(consent.privacyVersion, "2026-07-22")
+        XCTAssertEqual(consent.privacyVersion, "2026-11-11")
         XCTAssertEqual(consent.legalAcceptedAt, consent.sensitiveDataAcceptedAt)
     }
 
@@ -3372,10 +4058,13 @@ private final class RecordRepositoryStub: RecordRepositoryProtocol {
     private let acknowledgedFeedback: NativeAIFeedback?
     private let createReference: String
     private let onAcknowledgementStarted: (@MainActor () async -> Void)?
+    private let onMonthFetch: (@MainActor (String) async throws -> NativeRecordMonthSnapshot)?
     private var acknowledgementFailuresRemaining: Int
     private(set) var expressionPlanLookupCount = 0
     private(set) var acknowledgementCount = 0
     private(set) var createCount = 0
+    private(set) var fetchMonthCount = 0
+    private(set) var fetchMonthKeys: [String] = []
 
     init(
         details: [NativeRecordDetail] = [],
@@ -3383,7 +4072,8 @@ private final class RecordRepositoryStub: RecordRepositoryProtocol {
         acknowledgedFeedback: NativeAIFeedback? = nil,
         createReference: String = "expense/record-1",
         acknowledgementFailuresRemaining: Int = 0,
-        onAcknowledgementStarted: (@MainActor () async -> Void)? = nil
+        onAcknowledgementStarted: (@MainActor () async -> Void)? = nil,
+        onMonthFetch: (@MainActor (String) async throws -> NativeRecordMonthSnapshot)? = nil
     ) {
         self.details = details
         self.expressionPlanLookups = expressionPlanLookups
@@ -3391,10 +4081,14 @@ private final class RecordRepositoryStub: RecordRepositoryProtocol {
         self.createReference = createReference
         self.acknowledgementFailuresRemaining = acknowledgementFailuresRemaining
         self.onAcknowledgementStarted = onAcknowledgementStarted
+        self.onMonthFetch = onMonthFetch
     }
 
     func fetchMonth(monthKey: String, accessToken: String) async throws -> NativeRecordMonthSnapshot {
-        NativeRecordMonthSnapshot(groups: [], details: [:])
+        fetchMonthCount += 1
+        fetchMonthKeys.append(monthKey)
+        if let onMonthFetch { return try await onMonthFetch(monthKey) }
+        return NativeRecordMonthSnapshot(groups: [], details: [:])
     }
 
     func fetchDetail(reference: String, accessToken: String) async throws -> NativeRecordDetail {
@@ -3567,6 +4261,66 @@ private func makeRepaymentCycle(accountId: String, amount: Double, dueDate: Stri
         autoDebitAccountId: nil, autoConfirmRepayment: false, source: "screenshot",
         evidenceRecordId: nil, confidence: 0.95, note: "", confirmedAt: nil
     )
+}
+
+private extension SnapCountTests {
+    @MainActor
+    func makeRemoteExpressionState(
+        dashboardRepository: DashboardRepositoryProtocol = DashboardRepositoryStub(snapshot: DashboardSnapshot()),
+        recordRepository: RecordRepositoryProtocol,
+        localBindingRepository: LocalBindingRepository? = nil,
+        sessionProvider: NativeSessionProvider? = nil,
+        expressionPlanAcknowledgementSleep: @escaping NativeSleepProvider = { try await Task<Never, Never>.sleep(nanoseconds: $0) }
+    ) -> AppState {
+        let state = AppState(dashboardRepository: dashboardRepository, recordRepository: recordRepository,
+            localExpenseUseCase: LegacyRemoteExpenseUseCaseStub(),
+            localBindingRepository: localBindingRepository ?? TestLocalBindingRepositoryStub(userID: Self.expressionTestSession.user.id),
+            sessionProvider: sessionProvider ?? { _ in Self.expressionTestSession },
+            expressionPlanAcknowledgementSleep: expressionPlanAcknowledgementSleep)
+        state.isSignedIn = true
+        state.currentUserId = Self.expressionTestSession.user.id
+        state.refreshLocalSyncState()
+        return state
+    }
+
+    @MainActor
+    func authorizeRemoteReads(for userID: String, in state: AppState) {
+        state.localSyncState = LocalSyncState(
+            workspaceID: UUID(uuidString: "11111111-1111-1111-1111-111111111111")!,
+            binding: .bound(userID),
+            status: .synced,
+            conflictState: .none,
+            syncGeneration: 1,
+            pullCursor: nil,
+            lastSuccessfulSyncAt: Date(),
+            activeAttemptID: nil,
+            pendingMutationCount: 0
+        )
+    }
+}
+
+private final class TestLocalBindingRepositoryStub: LocalBindingRepository {
+    private let userID: String
+    private let profile = LocalProfile(
+        id: UUID(uuidString: "11111111-1111-1111-1111-111111111111")!,
+        createdAt: Date(), cloudUserID: nil, syncEnabled: false
+    )
+
+    init(userID: String) { self.userID = userID }
+
+    func activeProfile() throws -> LocalProfile { profile }
+    func workspaceSummary(profileID: UUID) throws -> LocalWorkspaceSummary {
+        LocalWorkspaceSummary(workspaceID: profileID, expenseCount: 0, accountCount: 0, pendingOutboxCount: 0)
+    }
+    func syncState(profileID: UUID) throws -> LocalSyncState {
+        LocalSyncState(
+            workspaceID: profileID, binding: .bound(userID), status: .synced, conflictState: .none,
+            syncGeneration: 1, pullCursor: nil, lastSuccessfulSyncAt: Date(), activeAttemptID: nil,
+            pendingMutationCount: 0
+        )
+    }
+    func confirmBinding(profileID: UUID, cloudUserID: String) throws -> LocalSyncState { try syncState(profileID: profileID) }
+    func disableSync(profileID: UUID) throws -> LocalSyncState { try syncState(profileID: profileID) }
 }
 
 private func makeInsightDay(

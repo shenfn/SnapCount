@@ -18,18 +18,28 @@ enum KeychainStoreError: LocalizedError {
 final class KeychainStore {
     static let shared = KeychainStore()
 
-    private let service = "com.jiezi.app"
+    private let service: String
 
-    private init() {}
+    init(service: String = "com.jiezi.app") {
+        self.service = service
+    }
 
     func setString(_ value: String, for key: String) throws {
+#if targetEnvironment(simulator)
+        UserDefaults.standard.set(value, forKey: simulatorStorageKey(for: key))
+        return
+#else
         let data = Data(value.utf8)
         var query = baseQuery(for: key)
+        query[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
         query[kSecValueData as String] = data
 
         let status = SecItemAdd(query as CFDictionary, nil)
         if status == errSecDuplicateItem {
-            let attributes: [String: Any] = [kSecValueData as String: data]
+            let attributes: [String: Any] = [
+                kSecValueData as String: data,
+                kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+            ]
             let updateStatus = SecItemUpdate(baseQuery(for: key) as CFDictionary, attributes as CFDictionary)
             guard updateStatus == errSecSuccess else {
                 throw KeychainStoreError.unexpectedStatus(updateStatus)
@@ -40,9 +50,13 @@ final class KeychainStore {
         guard status == errSecSuccess else {
             throw KeychainStoreError.unexpectedStatus(status)
         }
+#endif
     }
 
     func string(for key: String) throws -> String? {
+#if targetEnvironment(simulator)
+        return UserDefaults.standard.string(forKey: simulatorStorageKey(for: key))
+#else
         var query = baseQuery(for: key)
         query[kSecReturnData as String] = true
         query[kSecMatchLimit as String] = kSecMatchLimitOne
@@ -57,14 +71,26 @@ final class KeychainStore {
             throw KeychainStoreError.invalidData
         }
         return value
+#endif
     }
 
     func remove(_ key: String) throws {
+#if targetEnvironment(simulator)
+        UserDefaults.standard.removeObject(forKey: simulatorStorageKey(for: key))
+        return
+#else
         let status = SecItemDelete(baseQuery(for: key) as CFDictionary)
         guard status == errSecSuccess || status == errSecItemNotFound else {
             throw KeychainStoreError.unexpectedStatus(status)
         }
+#endif
     }
+
+#if targetEnvironment(simulator)
+    private func simulatorStorageKey(for key: String) -> String {
+        "\(service).simulator.\(key)"
+    }
+#endif
 
     private func baseQuery(for key: String) -> [String: Any] {
         [
@@ -78,4 +104,5 @@ final class KeychainStore {
 enum KeychainKeys {
     static let authSession = "auth_session"
     static let uploadToken = "upload_token"
+    static let byokQwenAPIKey = "byok_qwen_api_key"
 }

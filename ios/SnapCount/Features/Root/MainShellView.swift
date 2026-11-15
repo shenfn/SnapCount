@@ -1,0 +1,466 @@
+import SwiftUI
+
+/// 五域骨架主场景（IOS-V2-SHELL-001~004）：
+/// 域横滑为主体，顶底栏按实际高度参与安全区布局，背景和猫为独立层，
+/// 菜单四项与待确认以全屏覆盖层呈现，关闭后回到原域页。
+struct MainShellView: View {
+    @EnvironmentObject private var appState: AppState
+    @EnvironmentObject private var themeManager: JieziThemeManager
+    @State private var showManualRecordSheet = false
+    @State private var showCaptureOptions = false
+    @State private var showPhotoLibraryPicker = false
+    @State private var showCaptureResult = false
+    @State private var captureMessage = ""
+    @State private var captureFeedback: NativeAIFeedback?
+    @State private var captureRoute: AppOverlay?
+    @State private var captureIsError = false
+    @State private var showsCalendar = false
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
+    private var scene: JieziSceneTokens { JieziScene.tokens(for: appState.selectedDomain.rawValue) }
+
+    private var overlayItem: Binding<AppOverlay?> {
+        Binding(
+            get: { appState.presentedOverlay == .none ? nil : appState.presentedOverlay },
+            set: { appState.presentedOverlay = $0 ?? .none }
+        )
+    }
+
+    var body: some View {
+        NavigationStack(path: $appState.homePath) {
+            homeScene
+                .toolbar(.hidden, for: .navigationBar)
+                .navigationDestination(for: NativeRecordRoute.self) { route in
+                    RecordDetailView(reference: route.reference)
+                        .toolbar(.visible, for: .navigationBar)
+                }
+                .navigationDestination(for: NativeDomainDrillRoute.self) { route in
+                    NativeDomainDrillView(route: route)
+                        .toolbar(.visible, for: .navigationBar)
+                }
+        }
+        .task(id: appState.selectedDateKey) {
+            await appState.loadRecordDateWindow(around: appState.selectedDateKey)
+        }
+        .fullScreenCover(item: overlayItem) { overlay in
+            overlayDestination(overlay)
+        }
+        .sheet(isPresented: $showManualRecordSheet) {
+            UnifiedManualRecordEntry(domain: appState.selectedDomain)
+        }
+        .confirmationDialog("留下此刻", isPresented: $showCaptureOptions, titleVisibility: .visible) {
+            Button("手动记录") { showManualRecordSheet = true }
+            Button("从相册选择") { showPhotoLibraryPicker = true }
+            Button("取消", role: .cancel) {}
+        }
+        .sheet(isPresented: $showPhotoLibraryPicker) {
+            PhotoLibraryPicker { data in
+                showPhotoLibraryPicker = false
+                Task { await recognizeCapturedImage(data) }
+            } onCancel: { showPhotoLibraryPicker = false }
+        }
+        .sheet(isPresented: $showCaptureResult) {
+            LocalIntakeResultSheet(
+                notificationText: captureMessage,
+                feedback: captureFeedback,
+                isError: captureIsError,
+                onViewRecord: {
+                    showCaptureResult = false
+                    if let captureRoute { appState.presentedOverlay = captureRoute }
+                },
+                onDismiss: { showCaptureResult = false }
+            )
+        }
+    }
+
+    private var homeScene: some View {
+        ZStack {
+            DomainSceneView(domain: appState.selectedDomain)
+            if !dynamicTypeSize.isAccessibilitySize {
+                DomainCatView(domain: appState.selectedDomain)
+                    .padding(.top, 14)
+                    .padding(.trailing, JieziPrototypeLayout.metric_inset)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+            }
+            domainPager
+        }
+        .safeAreaInset(edge: .top, spacing: 0) {
+            VStack(spacing: 4) {
+                shellTopBar
+                if let warning = appState.localProjectionRefreshMessage {
+                    Button { Task { await appState.retryLocalProjectionRefresh() } } label: {
+                        Label(warning + " 点此重试读取", systemImage: "arrow.clockwise")
+                            .font(.footnote)
+                            .padding(.horizontal)
+                    }
+                }
+            }
+        }
+        .safeAreaInset(edge: .bottom, spacing: 0) { shellBottomBar }
+    }
+
+    // MARK: - 域横滑（SHELL-001）
+
+    private var domainPager: some View {
+        TabView(selection: $appState.selectedDomain) {
+            ForEach(AppDomain.allCases) { domain in
+                NativeDomainPageView(domain: domain)
+                    .tag(domain)
+            }
+        }
+        .tabViewStyle(.page(indexDisplayMode: .never))
+        // 原生分页负责跟手/吸附，不再把选中变化变成整个分页树的第二次动画。
+    }
+
+    // MARK: - 顶部栏（SHELL-002）
+
+    private var shellTopBar: some View {
+        VStack(spacing: 8) {
+            HStack(spacing: JieziSpacing.md) {
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("芥子").font(JieziType.prototypeBrand)
+                    Text("JIEZI").font(JieziFont.caption2).tracking(1.5)
+                }
+                .foregroundStyle(scene.foreground)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel("芥子")
+
+                Button { appState.presentedOverlay = .settings } label: {
+                    syncStatusIcon.frame(minHeight: 44)
+                }
+                .buttonStyle(.plain)
+                .accessibilityHint("查看同步设置")
+
+                Spacer()
+
+                Button { showsCalendar = true } label: {
+                    Image(systemName: "calendar")
+                        .frame(minWidth: 44, minHeight: 44)
+                        .background(scene.surface.opacity(0.55), in: Circle())
+                }
+                .foregroundStyle(scene.foreground)
+                .accessibilityLabel("选择日期，当前\(appState.selectedDateKey)")
+
+                Menu {
+                    Button { appState.presentedOverlay = .insights } label: {
+                        Label("观察", systemImage: "chart.xyaxis.line")
+                    }
+                    Button { appState.presentedOverlay = .records } label: {
+                        Label("记录", systemImage: "list.bullet.rectangle")
+                    }
+                    Button { appState.presentedOverlay = .wallet } label: {
+                        Label("钱包", systemImage: "wallet.pass")
+                    }
+                    Button { appState.presentedOverlay = .settings } label: {
+                        Label("设置", systemImage: "gearshape")
+                    }
+                } label: {
+                    Image(systemName: "ellipsis")
+                        .font(.headline)
+                        .foregroundStyle(scene.foreground)
+                        .frame(minWidth: 44, minHeight: 44)
+                        .background(scene.surface.opacity(0.55), in: Circle())
+                }
+                .accessibilityLabel("更多功能")
+            }
+            DomainDatePickerView(showsCalendar: $showsCalendar)
+        }
+        .padding(.horizontal, JieziPrototypeLayout.page_inset)
+        .padding(.top, 8)
+        .padding(.bottom, 10)
+    }
+
+    private var syncStatusIcon: some View {
+        Group {
+            if dynamicTypeSize.isAccessibilitySize {
+                Image(systemName: appState.isSynchronizingLocalData ? "arrow.triangle.2.circlepath" : "iphone")
+                    .frame(minWidth: 44, minHeight: 44)
+            } else {
+                Label(appState.isSynchronizingLocalData ? "同步中" : "本机数据",
+                      systemImage: appState.isSynchronizingLocalData ? "arrow.triangle.2.circlepath" : "iphone")
+                    .fixedSize()
+            }
+        }
+            .font(JieziFont.caption2)
+            .foregroundStyle(scene.muted)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(scene.surface.opacity(0.55), in: Capsule())
+            .accessibilityLabel(appState.isSynchronizingLocalData ? "本机数据，正在同步授权范围" : "本机数据，点击查看同步设置")
+    }
+
+    // MARK: - 底部栏（SHELL-003）
+
+    private var shellBottomBar: some View {
+        ViewThatFits(in: .horizontal) {
+            bottomControls(compact: false)
+            VStack(spacing: 0) {
+                domainPageButtons
+                bottomControls(compact: true)
+            }
+            VStack(spacing: 4) {
+                domainPageButtons
+                Text(appState.selectedDomain.title)
+                    .font(JieziFont.caption)
+                    .foregroundStyle(scene.foreground)
+                HStack {
+                    pendingButton
+                    Spacer(minLength: 8)
+                    addButton
+                }
+            }
+        }
+        .padding(.horizontal, JieziPrototypeLayout.page_inset)
+        .padding(.vertical, 8)
+    }
+
+    private func bottomControls(compact: Bool) -> some View {
+        ShellBottomLayout {
+            pendingButton
+
+            VStack(spacing: 5) {
+                if !compact {
+                    domainPageButtons
+                }
+                Menu {
+                    ForEach(AppDomain.allCases) { domain in
+                        Button { appState.selectedDomain = domain } label: {
+                            Label(domain.title, systemImage: domain == appState.selectedDomain ? "checkmark" : domain.systemImage)
+                        }
+                    }
+                } label: {
+                    VStack(spacing: 1) {
+                        Text(appState.selectedDomain.title).font(JieziFont.caption)
+                        if !dynamicTypeSize.isAccessibilitySize {
+                            Text(domainEnglishName).font(JieziFont.caption2)
+                        }
+                    }
+                    .fixedSize()
+                    .frame(minWidth: 44, minHeight: 44)
+                    .foregroundStyle(scene.foreground)
+                }
+                .accessibilityLabel("当前\(appState.selectedDomain.title)，选择领域")
+            }
+
+            addButton
+        }
+    }
+
+    private var pendingButton: some View {
+        Button {
+            appState.presentedOverlay = .inbox
+        } label: {
+            HStack(spacing: 7) {
+                Image(systemName: "tray.full")
+                    .font(.system(size: 15, weight: .semibold))
+                // 入口名与页面标题保持一致（页面已从「待确认」改名为「待处理」），
+                // 否则同一个地方两套叫法，用户会以为是两个入口。
+                Text("待处理")
+                    .font(JieziFont.caption)
+                    .fixedSize()
+                Text("\(appState.dashboard.pendingCount)")
+                    .font(JieziType.moneyInline.monospacedDigit())
+                    .contentTransition(.numericText())
+            }
+            .foregroundStyle(scene.foreground)
+            .padding(.horizontal, 12)
+            .frame(minHeight: 44)
+            .background(scene.surface.opacity(0.82), in: Capsule())
+            .overlay(Capsule().stroke(scene.accent.opacity(0.12), lineWidth: 1))
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("收件箱，\(appState.dashboard.pendingCount) 条待确认")
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var addButton: some View {
+        Button {
+            showCaptureOptions = true
+        } label: {
+            Image(systemName: "plus")
+                .font(.title3.weight(.semibold))
+                .foregroundStyle(.white)
+                .frame(width: JieziPrototypeLayout.add_button_size, height: JieziPrototypeLayout.add_button_size)
+                .background(JieziScene.expense.accent, in: Circle())
+        }
+        .accessibilityLabel("留下此刻")
+    }
+
+    @MainActor
+    private func recognizeCapturedImage(_ data: Data) async {
+        do {
+            let token = appState.localVisionMode == .hosted
+                ? try? KeychainStore.shared.string(for: KeychainKeys.uploadToken)
+                : nil
+            let outcome = try await appState.ingestHostedImageLocally(
+                data: data,
+                captureKind: "photo_library",
+                filename: "photo-library-upload.jpg",
+                uploadToken: token
+            )
+            captureMessage = outcome.notificationText ?? "识别结果已保存到本机。"
+            captureFeedback = outcome.feedback
+            captureIsError = false
+            captureRoute = switch outcome.result {
+            case .archived, .financialArchived: .records
+            case .staged, .financialPending: .inbox
+            }
+        } catch {
+            captureMessage = LocalImageRecognitionFailureMessage.result(
+                for: error,
+                persisted: appState.hasPersistedInputImage(data)
+            )
+            captureFeedback = nil
+            captureIsError = true
+            captureRoute = .inbox
+        }
+        showCaptureResult = true
+    }
+
+    private var domainPageButtons: some View {
+        HStack(spacing: 0) {
+            ForEach(AppDomain.allCases) { domain in
+                Button { selectPagerDomain(domain) } label: {
+                    Capsule()
+                        .fill(domain == appState.selectedDomain ? scene.pagerAccent : scene.foreground.opacity(0.30))
+                        .frame(
+                            width: domain == appState.selectedDomain ? JieziPrototypeLayout.selected_page_width : JieziPrototypeLayout.page_dot_size,
+                            height: JieziPrototypeLayout.page_dot_size
+                        )
+                        .frame(width: JieziPrototypeLayout.page_dot_hit_width, height: 44)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(domain.title)
+                .accessibilityAddTraits(domain == appState.selectedDomain ? .isSelected : [])
+            }
+        }
+        .fixedSize(horizontal: true, vertical: false)
+        .contentShape(Rectangle())
+        .highPriorityGesture(
+            DragGesture(minimumDistance: JieziPrototypeLayout.page_dot_drag_distance)
+                .onChanged { value in
+                    if let domain = AppDomain.pagerDomain(at: value.location.x) {
+                        selectPagerDomain(domain)
+                    }
+                }
+        )
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("领域选择")
+        .accessibilityValue(appState.selectedDomain.title)
+        .accessibilityAdjustableAction { direction in
+            guard let index = AppDomain.allCases.firstIndex(of: appState.selectedDomain) else { return }
+            let offset: Int
+            switch direction {
+            case .increment: offset = 1
+            case .decrement: offset = -1
+            @unknown default: return
+            }
+            let x = (CGFloat(index + offset) + 0.5) * JieziPrototypeLayout.page_dot_hit_width
+            if let domain = AppDomain.pagerDomain(at: x) { selectPagerDomain(domain) }
+        }
+    }
+
+    @MainActor
+    private func selectPagerDomain(_ domain: AppDomain) {
+        guard domain != appState.selectedDomain else { return }
+        // 小点可直接跨域，不能把每个途经领域排成横穿中间页的动画。
+        withAnimation(nil) { appState.selectedDomain = domain }
+        JieziHaptics.tap()
+    }
+
+    private var domainEnglishName: String {
+        switch appState.selectedDomain {
+        case .expense: return "Spending"
+        case .sleep: return "Sleep"
+        case .food: return "Food"
+        case .sport: return "Exercise"
+        case .reading: return "Reading"
+        }
+    }
+
+    // MARK: - 覆盖层（SHELL-004）
+    // inbox/records 覆盖层沿用 AppState 的 NavigationPath 绑定，
+    // 保证 openUnboundRecord / openDayRecord / 快捷指令路由的编程式推栈在覆盖层内继续生效。
+
+    @ViewBuilder
+    private func overlayDestination(_ overlay: AppOverlay) -> some View {
+        switch overlay {
+        case .none:
+            EmptyView()
+        case .inbox:
+            NavigationStack(path: $appState.inboxPath) {
+                overlayRoot { InboxView() }
+            }
+            .environmentObject(appState)
+            .environmentObject(themeManager)
+        case .records:
+            NavigationStack(path: $appState.recordsPath) {
+                overlayRoot {
+                    RecordsView(initialMonthKey: NativeLocalDate.monthKey(from: appState.selectedDateKey) ?? NativeMonthKey.current())
+                }
+            }
+            .environmentObject(appState)
+            .environmentObject(themeManager)
+        case .insights:
+            NavigationStack {
+                overlayRoot {
+                    InsightsView(
+                        initialMonthKey: NativeLocalDate.monthKey(from: appState.selectedDateKey) ?? NativeMonthKey.current(),
+                        initialDomainKey: appState.selectedDomain.rawValue
+                    )
+                }
+            }
+            .environmentObject(appState)
+            .environmentObject(themeManager)
+        case .wallet:
+            NavigationStack {
+                overlayRoot { AccountsView() }
+            }
+            .environmentObject(appState)
+            .environmentObject(themeManager)
+        case .settings:
+            NavigationStack {
+                overlayRoot { SettingsView() }
+            }
+            .environmentObject(appState)
+            .environmentObject(themeManager)
+        }
+    }
+
+    /// 覆盖层没有 Tab 栏兜底，左上角必须始终有关闭门禁（§15 导航门禁不可删）。
+    private func overlayRoot(@ViewBuilder content: () -> some View) -> some View {
+        content()
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button {
+                        appState.presentedOverlay = .none
+                    } label: {
+                        Label("关闭", systemImage: "xmark")
+                    }
+                }
+            }
+    }
+}
+
+/// 左右栏按较宽的一侧留位，中心组始终位于屏幕中线；空间不足交给 ViewThatFits 换行。
+private struct ShellBottomLayout: Layout {
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        assert(subviews.count == 3)
+        let sizes = subviews.map { $0.sizeThatFits(.unspecified) }
+        let side = max(sizes[0].width, sizes[2].width)
+        return CGSize(
+            width: max(proposal.width ?? 0, side * 2 + sizes[1].width + 16),
+            height: sizes.map(\.height).max() ?? 0
+        )
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        assert(subviews.count == 3)
+        let left = subviews[0].sizeThatFits(.unspecified)
+        let right = subviews[2].sizeThatFits(.unspecified)
+        subviews[0].place(at: CGPoint(x: bounds.minX + left.width / 2, y: bounds.midY), anchor: .center, proposal: .unspecified)
+        subviews[1].place(at: CGPoint(x: bounds.midX, y: bounds.midY), anchor: .center, proposal: .unspecified)
+        subviews[2].place(at: CGPoint(x: bounds.maxX - right.width / 2, y: bounds.midY), anchor: .center, proposal: .unspecified)
+    }
+}

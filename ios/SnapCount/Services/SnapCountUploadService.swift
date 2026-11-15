@@ -23,9 +23,17 @@ enum SnapCountUploadServiceError: LocalizedError {
 final class SnapCountUploadService {
     private let session: URLSession
     private let decoder = JSONDecoder()
+    private let functionsURLOverride: String?
+    private let anonKeyOverride: String?
 
-    init(session: URLSession = .shared) {
+    init(
+        session: URLSession = .shared,
+        functionsURL: String? = nil,
+        anonKey: String? = nil
+    ) {
         self.session = session
+        self.functionsURLOverride = functionsURL
+        self.anonKeyOverride = anonKey
     }
 
     func uploadShortcutImage(
@@ -130,6 +138,63 @@ final class SnapCountUploadService {
         )
     }
 
+    /// Ask the hosted text provider to compose a Companion for one local fact.
+    /// The endpoint is read-only and must not be used for business writes.
+    func generateLocalExpression(
+        currentFact: [String: Any],
+        plannerCandidate: [String: Any]?,
+        recentFacts: [[String: Any]],
+        localMemoryContext: [String: Any]?,
+        expressionPreferences: [String: Any],
+        clientLocalTime: String?,
+        clientCapturedAt: String?,
+        weekday: String?,
+        recentCompanionLines: [String],
+        accessToken: String
+    ) async throws -> Data {
+        let functionsURL = functionsURLOverride ?? AppConfig.supabaseFunctionsURL
+        let anonKey = anonKeyOverride ?? AppConfig.supabaseAnonKey
+        guard !functionsURL.isEmpty, !anonKey.isEmpty else {
+            throw SnapCountUploadServiceError.missingConfig
+        }
+        guard let baseURL = URL(string: functionsURL) else {
+            throw SnapCountUploadServiceError.invalidURL
+        }
+        let endpointPath = baseURL.path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        let url = endpointPath.hasSuffix("functions/v1")
+            ? baseURL.appendingPathComponent("ingest-receipt")
+            : baseURL.appendingPathComponent("functions/v1/ingest-receipt")
+        var body: [String: Any] = [
+            "action": "generate_local_expression",
+            "current_fact": currentFact,
+            "expression_preferences": expressionPreferences,
+            "recent_companion_lines": Array(recentCompanionLines.prefix(5)),
+        ]
+        if let plannerCandidate { body["planner_candidate"] = plannerCandidate }
+        if !recentFacts.isEmpty { body["recent_facts"] = Array(recentFacts.prefix(12)) }
+        if let localMemoryContext { body["local_memory_context"] = localMemoryContext }
+        if let clientLocalTime { body["client_local_time"] = clientLocalTime }
+        if let clientCapturedAt { body["client_captured_at"] = clientCapturedAt }
+        if let weekday { body["weekday"] = weekday }
+        var request = URLRequest(url: url)
+        request.timeoutInterval = 60
+        request.httpMethod = "POST"
+        request.setValue(anonKey, forHTTPHeaderField: "apikey")
+        request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        let (responseData, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            throw SnapCountUploadServiceError.invalidResponse
+        }
+        guard (200..<300).contains(http.statusCode) else {
+            throw SnapCountUploadServiceError.requestFailed(
+                displayErrorMessage(from: responseData, fallback: String(data: responseData, encoding: .utf8) ?? "", statusCode: http.statusCode)
+            )
+        }
+        return responseData
+    }
+
     private func uploadImage(
         data: Data,
         uploadToken: String,
@@ -161,14 +226,25 @@ final class SnapCountUploadService {
         responseMode: String,
         operation: String? = nil
     ) async throws -> Data {
-        guard !AppConfig.supabaseFunctionsURL.isEmpty, !AppConfig.supabaseAnonKey.isEmpty else {
+        let functionsURL = functionsURLOverride ?? AppConfig.supabaseFunctionsURL
+        let anonKey = anonKeyOverride ?? AppConfig.supabaseAnonKey
+        guard !functionsURL.isEmpty, !anonKey.isEmpty else {
             throw SnapCountUploadServiceError.missingConfig
         }
-        guard let baseURL = URL(string: AppConfig.supabaseFunctionsURL) else {
+        guard let baseURL = URL(string: functionsURL) else {
             throw SnapCountUploadServiceError.invalidURL
         }
 
-        let url = baseURL.appendingPathComponent("functions/v1/ingest-receipt")
+        // `SupabaseFunctionsURL` is configured as the functions base URL in the
+        // app project (`.../functions/v1`).  CI may instead provide the project
+        // root URL, so normalize both forms without ever duplicating the path.
+        let endpointPath = baseURL.path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        let url: URL
+        if endpointPath.hasSuffix("functions/v1") {
+            url = baseURL.appendingPathComponent("ingest-receipt")
+        } else {
+            url = baseURL.appendingPathComponent("functions/v1/ingest-receipt")
+        }
         let boundary = "Boundary-\(UUID().uuidString)"
         var multipart = MultipartFormData(boundary: boundary)
         if let uploadToken, !uploadToken.isEmpty {
@@ -189,8 +265,9 @@ final class SnapCountUploadService {
         )
 
         var request = URLRequest(url: url)
+        request.timeoutInterval = 60
         request.httpMethod = "POST"
-        request.setValue(AppConfig.supabaseAnonKey, forHTTPHeaderField: "apikey")
+        request.setValue(anonKey, forHTTPHeaderField: "apikey")
         request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
         request.httpBody = multipart.body
 
@@ -209,6 +286,9 @@ final class SnapCountUploadService {
     }
 
     private func displayErrorMessage(from data: Data, fallback: String, statusCode: Int) -> String {
+        if statusCode == 401 {
+            return "登录凭据未同步或已失效，请打开芥子重新登录后再运行快捷指令。"
+        }
         if let payload = try? decoder.decode(UploadErrorPayload.self, from: data) {
             if payload.code == "WORKER_RESOURCE_LIMIT" {
                 return "AI 识别资源不足。请重试一次，或换一张更清晰、范围更小的截图。"
@@ -241,16 +321,34 @@ struct ShortcutUploadResult {
             ?? payload.message
             ?? payload.error
             ?? "截图已上传，打开芥子查看结果。"
-        let text = ShortcutUploadResult.notificationText(
+        let mergedText = ShortcutUploadResult.notificationText(
             baseText: baseText,
             payload: payload
         )
-        notificationText = text
-        displayText = ShortcutUploadResult.shortcutDisplayText(
-            notificationText: text,
-            payload: payload
-        )
+        // Compose the block once: the notification body and the in-app result
+        // must show the same companion + fixed facts, not a re-merged copy.
+        displayText = mergedText
+        notificationText = mergedText
         route = payload.routePath
+    }
+
+    /// Archived Shortcut outcome. Compose the companion + fixed receipt facts
+    /// once and reuse it for both the result card and the system notification.
+    static func archived(
+        notificationText: String,
+        companionMessage: String?,
+        feedback: NativeAIFeedback?
+    ) -> ShortcutUploadResult {
+        let mergedText = expandedDisplayText(
+            baseText: notificationText,
+            companionMessage: companionMessage,
+            feedback: feedback
+        )
+        return ShortcutUploadResult(
+            displayText: mergedText,
+            notificationText: mergedText,
+            route: "records"
+        )
     }
 
     var notificationTitle: String {
@@ -265,68 +363,43 @@ struct ShortcutUploadResult {
     }
 
     var notificationBody: String {
-        let compact = notificationText
-            .split(whereSeparator: \.isNewline)
-            .joined(separator: " ")
-        return compact.count > 160 ? "\(compact.prefix(157))..." : compact
+        LocalIntakeNotificationText.boundedNotificationText(notificationText)
     }
 
     var compactDisplayText: String {
         "已发送到芥子。推荐点击通知回到 App 查看。"
     }
 
-    private static func shortcutDisplayText(notificationText: String, payload: ShortcutUploadPayload) -> String {
-        var lines: [String] = [notificationText]
+    static func expandedDisplayText(
+        baseText: String,
+        companionMessage: String?,
+        feedback: NativeAIFeedback?
+    ) -> String {
+        LocalIntakeNotificationText.merge(
+            baseText: baseText,
+            companionMessage: companionMessage,
+            feedbackParts: feedback.map { LocalIntakeNotificationFeedback($0) }
+        )
+    }
 
-        if let companion = payload.companionMessage,
-           !companion.isEmpty,
-           !notificationText.contains(companion) {
-            lines.append(companion)
-        }
-
-        if let utility = payload.aiFeedback?.utilityLine,
-           !utility.isEmpty,
-           !lines.contains(where: { $0.contains(utility) }) {
-            lines.append("观察：\(utility)")
-        }
-
-        if let reason = payload.aiFeedback?.detailReason,
-           !reason.isEmpty,
-           !lines.contains(where: { $0.contains(reason) }) {
-            lines.append("依据：\(reason)")
-        }
-
-        switch payload.route {
-        case "inbox":
-            lines.append("状态：需要打开芥子收件箱确认")
-        case "records":
-            lines.append("状态：已归档到芥子记录")
-        default:
-            lines.append("状态：已发送到芥子")
-        }
-
-        lines.append("提示：点通知可回到芥子；这张卡片只负责确认。")
-        return lines.joined(separator: "\n")
+    static func expandedDisplayText(
+        baseText: String,
+        companionMessage: String?,
+        feedback: ShortcutAIFeedback?
+    ) -> String {
+        LocalIntakeNotificationText.merge(
+            baseText: baseText,
+            companionMessage: companionMessage,
+            feedbackParts: feedback.map { LocalIntakeNotificationFeedback($0) }
+        )
     }
 
     private static func notificationText(baseText: String, payload: ShortcutUploadPayload) -> String {
-        var lines: [String] = []
-        let companion = payload.companionMessage?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        let emotion = payload.aiFeedback?.emotionLine?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        let expression = companion.isEmpty ? emotion : companion
-        if !expression.isEmpty, !baseText.contains(expression) {
-            lines.append(expression)
-        }
-        lines.append(contentsOf: baseText.split(whereSeparator: \.isNewline).map(String.init))
-
-        var seen = Set<String>()
-        return lines.compactMap { line -> String? in
-            let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !trimmed.isEmpty else { return nil }
-            let key = trimmed.replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
-            guard seen.insert(key).inserted else { return nil }
-            return trimmed
-        }.joined(separator: "\n")
+        LocalIntakeNotificationText.merge(
+            baseText: baseText,
+            companionMessage: payload.companionMessage,
+            feedbackParts: payload.aiFeedback.map { LocalIntakeNotificationFeedback($0) }
+        )
     }
 }
 
@@ -376,13 +449,17 @@ struct ShortcutUploadPayload: Decodable {
 }
 
 struct ShortcutAIFeedback: Decodable {
+    let icon: String?
     let badge: String?
+    let confidence: Double?
     let emotionLine: String?
     let utilityLine: String?
     let detailReason: String?
 
     enum CodingKeys: String, CodingKey {
+        case icon
         case badge
+        case confidence
         case emotionLine = "emotion_line"
         case utilityLine = "utility_line"
         case detailReason = "detail_reason"

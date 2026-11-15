@@ -20,6 +20,17 @@ enum LocalRecordSourceKind: String, Codable, Equatable {
     case imported
 }
 
+/// 用户确认候选时的已编辑事实；图片与候选身份仍由仓库中的原行提供。
+struct LocalStagingConfirmation {
+    let domainKey: String
+    let title: String
+    let summary: String
+    let payload: [String: AnyCodable]
+    let recordDate: String
+    let recordTime: String?
+    let note: String?
+}
+
 struct LocalRecordCommand {
     let id: UUID
     let domainKey: String
@@ -124,6 +135,10 @@ struct LocalRecordUpdateCommand {
     let recordTime: String?
     let note: String?
     let updatedAt: Date
+    var imageData: Data? = nil
+    var removeImage = false
+    var imagePath: String? = nil
+    var imageHash: String? = nil
 }
 
 struct LocalRecordDeleteCommand {
@@ -149,6 +164,12 @@ struct LocalRecord: Equatable {
     let localVersion: Int64
     let createdAt: Date
     let updatedAt: Date
+
+    var businessDate: String {
+        NativeSleepFacts.businessDate(
+            domainKey: domainKey, payload: (try? LocalRecordCodec.decode(payloadJSON)) ?? [:], fallback: recordDate
+        )
+    }
 }
 
 struct LocalRecordTombstone: Equatable {
@@ -157,6 +178,16 @@ struct LocalRecordTombstone: Equatable {
     let localVersion: Int64
     let deletedAt: Date
     let imagePath: String?
+}
+
+struct LocalImageCleanup: Equatable, Identifiable {
+    let id: UUID
+    let profileID: UUID
+    let imagePath: String
+    let attemptCount: Int
+    let lastError: String?
+    let createdAt: Date
+    let updatedAt: Date
 }
 
 struct LocalRecordMonth: Equatable {
@@ -357,6 +388,8 @@ struct LocalStagingOutcome: Equatable {
 enum LocalRecordIntakeOutcome: Equatable {
     case archived(LocalRecordOutcome)
     case staged(LocalStagingOutcome)
+    case financialPending(UUID)
+    case financialArchived(UUID)
 }
 
 enum LocalRecordIntakeRoute: Equatable {
@@ -385,6 +418,36 @@ enum LocalRecordIntakeRouter {
             return .staging
         }
         return .autoArchive
+    }
+}
+
+/// 记账域的自动归档规则，与云端 ingest-receipt 的判定保持一致：
+/// 支出要求金额、消费渠道、消费分类、支付方式齐全，收入只要求金额有效，
+/// 两者都要求置信度不低于 `0.70`，否则进入待补全。
+enum LocalFinancialAutoArchiveRule {
+    static let confidenceThreshold = 0.70
+
+    /// 金额用已经过 `LocalExpenseMapper` 解析的口径，避免再解析一次导致
+    /// `¥20.00` 这类带符号文本被判定为无效金额而永久无法自动归档。
+    static func shouldArchive(
+        kind: NativePendingEntryKind,
+        amountMinor: Int64,
+        payload: [String: AnyCodable],
+        confidence: Double?
+    ) -> Bool {
+        guard amountMinor > 0 else { return false }
+        guard let confidence, confidence >= confidenceThreshold else { return false }
+        switch kind {
+        case .expense:
+            return ["platform", "category", "payment_method"].allSatisfy { hasText(payload[$0]) }
+        case .income:
+            return true
+        }
+    }
+
+    private static func hasText(_ value: AnyCodable?) -> Bool {
+        guard let text = value?.stringValue?.trimmingCharacters(in: .whitespacesAndNewlines) else { return false }
+        return !text.isEmpty
     }
 }
 
@@ -422,9 +485,11 @@ enum LocalRecordCodec {
             }
         case "sleep":
             if let minutes = numberValue(normalized["sleep_minutes"]) {
-                normalized["sleep_minutes"] = AnyCodable(Int(minutes.rounded()))
+                guard let value = Int(exactly: minutes.rounded()) else { throw LocalDataError.invalidRecord }
+                normalized["sleep_minutes"] = AnyCodable(value)
             } else if let hours = numberValue(normalized["sleep_hours"]) {
-                normalized["sleep_minutes"] = AnyCodable(Int((hours * 60).rounded()))
+                guard let value = Int(exactly: (hours * 60).rounded()) else { throw LocalDataError.invalidRecord }
+                normalized["sleep_minutes"] = AnyCodable(value)
             }
             normalized.removeValue(forKey: "sleep_hours")
             if requireFacts && positiveNumber(normalized["sleep_minutes"]) == nil {
@@ -469,7 +534,9 @@ enum LocalRecordCodec {
         case let value as Int: return Double(value)
         case let value as Int64: return Double(value)
         case let value as NSNumber: return value.doubleValue.isFinite ? value.doubleValue : nil
-        case let value as String: return Double(value)
+        case let value as String:
+            guard let number = Double(value), number.isFinite else { return nil }
+            return number
         default: return nil
         }
     }
@@ -486,6 +553,15 @@ enum LocalRecordCodec {
 
 enum LocalRecordValidation {
     static let supportedDomainKeys: Set<String> = ["food", "sleep", "sport", "reading"]
+    static let supportedStagingDomainKeys = supportedDomainKeys.union(["wallet"])
+
+    static func validateWalletRepaymentCandidate(_ payload: [String: AnyCodable]) throws {
+        guard payload.string("status") == "paid",
+              payload.string("account_snapshot_kind") == "liability"
+                || payload.string("record_kind") == "liability_snapshot" else {
+            throw LocalDataError.invalidRecord
+        }
+    }
 
     static func validate(
         domainKey: String,
@@ -497,7 +573,7 @@ enum LocalRecordValidation {
         guard !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw LocalDataError.invalidRecord
         }
-        guard recordDate.range(of: #"^\d{4}-\d{2}-\d{2}$"#, options: .regularExpression) != nil else {
+        guard NativeLocalDate.monthKey(from: recordDate) != nil else {
             throw LocalDataError.invalidRecord
         }
         if let recordTime {

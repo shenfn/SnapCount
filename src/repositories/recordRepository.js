@@ -19,7 +19,7 @@ function normalizeLimit(value, fallback) {
 function financeMonthFilter(legacyDateColumn, start, end) {
   const startTimestamp = buildShanghaiOccurredAt(start, '00:00:00')
   const endTimestamp = buildShanghaiOccurredAt(end, '23:59:59')
-  return `and(occurred_at.gte.${startTimestamp},occurred_at.lte.${endTimestamp}),and(occurred_at.is.null,${legacyDateColumn}.gte.${start},${legacyDateColumn}.lte.${end})`
+  return `and(occurred_at.gte.${startTimestamp},occurred_at.lte.${endTimestamp}),and(occurred_at.is.null,${legacyDateColumn}.gte.${start},${legacyDateColumn}.lte.${end}),and(occurred_at.is.null,${legacyDateColumn}.is.null,created_at.gte.${startTimestamp},created_at.lte.${endTimestamp})`
 }
 
 function universalMonthFilter(start, end) {
@@ -103,7 +103,11 @@ async function saveRecord(client, rpcName, params, mapper, kind) {
 }
 
 export function mapIncomeRow(row = {}) {
-  const occurrence = resolveFinanceOccurrence({ occurredAt: row.occurred_at, date: row.income_date })
+  const occurrence = resolveFinanceOccurrence({
+    occurredAt: row.occurred_at,
+    date: row.income_date,
+    fallbackInstant: row.created_at,
+  })
   return {
     id: row.id,
     cat: row.category,

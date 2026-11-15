@@ -13,6 +13,12 @@ final class LocalDatabase {
         try Self.migrator.migrate(writer)
     }
 
+    /// 接管一个已打开的连接（校验副本用），并确保结构在当前版本。
+    init(queue: DatabaseQueue) throws {
+        writer = queue
+        try Self.migrator.migrate(writer)
+    }
+
     convenience init() throws {
         let directory = FileManager.default.urls(
             for: .applicationSupportDirectory,
@@ -34,7 +40,7 @@ final class LocalDatabase {
         )
     }
 
-    private static var migrator: DatabaseMigrator {
+    static var migrator: DatabaseMigrator {
         var migrator = DatabaseMigrator()
         migrator.registerMigration("local-v1") { database in
             try database.execute(sql: """
@@ -234,18 +240,65 @@ final class LocalDatabase {
                 ADD COLUMN missing_fields_json TEXT NOT NULL DEFAULT '[]';
                 """)
         }
-        migrator.registerMigration("local-v8-phase1-income") { database in
+        migrator.registerMigration("local-v8-image-intake") { database in
             try database.execute(sql: """
-                CREATE TABLE local_incomes (
+                CREATE TABLE local_image_intakes (
+                    id TEXT PRIMARY KEY NOT NULL,
+                    profile_id TEXT NOT NULL REFERENCES local_profiles(id) ON DELETE CASCADE,
+                    capture_kind TEXT NOT NULL,
+                    filename TEXT NOT NULL,
+                    status TEXT NOT NULL CHECK (status IN ('receiving', 'failed', 'completed')),
+                    image_path TEXT NOT NULL,
+                    image_hash TEXT NOT NULL,
+                    failure_message TEXT,
+                    attempt_count INTEGER NOT NULL DEFAULT 0 CHECK (attempt_count >= 0),
+                    created_at DATETIME NOT NULL,
+                    updated_at DATETIME NOT NULL
+                );
+
+                CREATE INDEX local_image_intakes_profile_status_idx
+                    ON local_image_intakes(profile_id, status, updated_at DESC);
+                """)
+        }
+        migrator.registerMigration("local-v9-image-intake-cleanup") { database in
+            try database.execute(sql: """
+                ALTER TABLE local_image_intakes
+                ADD COLUMN cleanup_message TEXT;
+                """)
+        }
+        migrator.registerMigration("local-v10-image-cleanup-queue") { database in
+            try database.execute(sql: """
+                CREATE TABLE local_image_cleanups (
+                    id TEXT PRIMARY KEY NOT NULL,
+                    profile_id TEXT NOT NULL REFERENCES local_profiles(id) ON DELETE CASCADE,
+                    image_path TEXT NOT NULL UNIQUE,
+                    attempt_count INTEGER NOT NULL DEFAULT 0 CHECK (attempt_count >= 0),
+                    last_error TEXT,
+                    created_at DATETIME NOT NULL,
+                    updated_at DATETIME NOT NULL
+                );
+
+                CREATE INDEX local_image_cleanups_profile_idx
+                    ON local_image_cleanups(profile_id, updated_at);
+                """)
+        }
+        migrator.registerMigration("local-v11-image-intake-operation-claim") { database in
+            try database.execute(sql: """
+                ALTER TABLE local_image_intakes ADD COLUMN operation_id TEXT;
+                """)
+        }
+        migrator.registerMigration("local-v12-income-facts-and-optional-entry-time") { database in
+            try database.execute(sql: """
+                CREATE TABLE local_income_records (
                     id TEXT PRIMARY KEY NOT NULL,
                     profile_id TEXT NOT NULL REFERENCES local_profiles(id) ON DELETE CASCADE,
                     account_id TEXT REFERENCES local_accounts(id),
                     amount_minor INTEGER NOT NULL CHECK (amount_minor > 0),
                     currency TEXT NOT NULL,
-                    income_category TEXT NOT NULL,
-                    source_name TEXT,
+                    source_name TEXT NOT NULL,
+                    category TEXT NOT NULL,
                     income_date TEXT NOT NULL,
-                    income_time TEXT,
+                    occurred_at DATETIME,
                     note TEXT,
                     local_version INTEGER NOT NULL DEFAULT 1 CHECK (local_version > 0),
                     created_at DATETIME NOT NULL,
@@ -253,33 +306,168 @@ final class LocalDatabase {
                     deleted_at DATETIME
                 );
 
-                CREATE INDEX local_incomes_profile_date_idx
-                    ON local_incomes(profile_id, income_date, income_time, created_at);
+                CREATE INDEX local_income_profile_date_idx
+                    ON local_income_records(profile_id, income_date, created_at);
+
+                CREATE TABLE local_account_entries_v12 (
+                    id TEXT PRIMARY KEY NOT NULL,
+                    profile_id TEXT NOT NULL REFERENCES local_profiles(id) ON DELETE CASCADE,
+                    account_id TEXT NOT NULL REFERENCES local_accounts(id),
+                    direction TEXT NOT NULL CHECK (direction IN ('in', 'out')),
+                    amount_minor INTEGER NOT NULL CHECK (amount_minor > 0),
+                    entry_kind TEXT NOT NULL,
+                    source_kind TEXT NOT NULL,
+                    source_id TEXT NOT NULL,
+                    occurred_at DATETIME,
+                    voided_at DATETIME
+                );
+
+                INSERT INTO local_account_entries_v12
+                    (id, profile_id, account_id, direction, amount_minor, entry_kind,
+                     source_kind, source_id, occurred_at, voided_at)
+                SELECT id, profile_id, account_id, direction, amount_minor, entry_kind,
+                       source_kind, source_id, occurred_at, voided_at
+                FROM local_account_entries;
+
+                DROP INDEX local_account_entries_active_source_idx;
+                DROP INDEX local_account_entries_account_idx;
+                DROP TABLE local_account_entries;
+                ALTER TABLE local_account_entries_v12 RENAME TO local_account_entries;
+
+                CREATE UNIQUE INDEX local_account_entries_active_source_idx
+                    ON local_account_entries(source_kind, source_id)
+                    WHERE voided_at IS NULL;
+
+                CREATE INDEX local_account_entries_account_idx
+                    ON local_account_entries(account_id, occurred_at);
                 """)
         }
-        migrator.registerMigration("local-v9-phase1-wallet-snapshots") { database in
+        migrator.registerMigration("local-v13-managed-account-configuration") { database in
+            try database.execute(sql: """
+                ALTER TABLE local_accounts ADD COLUMN institution TEXT NOT NULL DEFAULT '';
+                ALTER TABLE local_accounts ADD COLUMN last4 TEXT NOT NULL DEFAULT ''
+                    CHECK (last4 = '' OR (length(last4) = 4 AND last4 NOT GLOB '*[^0-9]*'));
+                ALTER TABLE local_accounts ADD COLUMN bill_day INTEGER
+                    CHECK (bill_day IS NULL OR bill_day BETWEEN 1 AND 31);
+                ALTER TABLE local_accounts ADD COLUMN payment_due_day INTEGER
+                    CHECK (payment_due_day IS NULL OR payment_due_day BETWEEN 1 AND 31);
+                ALTER TABLE local_accounts ADD COLUMN auto_debit_account_id TEXT REFERENCES local_accounts(id);
+                ALTER TABLE local_accounts ADD COLUMN auto_confirm_repayment BOOLEAN NOT NULL DEFAULT 0
+                    CHECK (auto_confirm_repayment IN (0, 1));
+                ALTER TABLE local_accounts ADD COLUMN grace_period_days INTEGER NOT NULL DEFAULT 0
+                    CHECK (grace_period_days >= 0);
+                ALTER TABLE local_accounts ADD COLUMN is_default_expense BOOLEAN NOT NULL DEFAULT 0
+                    CHECK (is_default_expense IN (0, 1));
+                ALTER TABLE local_accounts ADD COLUMN is_default_income BOOLEAN NOT NULL DEFAULT 0
+                    CHECK (is_default_income IN (0, 1));
+                ALTER TABLE local_accounts ADD COLUMN is_archived BOOLEAN NOT NULL DEFAULT 0
+                    CHECK (is_archived IN (0, 1));
+                ALTER TABLE local_accounts ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0;
+                ALTER TABLE local_accounts ADD COLUMN local_version INTEGER NOT NULL DEFAULT 1
+                    CHECK (local_version > 0);
+
+                CREATE UNIQUE INDEX local_accounts_default_expense_idx
+                    ON local_accounts(profile_id) WHERE is_default_expense = 1 AND is_archived = 0;
+                CREATE UNIQUE INDEX local_accounts_default_income_idx
+                    ON local_accounts(profile_id) WHERE is_default_income = 1 AND is_archived = 0;
+                """)
+        }
+        migrator.registerMigration("local-v14-repayment-cycles-and-payments") { database in
+            try database.execute(sql: """
+                DROP INDEX local_account_entries_active_source_idx;
+                CREATE UNIQUE INDEX local_account_entries_active_source_idx
+                    ON local_account_entries(source_kind, source_id, account_id)
+                    WHERE voided_at IS NULL;
+
+                CREATE TABLE local_repayment_cycles (
+                    id TEXT PRIMARY KEY NOT NULL,
+                    profile_id TEXT NOT NULL REFERENCES local_profiles(id) ON DELETE CASCADE,
+                    account_id TEXT NOT NULL REFERENCES local_accounts(id),
+                    cycle_month TEXT NOT NULL CHECK (cycle_month GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]'),
+                    statement_start_date TEXT,
+                    statement_end_date TEXT,
+                    due_date TEXT,
+                    statement_amount_minor INTEGER NOT NULL DEFAULT 0 CHECK (statement_amount_minor >= 0),
+                    paid_amount_minor INTEGER NOT NULL DEFAULT 0 CHECK (paid_amount_minor >= 0),
+                    remaining_amount_minor INTEGER NOT NULL DEFAULT 0 CHECK (remaining_amount_minor >= 0),
+                    carried_over_amount_minor INTEGER NOT NULL DEFAULT 0 CHECK (carried_over_amount_minor >= 0),
+                    original_statement_amount_minor INTEGER CHECK (original_statement_amount_minor IS NULL OR original_statement_amount_minor >= 0),
+                    min_payment_amount_minor INTEGER CHECK (min_payment_amount_minor IS NULL OR min_payment_amount_minor >= 0),
+                    refund_applied_amount_minor INTEGER NOT NULL DEFAULT 0 CHECK (refund_applied_amount_minor >= 0),
+                    status TEXT NOT NULL,
+                    auto_debit_account_id TEXT REFERENCES local_accounts(id),
+                    auto_confirm_repayment BOOLEAN NOT NULL DEFAULT 0 CHECK (auto_confirm_repayment IN (0, 1)),
+                    source TEXT NOT NULL,
+                    evidence_record_id TEXT REFERENCES local_records(id) ON DELETE SET NULL,
+                    confidence REAL,
+                    note TEXT NOT NULL DEFAULT '',
+                    confirmed_at DATETIME,
+                    local_version INTEGER NOT NULL DEFAULT 1 CHECK (local_version > 0),
+                    created_at DATETIME NOT NULL,
+                    updated_at DATETIME NOT NULL,
+                    UNIQUE(account_id, cycle_month)
+                );
+                CREATE INDEX local_repayment_cycles_profile_month_idx
+                    ON local_repayment_cycles(profile_id, cycle_month DESC);
+
+                CREATE TABLE local_liability_payments (
+                    id TEXT PRIMARY KEY NOT NULL,
+                    profile_id TEXT NOT NULL REFERENCES local_profiles(id) ON DELETE CASCADE,
+                    account_id TEXT NOT NULL REFERENCES local_accounts(id),
+                    statement_id TEXT REFERENCES local_repayment_cycles(id) ON DELETE SET NULL,
+                    debit_account_id TEXT REFERENCES local_accounts(id) ON DELETE SET NULL,
+                    amount_minor INTEGER NOT NULL CHECK (amount_minor > 0),
+                    overpayment_amount_minor INTEGER NOT NULL DEFAULT 0 CHECK (overpayment_amount_minor >= 0),
+                    paid_at DATETIME NOT NULL,
+                    source TEXT NOT NULL CHECK (source IN ('screenshot', 'manual', 'auto_debit_assumed', 'system_match')),
+                    evidence_record_id TEXT REFERENCES local_records(id) ON DELETE SET NULL,
+                    status TEXT NOT NULL CHECK (status IN ('pending_review', 'confirmed', 'voided')),
+                    note TEXT,
+                    created_at DATETIME NOT NULL,
+                    updated_at DATETIME NOT NULL
+                );
+                CREATE INDEX local_liability_payments_profile_time_idx
+                    ON local_liability_payments(profile_id, paid_at DESC);
+                CREATE INDEX local_liability_payments_cycle_status_idx
+                    ON local_liability_payments(statement_id, status);
+                """)
+        }
+        migrator.registerMigration("local-v15-account-reconciliation-time") { database in
+            try database.execute(sql: """
+                ALTER TABLE local_accounts ADD COLUMN last_reconciled_at DATETIME;
+                CREATE TRIGGER local_accounts_grace_days_insert_check
+                BEFORE INSERT ON local_accounts
+                WHEN NEW.grace_period_days NOT BETWEEN 0 AND 60
+                BEGIN SELECT RAISE(ABORT, 'grace period must be between 0 and 60 days'); END;
+                CREATE TRIGGER local_accounts_grace_days_update_check
+                BEFORE UPDATE OF grace_period_days ON local_accounts
+                WHEN NEW.grace_period_days NOT BETWEEN 0 AND 60
+                BEGIN SELECT RAISE(ABORT, 'grace period must be between 0 and 60 days'); END;
+                """)
+        }
+        // Released v8/v9 used a different financial schema. Run the bridge before
+        // v16 even when a previous launch already committed the newer v8-v15.
+        migrator.registerMigration("local-v26-legacy-financial-compatibility") { database in
+            try LocalLegacySchemaUpgrade.prepareWalletV16(database)
+            try LocalLegacySchemaUpgrade.copyLegacyIncome(database)
+        }
+        migrator.registerMigration("local-v16-wallet-snapshot-facts") { database in
             try database.execute(sql: """
                 CREATE TABLE local_wallet_snapshots (
                     id TEXT PRIMARY KEY NOT NULL,
                     profile_id TEXT NOT NULL REFERENCES local_profiles(id) ON DELETE CASCADE,
-                    account_id TEXT REFERENCES local_accounts(id),
-                    snapshot_kind TEXT NOT NULL CHECK (snapshot_kind IN ('asset', 'liability')),
-                    amount_minor INTEGER NOT NULL CHECK (amount_minor >= 0),
-                    minimum_payment_minor INTEGER CHECK (
-                        minimum_payment_minor IS NULL OR minimum_payment_minor >= 0
-                    ),
-                    currency TEXT NOT NULL,
-                    account_name TEXT NOT NULL,
-                    account_type TEXT NOT NULL,
-                    snapshot_date TEXT NOT NULL,
-                    snapshot_time TEXT,
-                    due_date TEXT,
-                    bill_day INTEGER CHECK (bill_day IS NULL OR (bill_day >= 1 AND bill_day <= 31)),
-                    note TEXT,
+                    title TEXT NOT NULL,
+                    summary TEXT NOT NULL,
                     payload_json TEXT NOT NULL,
+                    record_date TEXT NOT NULL,
+                    record_time TEXT,
+                    occurred_at TEXT,
+                    snapshot_balance_minor INTEGER NOT NULL CHECK (snapshot_balance_minor >= 0),
+                    currency TEXT NOT NULL,
+                    account_snapshot_kind TEXT NOT NULL CHECK (account_snapshot_kind IN ('asset', 'liability')),
+                    linked_account_id TEXT REFERENCES local_accounts(id) ON DELETE SET NULL,
                     image_path TEXT,
                     image_hash TEXT,
-                    source_kind TEXT NOT NULL,
                     local_version INTEGER NOT NULL DEFAULT 1 CHECK (local_version > 0),
                     created_at DATETIME NOT NULL,
                     updated_at DATETIME NOT NULL,
@@ -287,10 +475,261 @@ final class LocalDatabase {
                 );
 
                 CREATE INDEX local_wallet_snapshots_profile_date_idx
-                    ON local_wallet_snapshots(profile_id, snapshot_date, snapshot_time, created_at);
+                    ON local_wallet_snapshots(profile_id, record_date DESC, occurred_at DESC, created_at DESC);
+                """)
+            try LocalLegacySchemaUpgrade.finishWalletV16(database)
+        }
+        migrator.registerMigration("local-v17-wallet-snapshot-link-action") { database in
+            try database.execute(sql: """
+                ALTER TABLE local_wallet_snapshots
+                ADD COLUMN linked_action TEXT CHECK (linked_action IN ('create', 'link'));
+                """)
+            if try database.tableExists("local_wallet_snapshots_legacy_v9") {
+                try database.execute(sql: """
+                    UPDATE local_wallet_snapshots SET linked_action = 'link'
+                    WHERE linked_account_id IS NOT NULL
+                      AND id IN (SELECT id FROM local_wallet_snapshots_legacy_v9);
+                    """)
+            }
+        }
+        migrator.registerMigration("local-v18-wallet-snapshot-cycle-evidence") { database in
+            try database.execute(sql: """
+                ALTER TABLE local_repayment_cycles
+                ADD COLUMN evidence_wallet_snapshot_id TEXT
+                    REFERENCES local_wallet_snapshots(id) ON DELETE SET NULL;
+                """)
+        }
+        migrator.registerMigration("local-v19-wallet-repayment-staging") { database in
+            try database.execute(sql: """
+                CREATE TABLE local_staging_records_v19 (
+                    id TEXT PRIMARY KEY NOT NULL,
+                    profile_id TEXT NOT NULL REFERENCES local_profiles(id) ON DELETE CASCADE,
+                    domain_key TEXT NOT NULL CHECK (domain_key IN ('expense', 'wallet', 'food', 'sleep', 'sport', 'reading')),
+                    status TEXT NOT NULL CHECK (status IN ('pending_review', 'archived', 'discarded', 'failed')),
+                    confidence REAL CHECK (confidence IS NULL OR (confidence >= 0 AND confidence <= 1)),
+                    title TEXT NOT NULL,
+                    summary TEXT NOT NULL,
+                    payload_json TEXT NOT NULL,
+                    record_date TEXT NOT NULL,
+                    record_time TEXT,
+                    image_path TEXT,
+                    image_hash TEXT,
+                    created_at DATETIME NOT NULL,
+                    updated_at DATETIME NOT NULL,
+                    target_record_id TEXT,
+                    resolved_action TEXT,
+                    resolved_at DATETIME,
+                    source_kind TEXT NOT NULL DEFAULT 'ai_candidate'
+                        CHECK (source_kind IN ('manual', 'ai_auto_archive', 'ai_candidate', 'ai_confirmed', 'imported')),
+                    domain_version INTEGER NOT NULL DEFAULT 1 CHECK (domain_version > 0),
+                    evidence_json TEXT NOT NULL DEFAULT '[]',
+                    missing_fields_json TEXT NOT NULL DEFAULT '[]'
+                );
+                INSERT INTO local_staging_records_v19 (
+                    id, profile_id, domain_key, status, confidence, title, summary, payload_json,
+                    record_date, record_time, image_path, image_hash, created_at, updated_at,
+                    target_record_id, resolved_action, resolved_at, source_kind, domain_version,
+                    evidence_json, missing_fields_json
+                ) SELECT
+                    id, profile_id, domain_key, status, confidence, title, summary, payload_json,
+                    record_date, record_time, image_path, image_hash, created_at, updated_at,
+                    target_record_id, resolved_action, resolved_at, source_kind, domain_version,
+                    evidence_json, missing_fields_json
+                FROM local_staging_records;
+                DROP TABLE local_staging_records;
+                ALTER TABLE local_staging_records_v19 RENAME TO local_staging_records;
+                CREATE INDEX local_staging_profile_status_idx
+                    ON local_staging_records(profile_id, status, record_date, created_at);
+                CREATE INDEX local_staging_target_record_idx
+                    ON local_staging_records(target_record_id);
+                """)
+        }
+        migrator.registerMigration("local-v20-screenshot-payment-evidence") { database in
+            try database.execute(sql: """
+                ALTER TABLE local_liability_payments
+                ADD COLUMN evidence_staging_id TEXT REFERENCES local_staging_records(id) ON DELETE SET NULL;
+                CREATE UNIQUE INDEX local_liability_payments_evidence_staging_idx
+                    ON local_liability_payments(evidence_staging_id)
+                    WHERE evidence_staging_id IS NOT NULL;
+                """)
+        }
+        migrator.registerMigration("local-v21-history-migration-checkpoint") { database in
+            try database.execute(sql: """
+                CREATE TABLE local_history_migrations (
+                    profile_id TEXT PRIMARY KEY NOT NULL REFERENCES local_profiles(id) ON DELETE CASCADE,
+                    cloud_user_id TEXT NOT NULL,
+                    generation INTEGER NOT NULL CHECK (generation > 0),
+                    status TEXT NOT NULL CHECK (status IN ('running', 'paused', 'completed')),
+                    expected_scopes_json TEXT NOT NULL,
+                    source_cursors_json TEXT NOT NULL DEFAULT '{"nextByScope":{},"completedScopes":[]}',
+                    imported_row_count INTEGER NOT NULL DEFAULT 0 CHECK (imported_row_count >= 0),
+                    started_at DATETIME NOT NULL,
+                    updated_at DATETIME NOT NULL,
+                    completed_at DATETIME
+                );
+                """)
+        }
+        migrator.registerMigration("local-v22-financial-images-and-pending") { database in
+            try database.execute(sql: """
+                ALTER TABLE local_expenses ADD COLUMN image_path TEXT;
+                ALTER TABLE local_expenses ADD COLUMN image_hash TEXT;
+                ALTER TABLE local_income_records ADD COLUMN image_path TEXT;
+                ALTER TABLE local_income_records ADD COLUMN image_hash TEXT;
+                ALTER TABLE local_income_records ADD COLUMN source_pending_transaction_id TEXT;
+                CREATE UNIQUE INDEX local_income_pending_source_idx ON local_income_records(source_pending_transaction_id);
+                CREATE TABLE local_pending_transactions (
+                    id TEXT PRIMARY KEY NOT NULL,
+                    profile_id TEXT NOT NULL REFERENCES local_profiles(id),
+                    amount_minor INTEGER NOT NULL CHECK(amount_minor >= 0),
+                    currency TEXT NOT NULL, merchant_name TEXT NOT NULL,
+                    transaction_date TEXT NOT NULL, transaction_time TEXT, occurred_at DATETIME,
+                    created_at DATETIME NOT NULL, image_path TEXT, image_hash TEXT,
+                    status TEXT NOT NULL CHECK(status IN ('pending','done','converted','deleted')),
+                    target_kind TEXT, target_id TEXT,
+                    preferred_kind TEXT NOT NULL DEFAULT 'expense' CHECK(preferred_kind IN ('expense','income'))
+                );
+                """)
+        }
+        migrator.registerMigration("local-v23-unbound-expense") { database in
+            try database.execute(sql: """
+                CREATE TABLE local_expenses_unbound (
+                    id TEXT PRIMARY KEY NOT NULL,
+                    profile_id TEXT NOT NULL REFERENCES local_profiles(id) ON DELETE CASCADE,
+                    account_id TEXT REFERENCES local_accounts(id),
+                    amount_minor INTEGER NOT NULL CHECK (amount_minor > 0),
+                    currency TEXT NOT NULL, merchant_name TEXT NOT NULL,
+                    platform TEXT NOT NULL, category TEXT NOT NULL, payment_method TEXT NOT NULL,
+                    transaction_date TEXT NOT NULL, transaction_time TEXT, note TEXT,
+                    local_version INTEGER NOT NULL DEFAULT 1 CHECK (local_version > 0),
+                    created_at DATETIME NOT NULL, updated_at DATETIME NOT NULL, deleted_at DATETIME,
+                    image_path TEXT, image_hash TEXT
+                );
+                INSERT INTO local_expenses_unbound SELECT * FROM local_expenses;
+                DROP TABLE local_expenses;
+                ALTER TABLE local_expenses_unbound RENAME TO local_expenses;
+                CREATE INDEX local_expenses_profile_date_idx ON local_expenses(profile_id, transaction_date, created_at);
+                """)
+        }
+        migrator.registerMigration("local-v24-history-ledger-evidence") { database in
+            try database.execute(sql: """
+                ALTER TABLE local_account_entries ADD COLUMN is_voided INTEGER NOT NULL DEFAULT 0 CHECK(is_voided IN (0,1));
+                ALTER TABLE local_account_entries ADD COLUMN source_metadata_json TEXT;
+                ALTER TABLE local_liability_payments ADD COLUMN evidence_wallet_snapshot_id TEXT REFERENCES local_wallet_snapshots(id);
+                DROP INDEX local_account_entries_active_source_idx;
+                CREATE UNIQUE INDEX local_account_entries_active_source_idx
+                    ON local_account_entries(source_kind, source_id, account_id)
+                    WHERE voided_at IS NULL AND is_voided = 0;
+                """)
+        }
+        migrator.registerMigration("local-v25-history-migration-cache") { database in
+            try database.execute(sql: """
+                CREATE TABLE local_history_migration_cache (
+                    profile_id TEXT NOT NULL REFERENCES local_profiles(id) ON DELETE CASCADE,
+                    cloud_user_id TEXT NOT NULL,
+                    cache_kind TEXT NOT NULL CHECK(cache_kind IN ('page','image')),
+                    cache_key TEXT NOT NULL,
+                    payload_json TEXT NOT NULL,
+                    updated_at DATETIME NOT NULL,
+                    PRIMARY KEY(profile_id, cache_kind, cache_key)
+                );
+                """)
+        }
+        migrator.registerMigration("local-v27-history-unresolved-originals") { database in
+            try database.execute(sql: """
+                CREATE TABLE local_history_unresolved_records (
+                    id TEXT PRIMARY KEY NOT NULL,
+                    profile_id TEXT NOT NULL REFERENCES local_profiles(id) ON DELETE CASCADE,
+                    source_table TEXT NOT NULL CHECK(source_table IN ('data_records','staging_records')),
+                    source_id TEXT NOT NULL,
+                    source_json TEXT NOT NULL CHECK(json_valid(source_json) AND json_type(source_json) = 'object'),
+                    issues_json TEXT NOT NULL CHECK(json_valid(issues_json) AND json_type(issues_json) = 'array' AND json_array_length(issues_json) > 0),
+                    image_path TEXT, image_hash TEXT,
+                    created_at DATETIME NOT NULL, updated_at DATETIME NOT NULL,
+                    CHECK ((image_path IS NULL AND image_hash IS NULL) OR (image_path IS NOT NULL AND image_hash IS NOT NULL)),
+                    UNIQUE(profile_id, source_table, source_id)
+                );
+                CREATE INDEX local_history_unresolved_profile_idx ON local_history_unresolved_records(profile_id, created_at, id);
+                """)
+        }
+        // 云端 transactions / income_records 各有一列 companion_message（AI 陪伴文本）。
+        // 本机此前没有对应列，读模型一律写死 nil，历史迁移过来的记录永远看不到 AI 陪伴。
+        // 只加可空列，不涉及任何既有语义。
+        migrator.registerMigration("local-v28-financial-companion-message") { database in
+            try database.execute(sql: "ALTER TABLE local_expenses ADD COLUMN companion_message TEXT")
+            try database.execute(sql: "ALTER TABLE local_income_records ADD COLUMN companion_message TEXT")
+        }
+        // 待补全账单必须保留识别出的记账四要素，否则补全页只能让用户从零重填。
+        migrator.registerMigration("local-v29-pending-financial-facts") { database in
+            try database.execute(sql: "ALTER TABLE local_pending_transactions ADD COLUMN platform TEXT")
+            try database.execute(sql: "ALTER TABLE local_pending_transactions ADD COLUMN category TEXT")
+            try database.execute(sql: "ALTER TABLE local_pending_transactions ADD COLUMN payment_method TEXT")
+            try database.execute(sql: "ALTER TABLE local_pending_transactions ADD COLUMN income_category TEXT")
+        }
+        // 待补全账单要保留 AI 陪伴文本与结构化反馈，否则待确认详情页只能显示空白。
+        migrator.registerMigration("local-v30-pending-ai-feedback") { database in
+            try database.execute(sql: "ALTER TABLE local_pending_transactions ADD COLUMN companion_message TEXT")
+            try database.execute(sql: "ALTER TABLE local_pending_transactions ADD COLUMN ai_feedback TEXT")
+        }
+        // 感知指纹用于「重新截图同一笔账单」的判重：精确哈希只能挡住同一张图重传，
+        // 挡住不同字节但画面相同的截图。与 PWA 服务端 perceptual_hash 同算法（aHash 64 位）。
+        migrator.registerMigration("local-v31-financial-perceptual-hash") { database in
+            try database.execute(sql: "ALTER TABLE local_expenses ADD COLUMN perceptual_hash TEXT")
+            try database.execute(sql: "ALTER TABLE local_income_records ADD COLUMN perceptual_hash TEXT")
+            try database.execute(sql: "ALTER TABLE local_pending_transactions ADD COLUMN perceptual_hash TEXT")
+            // 与 PWA 的 review_reason = 'possible_duplicate' 同语义，供待确认页换成确认口径。
+            try database.execute(sql: "ALTER TABLE local_pending_transactions ADD COLUMN review_reason TEXT")
+        }
+        // 自动归档的记账同样要保留 AI 反馈：PWA 的 transactions / income_records 存了
+        // ai_feedback，详情页靠它渲染点评；本地表此前只有 pending 表有这一列，
+        // 归档后反馈直接丢失，详情页只剩一句机械摘要。
+        // companion_message 列早在 local-v27 就加过，但插入语句一直没写，等于空壳。
+        migrator.registerMigration("local-v32-financial-ai-feedback") { database in
+            try database.execute(sql: "ALTER TABLE local_expenses ADD COLUMN ai_feedback TEXT")
+            try database.execute(sql: "ALTER TABLE local_income_records ADD COLUMN ai_feedback TEXT")
+        }
+        // 本地 Companion/Planner 的记忆投影只保存结构化事实、偏好和趋势。
+        // 记忆不进入业务 outbox，也不依赖云端 profile；profile 删除时随本地事实级联删除。
+        migrator.registerMigration("local-v33-companion-memories") { database in
+            try database.execute(sql: """
+                CREATE TABLE local_companion_memories (
+                    id TEXT PRIMARY KEY NOT NULL,
+                    profile_id TEXT NOT NULL REFERENCES local_profiles(id) ON DELETE CASCADE,
+                    memory_key TEXT NOT NULL CHECK(length(trim(memory_key)) BETWEEN 1 AND 128),
+                    memory_type TEXT NOT NULL CHECK(length(trim(memory_type)) BETWEEN 1 AND 32),
+                    content_json TEXT NOT NULL CHECK(json_valid(content_json) AND json_type(content_json) = 'object'),
+                    source_table TEXT,
+                    source_id TEXT,
+                    confidence REAL NOT NULL CHECK(confidence >= 0 AND confidence <= 1),
+                    created_at DATETIME NOT NULL,
+                    updated_at DATETIME NOT NULL,
+                    deleted_at DATETIME,
+                    CHECK ((source_table IS NULL AND source_id IS NULL)
+                        OR (source_table IS NOT NULL AND source_id IS NOT NULL)),
+                    UNIQUE(profile_id, memory_key)
+                );
 
-                CREATE INDEX local_wallet_snapshots_profile_account_idx
-                    ON local_wallet_snapshots(profile_id, account_id, snapshot_date, created_at);
+                CREATE INDEX local_companion_memories_profile_idx
+                    ON local_companion_memories(profile_id, deleted_at, updated_at DESC, memory_key);
+
+                CREATE INDEX local_companion_memories_source_idx
+                    ON local_companion_memories(profile_id, source_table, source_id, deleted_at);
+                """)
+        }
+        migrator.registerMigration("local-v34-import-metadata") { database in
+            try database.execute(sql: """
+                CREATE TABLE local_import_metadata (
+                    id TEXT PRIMARY KEY NOT NULL,
+                    profile_id TEXT NOT NULL REFERENCES local_profiles(id) ON DELETE CASCADE,
+                    target_kind TEXT NOT NULL CHECK(target_kind IN ('expense', 'income')),
+                    target_id TEXT NOT NULL,
+                    source_record_id TEXT,
+                    source_fingerprint TEXT NOT NULL,
+                    source_payload_json TEXT NOT NULL CHECK(json_valid(source_payload_json)),
+                    imported_at DATETIME NOT NULL,
+                    UNIQUE(profile_id, target_kind, source_record_id),
+                    UNIQUE(profile_id, source_fingerprint)
+                );
+                CREATE INDEX local_import_metadata_target_idx ON local_import_metadata(profile_id, target_kind, target_id);
                 """)
         }
         return migrator

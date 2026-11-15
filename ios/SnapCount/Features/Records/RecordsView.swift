@@ -12,7 +12,7 @@ struct RecordsView: View {
     private var monthGroups: [NativeDayRecordGroup] { appState.recordGroups(monthKey: selectedMonthKey) }
     private var groups: [NativeDayRecordGroup] { query.groups(from: monthGroups) }
     private var availableKinds: [NativeDayRecordKind] { query.availableKinds(from: monthGroups) }
-    private var isLoadingMonth: Bool { appState.loadingRecordMonthKey == selectedMonthKey }
+    private var isLoadingMonth: Bool { appState.isLoadingRecordMonth(selectedMonthKey) }
     private var palette: JieziGeneratedPalette { themeManager.palette }
 
     init() {
@@ -26,7 +26,7 @@ struct RecordsView: View {
     var body: some View {
         ZStack {
             // 统一页面只依赖 recordGroups(monthKey:) 的本地读模型，登录态不改变业务树。
-            JieziGradient.pageBackground(palette: palette).ignoresSafeArea()
+            JieziTheme.pageBackground.ignoresSafeArea()
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: JieziSpacing.xl2) {
                     VStack(alignment: .leading, spacing: JieziSpacing.md) {
@@ -114,7 +114,7 @@ struct RecordsView: View {
             .refreshable { await appState.loadRecordMonth(selectedMonthKey, force: true) }
         }
         .navigationTitle("记录")
-        .toolbarBackground(.ultraThinMaterial, for: .navigationBar)
+        .toolbarBackground(JieziScene.expense.surface, for: .navigationBar)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Button {
@@ -296,6 +296,7 @@ struct RecordsView: View {
 
 struct RecordDetailView: View {
     @EnvironmentObject private var appState: AppState
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.dismiss) private var dismiss
     let reference: String
     @State private var imagePreview: ImagePreviewRoute?
@@ -443,12 +444,12 @@ struct RecordDetailView: View {
             }
         }
         .navigationTitle("记录详情")
-        .toolbarBackground(.ultraThinMaterial, for: .navigationBar)
+        .toolbarBackground(JieziScene.expense.surface, for: .navigationBar)
         .toolbar {
             if let detail {
                 if detail.isEditable {
                     Button {
-                        if detail.kind == "data" {
+                        if detail.kind == "data" || detail.status == "local" {
                             universalEditDetail = detail
                         } else {
                             editDraft = NativeRecordEditDraft(detail: detail)
@@ -521,7 +522,7 @@ struct RecordDetailView: View {
             }
             Button("取消", role: .cancel) {}
         } message: {
-            Text("删除后会同步处理关联账户流水，截图文件是否清理仍沿用现有服务端规则。")
+            Text("删除后会冲销关联账户流水。本机原图在没有其他记录引用后清理；清理失败可在收件箱重试。已上传的云副本受同步状态约束。")
         }
     }
 
@@ -538,7 +539,10 @@ struct RecordDetailView: View {
     }
 
     private func recordHeader(_ detail: NativeRecordDetail) -> some View {
-        HStack(spacing: 12) {
+        let layout = dynamicTypeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 12))
+            : AnyLayout(HStackLayout(spacing: 12))
+        return layout {
             Image(systemName: detail.systemImage)
                 .font(.title3.weight(.semibold))
                 .foregroundStyle(JieziTheme.brand)
@@ -548,29 +552,36 @@ struct RecordDetailView: View {
                 Text(detail.title).font(.headline)
                 Text(detail.subtitle).font(.caption).foregroundStyle(.secondary)
             }
-            Spacer()
+            if !dynamicTypeSize.isAccessibilitySize { Spacer() }
             if !detail.value.isEmpty {
                 Text(detail.value).font(.headline.monospacedDigit())
             }
         }
         .padding(16)
-        .background(.white.opacity(0.9), in: RoundedRectangle(cornerRadius: 8))
+        .jieziPrototypePanel()
     }
 
     private func detailSection(title: String, rows: [NativeDetailRow]) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             Text(title).font(.headline).padding(.bottom, 12)
             ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
-                HStack(alignment: .top, spacing: 16) {
-                    Text(row.label).font(.subheadline).foregroundStyle(.secondary).frame(width: 82, alignment: .leading)
-                    Text(row.value).font(.subheadline).frame(maxWidth: .infinity, alignment: .trailing).multilineTextAlignment(.trailing)
+                let layout = dynamicTypeSize.isAccessibilitySize
+                    ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
+                    : AnyLayout(HStackLayout(alignment: .top, spacing: 16))
+                layout {
+                    Text(row.label).font(.subheadline).foregroundStyle(.secondary)
+                        .frame(width: dynamicTypeSize.isAccessibilitySize ? nil : 82, alignment: .leading)
+                    Text(row.value).font(.subheadline)
+                        .frame(maxWidth: .infinity, alignment: dynamicTypeSize.isAccessibilitySize ? .leading : .trailing)
+                        .multilineTextAlignment(dynamicTypeSize.isAccessibilitySize ? .leading : .trailing)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
                 .padding(.vertical, 10)
                 if index < rows.count - 1 { Divider() }
             }
         }
         .padding(16)
-        .background(.white.opacity(0.9), in: RoundedRectangle(cornerRadius: 8))
+        .jieziPrototypePanel()
     }
 
     private func foodDishesSection(_ dishes: [NativeFoodDish]) -> some View {
@@ -597,7 +608,7 @@ struct RecordDetailView: View {
             }
         }
         .padding(16)
-        .background(.white.opacity(0.9), in: RoundedRectangle(cornerRadius: 8))
+        .jieziPrototypePanel()
     }
 
     private func accountBindingSection(
@@ -736,14 +747,14 @@ struct RecordDetailView: View {
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.white.opacity(0.9), in: RoundedRectangle(cornerRadius: 8))
+        .jieziPrototypePanel()
     }
 
     private func actionSection(_ detail: NativeRecordDetail) -> some View {
         HStack(spacing: 12) {
             if detail.isEditable {
                 Button {
-                    if detail.kind == "data" { universalEditDetail = detail }
+                    if detail.kind == "data" || detail.status == "local" { universalEditDetail = detail }
                     else { editDraft = NativeRecordEditDraft(detail: detail) }
                 } label: {
                     Label(detail.status == "pending" ? "补充信息" : "编辑", systemImage: "square.and.pencil")

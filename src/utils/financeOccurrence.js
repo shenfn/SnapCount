@@ -80,3 +80,19 @@ export function resolveFinanceOccurrence({
     hasExactTime: false,
   }
 }
+
+export function resolveStagingFinanceOccurrence(record = {}, payloadOverride = null) {
+  const extracted = record?.extracted && typeof record.extracted === 'object' ? record.extracted : {}
+  const nested = extracted.payload_jsonb && typeof extracted.payload_jsonb === 'object'
+    ? extracted.payload_jsonb
+    : {}
+  const payload = payloadOverride && typeof payloadOverride === 'object'
+    ? payloadOverride
+    : { ...nested, ...extracted }
+  return resolveFinanceOccurrence({
+    occurredAt: payload.occurred_at || payload.order_finished_at || record?.occurredAt || null,
+    date: payload.transaction_date || payload.income_date || payload.record_date || payload.date || null,
+    time: payload.transaction_time || payload.record_time || payload.time || null,
+    fallbackInstant: record?.createdAt || null,
+  })
+}

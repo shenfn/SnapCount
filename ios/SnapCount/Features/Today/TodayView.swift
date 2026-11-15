@@ -11,6 +11,9 @@ struct TodayView: View {
     @State private var uploadMessage: String?
     @State private var uploadMessageIsError = false
     @State private var showUploadResult = false
+    @State private var intakeFeedback: NativeAIFeedback?
+    @State private var showIntakeResult = false
+    @State private var intakeResultRoute: AppOverlay?
     @State private var showWidgetManager = false
     @State private var showDatePicker = false
     @State private var selectedDate = Date()
@@ -139,7 +142,9 @@ struct TodayView: View {
             pendingLocalImageData = nil
         }) {
             if let pendingLocalImageData {
-                ManualRecordSheet(initialImageData: pendingLocalImageData)
+                ManualRecordSheet(initialImageData: pendingLocalImageData) {
+                    _ = appState.discardLocalImageIntake(matching: pendingLocalImageData)
+                }
             } else {
                 ManualRecordSheet()
             }
@@ -174,6 +179,20 @@ struct TodayView: View {
         .alert(uploadMessageIsError ? "上传失败" : "上传完成", isPresented: $showUploadResult) {
             Button("好", role: .cancel) {}
         } message: { Text(uploadMessage ?? "") }
+        .sheet(isPresented: $showIntakeResult) {
+            LocalIntakeResultSheet(
+                notificationText: uploadMessage ?? "",
+                feedback: intakeFeedback,
+                isError: false,
+                onViewRecord: {
+                    showIntakeResult = false
+                    if let route = intakeResultRoute { appState.presentedOverlay = route }
+                },
+                onDismiss: { showIntakeResult = false }
+            )
+            .presentationDetents([.medium])
+            .presentationDragIndicator(.visible)
+        }
         .task {
             if appState.accounts.isEmpty { await appState.loadAccounts() }
         }
@@ -198,12 +217,12 @@ struct TodayView: View {
         if appState.isLoadingDashboard && appState.dashboard.monthCount == 0 {
             HStack(spacing: 10) {
                 ProgressView()
-                Text("正在同步 PWA 数据")
+                Text("正在读取本机记录")
             }
             .font(.subheadline)
             .foregroundStyle(JieziTheme.muted)
         } else if appState.isShowingCachedDashboard {
-            Text(appState.dashboardMessage ?? "正在展示本地数据，芥子会在后台同步最新内容。")
+            Text(appState.dashboardMessage ?? "正在展示已缓存的数据，可手动刷新。")
                 .font(.footnote)
                 .foregroundStyle(JieziTheme.gold)
         } else if let message = appState.dashboardMessage {
@@ -637,8 +656,26 @@ struct TodayView: View {
     private func uploadImageData(_ data: Data, captureKind: String, filename: String) async {
         isUploading = true
         defer { isUploading = false }
+        if appState.localVisionMode == .disabled {
+            do {
+                _ = try appState.receiveImageForManualProcessing(
+                    data: data, captureKind: captureKind, filename: filename
+                )
+                pendingLocalImageData = data
+                showManualRecordSheet = true
+                uploadMessage = "AI 识别已关闭；图片仅保存在本机，可直接手动记录。"
+                uploadMessageIsError = false
+            } catch {
+                uploadMessage = "本地图像保存失败：\(error.localizedDescription)"
+                uploadMessageIsError = true
+                showUploadResult = true
+            }
+            return
+        }
         do {
-            let uploadToken = try? KeychainStore.shared.string(for: KeychainKeys.uploadToken)
+            let uploadToken = appState.localVisionMode == .hosted
+                ? try? KeychainStore.shared.string(for: KeychainKeys.uploadToken)
+                : nil
             let localOutcome = try await appState.ingestHostedImageLocally(
                 data: data,
                 captureKind: captureKind,
@@ -646,41 +683,32 @@ struct TodayView: View {
                 uploadToken: uploadToken
             )
             switch localOutcome.result {
-            case .archived:
-                uploadMessage = "AI 识别结果已按高置信度规则自动记录到本机。"
-            case .staged:
-                uploadMessage = "AI 识别结果已保存到本地收件箱，请确认后归档。"
+            case .archived, .financialArchived:
+                uploadMessage = localOutcome.notificationText ?? "AI 识别结果已按高置信度规则自动记录到本机。"
+                intakeResultRoute = .records
+            case .staged, .financialPending:
+                uploadMessage = localOutcome.notificationText ?? "AI 识别结果已保存到本地收件箱，请确认后归档。"
+                intakeResultRoute = .inbox
             }
+            intakeFeedback = localOutcome.feedback
             uploadMessageIsError = false
             await appState.refreshLocalRecognitionProjection()
-        } catch LocalImageRecognitionError.unsupportedDomain(_) where appState.isSignedIn {
-            do {
-                guard let uploadToken = try KeychainStore.shared.string(for: KeychainKeys.uploadToken), !uploadToken.isEmpty else {
-                    throw SnapCountUploadServiceError.requestFailed("登录凭据未同步，请重新登录")
-                }
-                let result = try await SnapCountUploadService().uploadNativeImageResult(
-                    data: data,
-                    uploadToken: uploadToken,
-                    captureKind: captureKind,
-                    filename: filename
-                )
-                uploadMessage = result.notificationText
-                uploadMessageIsError = false
-                await appState.refreshDashboard()
-            } catch {
-                uploadMessage = "上传失败：\(error.localizedDescription)"
-                uploadMessageIsError = true
-            }
         } catch {
-            if !appState.isSignedIn {
-                pendingLocalImageData = data
-                showManualRecordSheet = true
-                return
-            }
-            uploadMessage = "AI 识别失败：\(error.localizedDescription)"
+            pendingLocalImageData = data
+            showManualRecordSheet = true
+            uploadMessage = LocalImageRecognitionFailureMessage.result(
+                for: error,
+                persisted: appState.hasPersistedInputImage(data)
+            )
             uploadMessageIsError = true
+            return
         }
-        showUploadResult = true
+        // 识别成功走结果浮层（含 AI 卡片）；失败保留系统 alert。
+        if uploadMessageIsError {
+            showUploadResult = true
+        } else {
+            showIntakeResult = true
+        }
     }
 
     private static let fullDateFormatter: DateFormatter = {

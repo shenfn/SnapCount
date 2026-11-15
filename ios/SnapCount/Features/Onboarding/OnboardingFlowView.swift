@@ -1,413 +1,394 @@
 import SwiftUI
-import UIKit
 
 struct OnboardingFlowView: View {
     @EnvironmentObject private var appState: AppState
     @Environment(\.openURL) private var openURL
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    @State private var activeStep: OnboardingStep = .capture
+    @State private var activeStep: OnboardingStep = .welcome
     @State private var completedSteps: Set<OnboardingStep> = []
-    @State private var openedTemplates: Set<ShortcutTemplateKind> = []
-    @State private var retentionDays = -1
-    @State private var companionPersona = "observer"
     @State private var localMessage: String?
     @State private var isSavingStep = false
-    @State private var showsCompletion = false
+    @State private var showsShortcutGuide = false
+    @State private var trialID: UUID?
+    @State private var trialReceipt: ShortcutTrialReceipt?
+    @State private var selectedTrigger = "轻点背面"
+
+    init(initialStep: OnboardingStep = .welcome) {
+        _activeStep = State(initialValue: initialStep)
+    }
 
     var body: some View {
         ZStack {
-            JieziPageBackground()
+            DomainSceneView(domain: .expense)
 
             VStack(spacing: 0) {
                 header
-                if showsCompletion {
-                    completionView
-                } else {
-                    timeline
-                }
+                stepPage
             }
         }
+        .safeAreaInset(edge: .bottom, spacing: 0) { stepFooter }
         .interactiveDismissDisabled()
         .sensoryFeedback(.success, trigger: completedSteps.count)
+        .sheet(isPresented: $showsShortcutGuide) {
+            NavigationStack {
+                ShortcutSetupView()
+                    .toolbar {
+                        ToolbarItem(placement: .topBarTrailing) {
+                            Button("完成") { showsShortcutGuide = false }
+                        }
+                    }
+            }
+            .environmentObject(appState)
+            .presentationDragIndicator(.visible)
+        }
         .task {
-            await appState.loadUserSettings()
-            retentionDays = currentRetention
-            companionPersona = appState.userSettings.companionPersona
-            await appState.refreshNotificationPermissionStatus()
+            appState.verifyShortcutCredential()
+            ShortcutTrialStore.shared.synchronize(scope: appState.onboardingScope)
+            refreshTrial()
         }
         .onChange(of: scenePhase) { _, phase in
             guard phase == .active else { return }
             appState.verifyShortcutCredential()
-            Task { await appState.refreshNotificationPermissionStatus() }
+            refreshTrial()
         }
+        .onChange(of: appState.onboardingScope) { _, scope in
+            cancelTrial()
+            ShortcutTrialStore.shared.synchronize(scope: scope)
+        }
+        .onDisappear { cancelTrial() }
     }
 
     private var header: some View {
-        HStack(alignment: .center, spacing: 14) {
-            ZStack {
-                Circle()
-                    .fill(JieziTheme.brand.opacity(0.11))
-                Image(systemName: "circle.hexagongrid.fill")
-                    .font(.title3.weight(.semibold))
-                    .foregroundStyle(JieziTheme.brand)
+        HStack(spacing: 14) {
+            HStack(spacing: 6) {
+                ForEach(OnboardingStep.allCases) { step in
+                    Capsule()
+                        .fill(step.rawValue <= activeStep.rawValue ? JieziTheme.brand : JieziTheme.brand.opacity(0.15))
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 4)
+                }
             }
-            .frame(width: 42, height: 42)
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text(showsCompletion ? "设置完成" : "开始使用芥子")
-                    .font(.headline)
-                    .foregroundStyle(JieziTheme.ink)
-                Text(showsCompletion ? "以后可在设置中重新查看" : "四步都可跳过，不影响正常记录")
-                    .font(.caption)
-                    .foregroundStyle(JieziTheme.muted)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("第 \(activeStep.rawValue + 1) 步，共 5 步")
+            Button(activeStep == .ready ? "完成" : "稍后设置") {
+                cancelTrial()
+                appState.finishOnboarding(skipped: activeStep != .ready)
             }
-
-            Spacer(minLength: 8)
-
-            Button(showsCompletion ? "进入首页" : "稍后") {
-                appState.finishOnboarding(skipped: !showsCompletion)
-            }
-            .font(.subheadline.weight(.semibold))
+            .font(JieziFont.caption)
             .foregroundStyle(JieziTheme.brand)
+            .fixedSize()
+            .padding(.horizontal, 12)
+            .frame(minHeight: 44)
+            .background(JieziScene.expense.surface.opacity(0.6), in: Capsule())
         }
         .padding(.horizontal, 20)
-        .padding(.top, 12)
-        .padding(.bottom, 12)
-        .background(.ultraThinMaterial)
-        .overlay(alignment: .bottom) {
-            Rectangle()
-                .fill(JieziTheme.line)
-                .frame(height: 1)
-        }
+        .padding(.vertical, 12)
     }
 
-    private var timeline: some View {
-        ScrollViewReader { proxy in
-            ScrollView {
-                VStack(alignment: .leading, spacing: 0) {
-                    intro
-
-                    ForEach(OnboardingStep.allCases) { step in
-                        timelineNode(step)
-                            .id(step.id)
-                    }
-
-                    Text("原图留存和 AI 语气会同步到账号；快捷指令与通知权限只作用于当前设备。")
-                        .font(.caption)
+    private var stepPage: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 22) {
+                if activeStep == .welcome || activeStep == .ready {
+                    JieziCatShape(pose: activeStep == .ready ? .reading : .expense)
+                        .stroke(JieziTheme.ink, style: StrokeStyle(lineWidth: 2.4, lineCap: .round, lineJoin: .round))
+                        .frame(width: 200, height: 200)
+                        .background {
+                            Circle().fill(JieziTheme.gold.opacity(0.2)).frame(width: 128, height: 128)
+                        }
+                        .frame(maxWidth: .infinity)
+                        .accessibilityHidden(true)
+                }
+                VStack(alignment: .leading, spacing: 12) {
+                    Text(activeStep == .welcome ? "留下事实，\n回看生活。" : activeStep.title)
+                        .font(JieziType.prototypeOnboarding)
+                        .foregroundStyle(JieziTheme.ink)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityAddTraits(.isHeader)
+                    Text(activeStep.detail)
+                        .font(JieziFont.body)
                         .foregroundStyle(JieziTheme.muted)
                         .fixedSize(horizontal: false, vertical: true)
-                        .padding(.leading, 52)
-                        .padding(.top, 8)
-                        .padding(.bottom, 32)
-                }
-                .padding(.horizontal, 18)
-            }
-            .scrollIndicators(.hidden)
-            .onChange(of: activeStep) { _, step in
-                withAnimation(JieziEasing.spring) {
-                    proxy.scrollTo(step.id, anchor: .center)
-                }
-            }
-        }
-    }
-
-    private var intro: some View {
-        VStack(alignment: .leading, spacing: 9) {
-            Text("让记录顺手发生")
-                .font(.title2.weight(.bold))
-                .foregroundStyle(JieziTheme.ink)
-            Text("截图或拍照后，芥子会整理成可查记录；不确定的内容会先放进中转站，由你决定。")
-                .font(.subheadline)
-                .foregroundStyle(JieziTheme.muted)
-                .fixedSize(horizontal: false, vertical: true)
-            ProgressView(
-                value: Double(completedSteps.count),
-                total: Double(OnboardingStep.allCases.count)
-            )
-            .tint(JieziTheme.brand)
-            .padding(.top, 4)
-        }
-        .padding(.top, 24)
-        .padding(.bottom, 22)
-    }
-
-    private func timelineNode(_ step: OnboardingStep) -> some View {
-        HStack(alignment: .top, spacing: 12) {
-            VStack(spacing: 0) {
-                timelineDot(step)
-                if step.rawValue < OnboardingStep.allCases.count - 1 {
-                    Rectangle()
-                        .fill(completedSteps.contains(step) ? JieziTheme.brand.opacity(0.45) : JieziTheme.line)
-                        .frame(width: 2)
-                        .frame(maxHeight: .infinity)
-                }
-            }
-            .frame(width: 22)
-
-            VStack(alignment: .leading, spacing: 0) {
-                Button {
-                    guard step.rawValue <= activeStep.rawValue || completedSteps.contains(step) else { return }
-                    activeStep = step
-                } label: {
-                    HStack(alignment: .top, spacing: 12) {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(step.eyebrow)
-                                .font(.caption2.weight(.bold))
-                                .foregroundStyle(stepColor(step))
-                            Text(step.title)
-                                .font(.headline)
-                                .foregroundStyle(JieziTheme.ink)
-                            Text(step.detail)
-                                .font(.caption)
-                                .foregroundStyle(JieziTheme.muted)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-                        Spacer(minLength: 8)
-                        if completedSteps.contains(step) {
-                            Image(systemName: "checkmark.circle.fill")
-                                .foregroundStyle(JieziTheme.brand)
-                        } else if activeStep == step {
-                            Text("当前")
-                                .font(.caption2.weight(.bold))
-                                .foregroundStyle(JieziTheme.brand)
-                        }
-                    }
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-
-                if activeStep == step {
-                    Divider()
-                        .overlay(JieziTheme.line)
-                        .padding(.vertical, 14)
-                    stepContent(step)
-                        .transition(.opacity.combined(with: .move(edge: .top)))
-                    if let localMessage {
-                        Text(localMessage)
-                            .font(.caption)
-                            .foregroundStyle(localMessage.contains("失败") || localMessage.contains("不可用") ? JieziTheme.coral : JieziTheme.muted)
-                            .fixedSize(horizontal: false, vertical: true)
-                            .padding(.top, 10)
+                    if activeStep == .welcome {
+                        Text("KEEP THE FACTS · LOOK BACK")
+                            .font(JieziFont.caption2).tracking(1.2).foregroundStyle(JieziTheme.muted)
                     }
                 }
+                stepContent(activeStep)
+                if let localMessage {
+                    Text(localMessage)
+                        .font(JieziFont.caption)
+                        .foregroundStyle(JieziTheme.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityAddTraits(.updatesFrequently)
+                }
             }
-            .padding(16)
-            .background(
-                .white.opacity(activeStep == step ? 0.88 : 0.62),
-                in: RoundedRectangle(cornerRadius: JieziRadius.Semantic.card, style: .continuous)
-            )
-            .overlay {
-                RoundedRectangle(cornerRadius: JieziRadius.Semantic.card, style: .continuous)
-                    .stroke(activeStep == step ? JieziTheme.brand.opacity(0.2) : JieziTheme.line, lineWidth: 1)
-            }
-            .opacity(step.rawValue > activeStep.rawValue ? 0.58 : 1)
-            .padding(.bottom, 14)
+            .padding(.horizontal, 22)
+            .padding(.top, 24)
+            .padding(.bottom, 24)
         }
-        .animation(JieziEasing.spring, value: activeStep)
-        .animation(JieziEasing.spring, value: completedSteps)
-    }
-
-    private func timelineDot(_ step: OnboardingStep) -> some View {
-        ZStack {
-            Circle()
-                .fill(completedSteps.contains(step) ? JieziTheme.brand : JieziTheme.paper)
-            Circle()
-                .stroke(stepColor(step), lineWidth: activeStep == step ? 2 : 1)
-            if completedSteps.contains(step) {
-                Image(systemName: "checkmark")
-                    .font(.caption2.bold())
-                    .foregroundStyle(.white)
-            } else {
-                Image(systemName: step.systemImage)
-                    .font(.caption2.weight(.semibold))
-                    .foregroundStyle(stepColor(step))
-            }
-        }
-        .frame(width: 22, height: 22)
+        .scrollIndicators(.hidden)
+        .id(activeStep)
+        .transition(.opacity)
+        .animation(reduceMotion ? nil : .easeInOut(duration: 0.25), value: activeStep)
     }
 
     @ViewBuilder
     private func stepContent(_ step: OnboardingStep) -> some View {
         switch step {
-        case .capture:
-            captureStep
-        case .retention:
-            retentionStep
-        case .notification:
-            notificationStep
-        case .companion:
-            companionStep
+        case .welcome: welcomeStep
+        case .flow: recordFlowStep
+        case .shortcuts: shortcutSetupStep
+        case .trial: trialStep
+        case .ready: readyStep
         }
     }
 
-    private var captureStep: some View {
+    private var welcomeStep: some View {
+        VStack(alignment: .leading, spacing: 13) {
+            Label("无需登录即可使用本机记录", systemImage: "iphone.gen3")
+                .font(JieziType.cardTitle)
+                .foregroundStyle(JieziTheme.brand)
+            Text("芥子把生活记录保存在本机。你可以先开始使用，之后再决定是否登录同步。")
+                .font(JieziFont.body)
+                .foregroundStyle(JieziTheme.muted)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private var recordFlowStep: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            onboardingFactCard(
+                title: "需要确认的候选",
+                detail: "候选先留在收件箱，确认前不计入正式统计。",
+                systemImage: "tray.full"
+            )
+            onboardingFactCard(
+                title: "自动归档的正式记录",
+                detail: "符合现有高置信规则并完成归档的记录会正常计入统计。",
+                systemImage: "checkmark.circle"
+            )
+            onboardingFactCard(
+                title: "AI 的边界",
+                detail: "AI 可整理或表达内容；金额、日期和统计仍以保存的业务事实为准。",
+                systemImage: "sparkles"
+            )
+        }
+    }
+
+    private func onboardingFactCard(title: String, detail: String, systemImage: String) -> some View {
+        HStack(alignment: .top, spacing: 11) {
+            Image(systemName: systemImage)
+                .foregroundStyle(JieziTheme.brand)
+                .frame(width: 24)
+                .padding(.top, 2)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title).font(JieziType.cardTitle).foregroundStyle(JieziTheme.ink)
+                Text(detail).font(JieziFont.caption).foregroundStyle(JieziTheme.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(JieziScene.expense.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+    }
+
+    private var shortcutSetupStep: some View {
         VStack(alignment: .leading, spacing: 12) {
             Label(
-                appState.hasUploadToken ? "登录凭据已同步到本机" : "登录凭据尚未同步",
-                systemImage: appState.hasUploadToken ? "key.fill" : "key.slash"
+                shortcutCredentialText,
+                systemImage: appState.isSignedIn && appState.hasUploadToken ? "key.fill" : "key.slash"
             )
             .font(.caption.weight(.semibold))
-            .foregroundStyle(appState.hasUploadToken ? JieziTheme.brand : JieziTheme.coral)
+            .foregroundStyle(appState.isSignedIn && appState.hasUploadToken ? JieziTheme.brand : JieziTheme.muted)
 
-            ForEach(ShortcutTemplateKind.allCases) { template in
-                Button {
-                    openShortcutTemplate(template)
-                } label: {
-                    HStack(spacing: 12) {
-                        Image(systemName: template.systemImage)
-                            .font(.body.weight(.semibold))
-                            .foregroundStyle(template == .photo ? JieziTheme.gold : JieziTheme.brand)
-                            .frame(width: 34, height: 34)
-                            .background((template == .photo ? JieziTheme.gold : JieziTheme.brand).opacity(0.11), in: Circle())
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(template.title)
-                                .font(.subheadline.weight(.semibold))
-                            Text(template.detail)
-                                .font(.caption)
-                                .foregroundStyle(JieziTheme.muted)
+            setupCard(number: 1, title: "添加记录快捷指令", detail: "安装会打开系统快捷指令；返回不代表已经安装完成。") {
+                ForEach(ShortcutTemplateKind.allCases) { template in
+                    Button {
+                        openShortcutTemplate(template)
+                    } label: {
+                        HStack(spacing: 12) {
+                            Image(systemName: template.systemImage)
+                                .font(.body.weight(.semibold))
+                                .foregroundStyle(template == .photo ? JieziTheme.gold : JieziTheme.brand)
+                                .frame(width: 34, height: 34)
+                                .background((template == .photo ? JieziTheme.gold : JieziTheme.brand).opacity(0.11), in: Circle())
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(template.title)
+                                    .font(.subheadline.weight(.semibold))
+                                Text(template.detail)
+                                    .font(.caption)
+                                    .foregroundStyle(JieziTheme.muted)
+                            }
+                            Spacer(minLength: 8)
+                            Image(systemName: "arrow.up.forward")
+                                .foregroundStyle(JieziTheme.brand)
                         }
-                        Spacer(minLength: 8)
-                        Image(systemName: openedTemplates.contains(template) ? "checkmark" : "arrow.up.forward")
-                            .foregroundStyle(JieziTheme.brand)
+                        .padding(.vertical, 5)
                     }
-                    .padding(.vertical, 5)
+                    .buttonStyle(.plain)
                 }
-                .buttonStyle(.plain)
             }
 
-            nextButton("继续", systemImage: "arrow.down") {
-                await advance(from: .capture)
+            setupCard(number: 2, title: "选一个触发方式", detail: "这里显示设置方法，实际配置需要在系统中完成。") {
+                ForEach(["轻点背面", "操作按钮", "共享菜单"], id: \.self) { trigger in
+                    Button { selectedTrigger = trigger } label: {
+                        HStack(spacing: 10) {
+                            Image(systemName: selectedTrigger == trigger ? "largecircle.fill.circle" : "circle")
+                            Text(trigger).font(JieziFont.body)
+                            Spacer(minLength: 0)
+                        }
+                        .foregroundStyle(JieziTheme.brand)
+                        .frame(minHeight: 44)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityAddTraits(selectedTrigger == trigger ? .isSelected : [])
+                }
+                Text(triggerInstructions).font(JieziFont.caption).foregroundStyle(JieziTheme.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+                Link("查看 Apple 设置说明", destination: triggerHelpURL)
+                    .font(JieziFont.caption).frame(minHeight: 44)
+            }
+
+            setupCard(number: 3, title: "只交给芥子你选的图片", detail: "首次运行时，按系统提示确认图片传递权限。芥子不会在这里申请整个相册的访问权限。") {
+                Label("权限与实际输入以系统运行时提示为准", systemImage: "hand.raised")
+                    .font(JieziFont.caption).foregroundStyle(JieziTheme.muted)
+            }
+
+            Button {
+                showsShortcutGuide = true
+            } label: {
+                Label("查看完整设置步骤", systemImage: "list.number")
+                    .font(JieziType.button)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 11)
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(JieziTheme.brand)
+            .background(JieziTheme.brand.opacity(0.08), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+
+        }
+    }
+
+    private var trialStep: some View {
+        VStack(alignment: .leading, spacing: 13) {
+            VStack(spacing: 12) {
+                Image(systemName: "doc.viewfinder").font(JieziType.display)
+                Text("运行已安装的快捷指令\n发送一张真实图片")
+                    .font(JieziFont.caption).multilineTextAlignment(.center)
+            }
+            .foregroundStyle(JieziTheme.muted)
+            .frame(width: 200, height: 180)
+            .background(JieziTheme.brand.opacity(0.05), in: RoundedRectangle(cornerRadius: 30))
+            .overlay(RoundedRectangle(cornerRadius: 30).stroke(JieziTheme.brand.opacity(0.2), style: StrokeStyle(lineWidth: 1, dash: [5, 5])))
+            .frame(maxWidth: .infinity)
+            .accessibilityHidden(true)
+            Label("发一张截图，看看它如何落下。", systemImage: "photo.badge.arrow.down")
+                .font(JieziType.cardTitle)
+                .foregroundStyle(JieziTheme.brand)
+            Text("从快捷指令运行刚配置的流程，然后回到这里查看真实结果。也可以稍后再试。")
+                .font(JieziFont.body)
+                .foregroundStyle(JieziTheme.muted)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Button {
+                guard let url = URL(string: "shortcuts://") else { return }
+                trialID = ShortcutTrialStore.shared.begin(scope: appState.onboardingScope)
+                refreshTrial()
+                localMessage = "正在请求打开快捷指令…"
+                openURL(url) { accepted in
+                    if accepted {
+                        localMessage = nil
+                        refreshTrial()
+                    } else {
+                        cancelTrial()
+                        localMessage = "无法打开快捷指令；可以重试，或稍后再试。"
+                    }
+                }
+            } label: {
+                Label(trialID == nil ? "打开快捷指令试一次" : "重新试一次", systemImage: "arrow.up.forward.app")
+                    .font(JieziType.button)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 11)
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(JieziTheme.brand)
+            .background(JieziTheme.brand.opacity(0.1), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+
+            if let trialReceipt {
+                VStack(alignment: .leading, spacing: 10) {
+                    if trialReceipt.processing && trialReceipt.outcome == nil { ProgressView() }
+                    Text(trialStatusText(trialReceipt))
+                        .font(JieziFont.body).fixedSize(horizontal: false, vertical: true)
+                    Button("刷新真实结果") { refreshTrial() }
+                        .font(JieziType.button).frame(minHeight: 44)
+                }
+                .foregroundStyle(JieziTheme.ink)
+                .padding(16)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(JieziScene.expense.surface, in: RoundedRectangle(cornerRadius: 22))
+                .accessibilityElement(children: .contain)
             }
         }
     }
 
-    private var retentionStep: some View {
+    private var readyStep: some View {
         VStack(alignment: .leading, spacing: 13) {
-            Picker("原图留存", selection: $retentionDays) {
-                Text("不留").tag(0)
-                Text("7 天").tag(7)
-                Text("30 天").tag(30)
-                Text("永久").tag(-1)
-            }
-            .pickerStyle(.segmented)
-
-            Label(retentionDescription, systemImage: retentionDays == 0 ? "eye.slash" : "photo")
-                .font(.caption)
+            Label("现在可以开始记录", systemImage: "checkmark.seal.fill")
+                .font(JieziType.cardTitle)
+                .foregroundStyle(JieziTheme.brand)
+            Text("原图保留、识别完成通知和 AI 表达偏好都可稍后在设置中调整。跳过或暂未配置快捷指令，不影响本机记录。")
+                .font(JieziFont.body)
                 .foregroundStyle(JieziTheme.muted)
                 .fixedSize(horizontal: false, vertical: true)
-
-            Text("这里只保存后续上传的留存策略；已有原图可在设置中单独清理。")
-                .font(.caption2)
-                .foregroundStyle(JieziTheme.muted)
-                .fixedSize(horizontal: false, vertical: true)
-
-            nextButton("保存并继续", systemImage: "checkmark") {
-                await advance(from: .retention)
-            }
         }
     }
 
-    private var notificationStep: some View {
-        VStack(alignment: .leading, spacing: 13) {
-            HStack(spacing: 10) {
-                Image(systemName: notificationIsActive ? "bell.badge.fill" : "bell")
-                    .foregroundStyle(notificationIsActive ? JieziTheme.brand : JieziTheme.muted)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(notificationStatusText)
-                        .font(.subheadline.weight(.semibold))
-                    Text("识别完成后提醒你；不开启也能正常记录。")
-                        .font(.caption)
-                        .foregroundStyle(JieziTheme.muted)
-                }
-            }
-
-            if notificationIsActive {
-                Label("无需处理，通知已经可用", systemImage: "checkmark.circle.fill")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(JieziTheme.brand)
-            } else {
+    private var stepFooter: some View {
+        HStack(spacing: 10) {
+            if activeStep != .welcome {
                 Button {
-                    Task { await handleNotificationAction() }
+                    guard !isSavingStep,
+                          let previous = OnboardingStep(rawValue: activeStep.rawValue - 1) else { return }
+                    if activeStep == .trial { cancelTrial() }
+                    localMessage = nil
+                    activeStep = previous
                 } label: {
-                    Label(notificationActionTitle, systemImage: notificationActionIcon)
-                        .font(.subheadline.weight(.semibold))
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 11)
+                    Image(systemName: "chevron.left")
+                        .font(JieziType.button)
+                        .frame(width: 52, height: 54)
+                        .background(JieziTheme.brand.opacity(0.08), in: RoundedRectangle(cornerRadius: 18))
                 }
                 .buttonStyle(.plain)
                 .foregroundStyle(JieziTheme.brand)
-                .background(JieziTheme.brand.opacity(0.1), in: RoundedRectangle(cornerRadius: JieziRadius.Semantic.card))
+                .accessibilityLabel("上一步")
+                .disabled(isSavingStep)
             }
-
-            nextButton("继续", systemImage: "arrow.down") {
-                await advance(from: .notification)
-            }
-        }
-    }
-
-    private var companionStep: some View {
-        VStack(alignment: .leading, spacing: 13) {
-            Picker("AI 语气", selection: $companionPersona) {
-                ForEach(NativeSettingsOptions.personas) { option in
-                    Text(option.title).tag(option.id)
+            nextButton(footerTitle, systemImage: activeStep == .ready ? "checkmark" : "arrow.right") {
+                if activeStep == .ready {
+                    completedSteps.insert(.ready)
+                    cancelTrial()
+                    appState.finishOnboarding(skipped: false)
+                } else {
+                    await advance(from: activeStep)
                 }
             }
-            .pickerStyle(.segmented)
-
-            Text(personaDescription)
-                .font(.caption)
-                .foregroundStyle(JieziTheme.muted)
-                .fixedSize(horizontal: false, vertical: true)
-
-            nextButton("完成设置", systemImage: "checkmark.circle.fill") {
-                await advance(from: .companion)
-            }
         }
+        .padding(.horizontal, 22)
+        .padding(.vertical, 12)
+        .background(JieziScene.expense.surface.opacity(0.9))
     }
 
-    private var completionView: some View {
-        VStack(spacing: 24) {
-            Spacer(minLength: 42)
-            ZStack {
-                Circle()
-                    .fill(JieziTheme.brand.opacity(0.11))
-                    .frame(width: 116, height: 116)
-                Circle()
-                    .stroke(JieziTheme.gold.opacity(0.55), lineWidth: 1)
-                    .frame(width: 92, height: 92)
-                Image(systemName: "checkmark.seal.fill")
-                    .font(.system(size: 48, weight: .semibold))
-                    .foregroundStyle(JieziTheme.brand)
-            }
-
-            VStack(spacing: 9) {
-                Text("可以开始记录了")
-                    .font(.title2.weight(.bold))
-                    .foregroundStyle(JieziTheme.ink)
-                Text("识别不确定时会进入中转站，统计事实由代码核算，AI 只负责表达语气。")
-                    .font(.subheadline)
-                    .foregroundStyle(JieziTheme.muted)
-                    .multilineTextAlignment(.center)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            .padding(.horizontal, 30)
-
-            Button {
-                appState.selectedTab = .today
-                appState.finishOnboarding(skipped: false)
-            } label: {
-                Label("进入芥子", systemImage: "arrow.right.circle.fill")
-                    .font(.headline)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 14)
-            }
-            .buttonStyle(.plain)
-            .foregroundStyle(.white)
-            .background(JieziTheme.brand, in: RoundedRectangle(cornerRadius: JieziRadius.Semantic.card))
-            .padding(.horizontal, 24)
-
-            Spacer()
+    private var footerTitle: String {
+        switch activeStep {
+        case .welcome: return "开始了解"
+        case .flow: return "下一步"
+        case .shortcuts: return "继续"
+        case .trial:
+            return trialReceipt?.outcome != nil && trialReceipt?.outcome != .failed ? "查看结果后继续" : "稍后再试，继续"
+        case .ready: return "完成并进入芥子"
         }
     }
 
@@ -430,7 +411,7 @@ struct OnboardingFlowView: View {
             }
             .font(.subheadline.weight(.semibold))
             .frame(maxWidth: .infinity)
-            .padding(.vertical, 12)
+            .frame(minHeight: 44)
         }
         .buttonStyle(.plain)
         .foregroundStyle(.white)
@@ -445,153 +426,127 @@ struct OnboardingFlowView: View {
         localMessage = nil
         defer { isSavingStep = false }
 
-        switch step {
-        case .capture, .notification:
-            break
-        case .retention:
-            await appState.setImageRetention(days: retentionDays, cleanupExisting: false)
-            if let message = appState.settingsMessage, message.contains("失败") {
-                localMessage = message
-                return
-            }
-        case .companion:
-            await appState.setCompanionPersona(companionPersona)
-            if let message = appState.settingsMessage, message.contains("失败") {
-                localMessage = message
-                return
-            }
-        }
-
         completedSteps.insert(step)
+        if step == .trial { cancelTrial() }
         if let next = OnboardingStep(rawValue: step.rawValue + 1) {
             activeStep = next
-        } else {
-            withAnimation(JieziEasing.spring) {
-                showsCompletion = true
-            }
         }
     }
 
     private func openShortcutTemplate(_ template: ShortcutTemplateKind) {
-        guard let url = URL(string: template.url), !template.url.isEmpty else {
-            localMessage = "当前构建的\(template.title)模板链接不可用，可稍后在设置中重试。"
+        guard !template.url.isEmpty, let url = URL(string: template.url) else {
+            localMessage = "当前构建未配置\(template.title)安装链接；可在设置查看安装步骤，或稍后继续。"
             return
         }
-        openedTemplates.insert(template)
-        localMessage = "已打开\(template.title)安装页；iOS 不提供可靠的安装完成检测。"
-        openURL(url)
-    }
-
-    @MainActor
-    private func handleNotificationAction() async {
-        if notificationPermissionIsGranted {
-            appState.setShortcutNotificationsEnabled(true)
-            appState.setShortcutResultCardEnabled(false)
-            return
-        }
-        if notificationWasDenied {
-            guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
-            openURL(url)
-            return
-        }
-        await appState.requestShortcutNotificationPermission()
-    }
-
-    private var currentRetention: Int {
-        appState.userSettings.keepSourceImages ? appState.userSettings.imageRetentionDays : 0
-    }
-
-    private var retentionDescription: String {
-        switch retentionDays {
-        case 0: return "识别字段保留，原图按清理流程删除，隐私最轻。"
-        case 7: return "保留一周复核窗口，之后自动进入清理。"
-        case 30: return "适合月度对账，保留更长的核对窗口。"
-        default: return "原图持续绑定记录，方便长期回看和复核。"
+        localMessage = "正在请求打开\(template.title)安装页…"
+        openURL(url) { accepted in
+            localMessage = accepted
+                ? "系统已接受模板链接；iOS 不提供可靠的安装完成检测。"
+                : "未能打开模板链接；可查看设置步骤、重试或稍后继续。"
         }
     }
 
-    private var personaDescription: String {
-        NativeSettingsOptions.personas.first(where: { $0.id == companionPersona })?.detail
-            ?? "冷静看见细节，事实为主"
-    }
-
-    private var notificationPermissionIsGranted: Bool {
-        appState.notificationPermissionStatusText.hasPrefix("已开启")
-            || appState.notificationPermissionStatusText.hasPrefix("临时允许")
-    }
-
-    private var notificationIsActive: Bool {
-        notificationPermissionIsGranted && appState.shortcutNotificationsEnabled
-    }
-
-    private var notificationWasDenied: Bool {
-        appState.notificationPermissionStatusText.hasPrefix("已关闭")
-    }
-
-    private var notificationActionTitle: String {
-        if notificationPermissionIsGranted { return "启用结果通知" }
-        if notificationWasDenied { return "前往系统设置" }
-        return "开启结果通知"
-    }
-
-    private var notificationStatusText: String {
-        if notificationPermissionIsGranted, !appState.shortcutNotificationsEnabled {
-            return "系统已允许，芥子内通知已关闭"
+    private func refreshTrial() {
+        trialReceipt = ShortcutTrialStore.shared.snapshot(for: appState.onboardingScope)
+        if let receipt = trialReceipt {
+            trialID = receipt.id
+        } else if trialID != nil {
+            trialID = nil
+            localMessage = "本次回执已过期或失效，可以重新试一次。"
         }
-        return appState.notificationPermissionStatusText
     }
 
-    private var notificationActionIcon: String {
-        notificationWasDenied ? "gear" : "bell.badge"
+    private func setupCard<Content: View>(number: Int, title: String, detail: String, @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .top, spacing: 12) {
+                Text("\(number)").font(JieziType.moneyInline)
+                    .frame(width: 28, height: 28)
+                    .background(JieziTheme.brand.opacity(0.1), in: Circle())
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(title).font(JieziType.cardTitle)
+                    Text(detail).font(JieziFont.caption).foregroundStyle(JieziTheme.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            content()
+        }
+        .foregroundStyle(JieziTheme.ink)
+        .padding(14)
+        .background(JieziScene.expense.surface.opacity(0.78), in: RoundedRectangle(cornerRadius: 22))
     }
 
-    private func stepColor(_ step: OnboardingStep) -> Color {
-        if completedSteps.contains(step) || activeStep == step { return JieziTheme.brand }
-        return JieziTheme.muted.opacity(0.7)
+    private var triggerInstructions: String {
+        switch selectedTrigger {
+        case "轻点背面": return "在系统设置的辅助功能（或无障碍）→触控→轻点背面中，选择已安装的记录快捷指令。"
+        case "操作按钮": return "支持操作按钮的机型，可在系统设置→操作按钮中选择快捷指令。"
+        default: return "在快捷指令详情启用“在共享表单中显示”，再从图片的共享菜单运行。"
+        }
     }
+
+    private var triggerHelpURL: URL {
+        let path: String
+        switch selectedTrigger {
+        case "轻点背面": path = "https://support.apple.com/zh-cn/111772"
+        case "操作按钮": path = "https://support.apple.com/zh-cn/guide/iphone/iphe89d61d66/ios"
+        default: path = "https://support.apple.com/zh-cn/guide/shortcuts/apd163eb9f95/ios"
+        }
+        return URL(string: path)!
+    }
+
+    private func cancelTrial() {
+        if let trialID { ShortcutTrialStore.shared.cancel(id: trialID) }
+        trialID = nil
+        trialReceipt = nil
+    }
+
+    private func trialStatusText(_ receipt: ShortcutTrialReceipt) -> String {
+        switch receipt.outcome {
+        case .archived: return "识别结果已自动归档到本机正式记录。"
+        case .staged: return "识别结果已保存到本机待确认，确认前不计入正式统计。"
+        case .remoteReturned: return "云端已返回。请在记录或待确认中核对实际结果。"
+        case .failed: return "这次没有完成。请查看快捷指令返回的错误，再重试。"
+        case nil: return receipt.processing ? "芥子已收到，正在处理本次试运行…" : "等待快捷指令发送图片；打开 App 不代表识别完成。"
+        }
+    }
+
+    private var shortcutCredentialText: String {
+        guard appState.isSignedIn else { return "登录后自动同步上传凭据；无需在快捷指令中填写 token。" }
+        return appState.hasUploadToken ? "登录凭据已同步到本机。" : "登录凭据暂不可用，可稍后在设置检查。"
+    }
+
+
 }
 
-private enum OnboardingStep: Int, CaseIterable, Identifiable {
-    case capture
-    case retention
-    case notification
-    case companion
+enum OnboardingStep: Int, CaseIterable, Identifiable {
+    case welcome
+    case flow
+    case shortcuts
+    case trial
+    case ready
 
     var id: Int { rawValue }
 
-    var eyebrow: String {
-        switch self {
-        case .capture: return "快捷捕获"
-        case .retention: return "原图选择"
-        case .notification: return "结果反馈"
-        case .companion: return "可选个性"
-        }
-    }
+
 
     var title: String {
         switch self {
-        case .capture: return "不用打开 App，也能记录"
-        case .retention: return "决定原图保留多久"
-        case .notification: return "识别完成时告诉你"
-        case .companion: return "选择 AI 说话方式"
+        case .welcome: return "让记录顺手发生"
+        case .flow: return "记录如何流动"
+        case .shortcuts: return "设置快捷指令"
+        case .trial: return "试一次"
+        case .ready: return "准备完成"
         }
     }
 
     var detail: String {
         switch self {
-        case .capture: return "安装拍照和截图模板，也可以稍后只用 App。"
-        case .retention: return "原图帮助复核，也可以按你的选择自动删除。"
-        case .notification: return "需要时再授权，不会在登录后突然弹出。"
-        case .companion: return "只改变表达语气，不改变识别事实和统计口径。"
+        case .welcome: return "先从本机开始；登录同步是可选的。"
+        case .flow: return "候选与正式记录分开，统计不把待确认内容算进去。"
+        case .shortcuts: return "可安装拍照和截图模板，未登录时会在登录后同步凭据。"
+        case .trial: return "可运行真实快捷指令，也可以跳过；没有回调不会伪造结果。"
+        case .ready: return "完成后进入五域主页，图片、通知和 AI 偏好可在设置调整。"
         }
     }
 
-    var systemImage: String {
-        switch self {
-        case .capture: return "bolt.fill"
-        case .retention: return "photo"
-        case .notification: return "bell.fill"
-        case .companion: return "quote.bubble.fill"
-        }
-    }
+
 }

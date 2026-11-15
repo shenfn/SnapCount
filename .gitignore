@@ -105,3 +105,6 @@ scripts/backup-supabase-storage.mjs
 多域联动分析.html
 *_原型*.html
 *_prototype*.html
+
+# 本地工具输出
+.workbuddy/

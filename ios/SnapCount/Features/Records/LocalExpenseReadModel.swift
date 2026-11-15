@@ -1,8 +1,11 @@
 import Foundation
 
 enum LocalExpenseReadModel {
-    static func detail(from expense: LocalExpense) -> NativeRecordDetail {
+    static func detail(from expense: LocalExpense, imageStore: LocalImageStore? = nil) -> NativeRecordDetail {
         let reference = "local-expense/\(expense.id.uuidString)"
+        // 本机已有的原图优先直接读文件：走远端签名等于每次看图都要联网，
+        // 而迁移落库的 image_path 是本机路径，云端根本没有这个对象。
+        let imageURL = localImageURL(expense.imagePath, imageStore: imageStore)
         let timeLabel = expense.transactionTime.map { " \($0)" } ?? ""
         let dateLabel = "\(expense.transactionDate)\(timeLabel)"
         let amount = Double(expense.amountMinor) / 100
@@ -26,10 +29,10 @@ enum LocalExpenseReadModel {
             subtitle: dateLabel,
             value: String(format: "¥%.2f", amount),
             detailRows: rows,
-            imageURL: nil,
-            imageLoadError: false,
-            imagePath: nil,
-            imageHash: nil,
+            imageURL: imageURL,
+            imageLoadError: expense.imagePath != nil && imageURL == nil,
+            imagePath: expense.imagePath,
+            imageHash: expense.imageHash,
             amount: amount,
             merchantName: expense.merchantName,
             platform: expense.platform,
@@ -37,8 +40,8 @@ enum LocalExpenseReadModel {
             paymentMethod: expense.paymentMethod,
             recordDate: expense.transactionDate,
             note: expense.note,
-            companionMessage: nil,
-            accountId: expense.accountID.uuidString,
+            companionMessage: expense.companionMessage,
+            accountId: expense.accountID?.uuidString,
             systemImage: "creditcard",
             payload: nil,
             occurredAt: NativeLocalDate.financeOccurredAt(
@@ -48,7 +51,10 @@ enum LocalExpenseReadModel {
             transactionTime: expense.transactionTime,
             domainKey: nil,
             source: "local",
-            status: "local"
+            status: "local",
+            aiFeedback: LocalPendingFinancialRepository.feedbackPayload(from: expense.aiFeedbackJSON)
+                .flatMap { NativeAIFeedback(payload: $0) },
+            localVersion: expense.localVersion
         )
     }
 
@@ -67,13 +73,21 @@ enum LocalExpenseReadModel {
                         title: expense.merchantName,
                         subtitle: expense.category,
                         value: String(format: "¥%.2f", Double(expense.amountMinor) / 100),
-                        timeLabel: expense.transactionTime,
+                        timeLabel: NativeLocalDate.listTimeLabel(
+                            recordTime: expense.transactionTime,
+                            uploadedAt: expense.createdAt
+                        ),
                         systemImage: "creditcard",
                         transactionType: "expense",
                         status: "local"
                     )
-                }.sorted { ($0.timeLabel ?? "") > ($1.timeLabel ?? "") }
+                }.sorted { NativeLocalDate.listTimeSortKey($0.timeLabel) > NativeLocalDate.listTimeSortKey($1.timeLabel) }
             )
         }.sorted { $0.dateKey > $1.dateKey }
+    }
+
+    private static func localImageURL(_ path: String?, imageStore: LocalImageStore?) -> URL? {
+        guard let path, let imageStore, imageStore.contains(path: path) else { return nil }
+        return imageStore.url(for: path)
     }
 }

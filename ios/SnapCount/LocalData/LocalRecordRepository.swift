@@ -6,12 +6,16 @@ protocol LocalRecordRepositoryProtocol {
     func updateRecord(_ update: LocalRecordUpdateCommand, profileID: UUID) throws -> LocalRecord
     func deleteRecord(_ command: LocalRecordDeleteCommand, profileID: UUID) throws -> LocalRecordTombstone
     func record(id: UUID) throws -> LocalRecord?
+    func hasImageReference(path: String) throws -> Bool
+    func pendingImageCleanups(profileID: UUID) throws -> [LocalImageCleanup]
+    func finishImageCleanup(id: UUID, profileID: UUID) throws
+    func failImageCleanup(id: UUID, profileID: UUID, message: String, at date: Date) throws
     func records(profileID: UUID, monthKey: String) throws -> [LocalRecord]
     func recordTombstone(id: UUID) throws -> LocalRecordTombstone?
     func createStaging(_ draft: LocalStagingDraft) throws -> LocalStagingRecord
     func staging(id: String) throws -> LocalStagingRecord?
     func stagingRecords(profileID: UUID) throws -> [LocalStagingRecord]
-    func archiveStaging(id: String, recordID: UUID, updatedAt: Date, profileID: UUID) throws -> LocalRecord
+    func archiveStaging(id: String, recordID: UUID, updatedAt: Date, profileID: UUID, changes: LocalStagingConfirmation?) throws -> LocalRecord
     func discardStaging(id: String, updatedAt: Date, profileID: UUID) throws
 }
 
@@ -86,7 +90,8 @@ final class LocalRecordRepository: LocalRecordRepositoryProtocol {
                 sql: """
                     UPDATE local_records
                     SET title = ?, summary = ?, payload_json = ?, record_date = ?,
-                        record_time = ?, note = ?, local_version = local_version + 1,
+                        record_time = ?, note = ?, image_path = ?, image_hash = ?,
+                        local_version = local_version + 1,
                         updated_at = ?
                     WHERE id = ? AND deleted_at IS NULL AND local_version = ?
                     """,
@@ -97,11 +102,17 @@ final class LocalRecordRepository: LocalRecordRepositoryProtocol {
                     update.recordDate,
                     update.recordTime,
                     update.note,
+                    update.imagePath,
+                    update.imageHash,
                     update.updatedAt,
                     update.id.uuidString,
                     update.expectedVersion
                 ]
             )
+            let oldImagePath: String? = current["image_path"]
+            if let oldImagePath, oldImagePath != update.imagePath {
+                try Self.enqueueImageCleanup(db, profileID: profileID, imagePath: oldImagePath, at: update.updatedAt)
+            }
             guard let row = try Row.fetchOne(
                 db,
                 sql: "SELECT * FROM local_records WHERE id = ?",
@@ -145,6 +156,10 @@ final class LocalRecordRepository: LocalRecordRepositoryProtocol {
                     command.expectedVersion
                 ]
             )
+            let imagePath: String? = current["image_path"]
+            if let imagePath {
+                try Self.enqueueImageCleanup(db, profileID: profileID, imagePath: imagePath, at: command.deletedAt)
+            }
             guard let row = try Row.fetchOne(
                 db,
                 sql: "SELECT * FROM local_records WHERE id = ?",
@@ -167,17 +182,99 @@ final class LocalRecordRepository: LocalRecordRepositoryProtocol {
         }
     }
 
+    func hasImageReference(path: String) throws -> Bool {
+        try database.writer.read { db in
+            (try Int.fetchOne(
+                db,
+                sql: """
+                    SELECT EXISTS (
+                        SELECT 1 FROM local_records
+                        WHERE image_path = ? AND deleted_at IS NULL
+                        UNION ALL
+                        SELECT 1 FROM local_staging_records
+                        WHERE image_path = ? AND status = 'pending_review'
+                        UNION ALL
+                        SELECT 1 FROM local_staging_records
+                        WHERE image_path = ? AND domain_key = 'wallet' AND status = 'archived'
+                          AND resolved_action = 'liability_repayment_confirmed'
+                        UNION ALL
+                        SELECT 1 FROM local_image_intakes
+                        WHERE image_path = ? AND status IN ('receiving', 'failed')
+                        UNION ALL
+                        SELECT 1 FROM local_wallet_snapshots
+                        WHERE image_path = ?
+                        UNION ALL
+                        SELECT 1 FROM local_expenses WHERE image_path = ? AND deleted_at IS NULL
+                        UNION ALL
+                        SELECT 1 FROM local_income_records WHERE image_path = ? AND deleted_at IS NULL
+                        UNION ALL
+                        SELECT 1 FROM local_pending_transactions WHERE image_path = ? AND status = 'pending'
+                    )
+                    """,
+                arguments: [path, path, path, path, path, path, path, path]
+            ) ?? 0) != 0
+        }
+    }
+
+    func pendingImageCleanups(profileID: UUID) throws -> [LocalImageCleanup] {
+        try database.writer.read { db in
+            try Row.fetchAll(
+                db,
+                sql: "SELECT * FROM local_image_cleanups WHERE profile_id = ? ORDER BY updated_at, id",
+                arguments: [profileID.uuidString]
+            ).map { row in
+                guard let id = UUID(uuidString: row["id"]),
+                      let profileID = UUID(uuidString: row["profile_id"]),
+                      let createdAt: Date = row["created_at"],
+                      let updatedAt: Date = row["updated_at"] else {
+                    throw LocalDataError.invalidRecord
+                }
+                return LocalImageCleanup(
+                    id: id,
+                    profileID: profileID,
+                    imagePath: row["image_path"],
+                    attemptCount: row["attempt_count"],
+                    lastError: row["last_error"],
+                    createdAt: createdAt,
+                    updatedAt: updatedAt
+                )
+            }
+        }
+    }
+
+    func finishImageCleanup(id: UUID, profileID: UUID) throws {
+        try database.writer.write { db in
+            try db.execute(
+                sql: "DELETE FROM local_image_cleanups WHERE id = ? AND profile_id = ?",
+                arguments: [id.uuidString, profileID.uuidString]
+            )
+        }
+    }
+
+    func failImageCleanup(id: UUID, profileID: UUID, message: String, at date: Date) throws {
+        try database.writer.write { db in
+            try db.execute(
+                sql: """
+                    UPDATE local_image_cleanups
+                    SET attempt_count = attempt_count + 1, last_error = ?, updated_at = ?
+                    WHERE id = ? AND profile_id = ?
+                    """,
+                arguments: [message, date, id.uuidString, profileID.uuidString]
+            )
+        }
+    }
+
     func records(profileID: UUID, monthKey: String) throws -> [LocalRecord] {
         try database.writer.read { db in
             try Row.fetchAll(
                 db,
                 sql: """
                     SELECT * FROM local_records
-                    WHERE profile_id = ? AND deleted_at IS NULL AND record_date LIKE ?
+                    WHERE profile_id = ? AND deleted_at IS NULL AND (domain_key = 'sleep' OR record_date LIKE ?)
                     ORDER BY record_date DESC, record_time DESC, created_at DESC, id DESC
                     """,
                 arguments: [profileID.uuidString, "\(monthKey)-%"]
-            ).map(Self.record(from:))
+            ).map(Self.record(from:)).filter { $0.businessDate.hasPrefix("\(monthKey)-") }
         }
     }
 
@@ -193,7 +290,7 @@ final class LocalRecordRepository: LocalRecordRepositoryProtocol {
     }
 
     func createStaging(_ draft: LocalStagingDraft) throws -> LocalStagingRecord {
-        guard LocalRecordValidation.supportedDomainKeys.contains(draft.domainKey) else {
+        guard LocalRecordValidation.supportedStagingDomainKeys.contains(draft.domainKey) else {
             throw LocalDataError.invalidRecord
         }
         return try database.writer.write { db in
@@ -267,7 +364,8 @@ final class LocalRecordRepository: LocalRecordRepositoryProtocol {
         id: String,
         recordID: UUID,
         updatedAt: Date,
-        profileID: UUID
+        profileID: UUID,
+        changes: LocalStagingConfirmation? = nil
     ) throws -> LocalRecord {
         try database.writer.write { db in
             guard let stagingRow = try Row.fetchOne(
@@ -291,18 +389,21 @@ final class LocalRecordRepository: LocalRecordRepositoryProtocol {
                 throw LocalDataError.invalidRecord
             }
             let stagingProfileID: String = stagingRow["profile_id"]
-            let domainKey: String = stagingRow["domain_key"]
-            let title: String = stagingRow["title"]
-            let summary: String = stagingRow["summary"]
+            let domainKey: String = changes?.domainKey ?? stagingRow["domain_key"]
+            let title: String = changes?.title ?? stagingRow["title"]
+            let summary: String = changes?.summary ?? stagingRow["summary"]
             let payloadJSON: String = stagingRow["payload_json"]
-            let recordDate: String = stagingRow["record_date"]
-            let recordTime: String? = stagingRow["record_time"]
+            let draftDate: String = changes?.recordDate ?? stagingRow["record_date"]
+            let recordTime: String? = changes.map(\.recordTime) ?? stagingRow["record_time"]
             let imagePath: String? = stagingRow["image_path"]
             let imageHash: String? = stagingRow["image_hash"]
             let createdAt: Date = stagingRow["created_at"]
+            let editedPayload = try changes?.payload ?? LocalRecordCodec.decode(payloadJSON)
+            let recordDate = NativeSleepFacts.businessDate(domainKey: domainKey, payload: editedPayload, fallback: draftDate)
+            try LocalRecordValidation.validate(domainKey: domainKey, title: title, recordDate: recordDate, recordTime: recordTime)
             let payload = try LocalRecordCodec.normalizedPayload(
                 domainKey: domainKey,
-                payload: try LocalRecordCodec.decode(payloadJSON)
+                payload: editedPayload
             )
             let normalizedPayloadJSON = try LocalRecordCodec.encode(payload)
 
@@ -312,7 +413,7 @@ final class LocalRecordRepository: LocalRecordRepositoryProtocol {
                         id, profile_id, domain_key, title, summary, payload_json,
                         record_date, record_time, note, image_path, image_hash,
                         source_kind, domain_version, local_version, created_at, updated_at, deleted_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, 1, ?, ?, NULL)
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, NULL)
                     """,
                 arguments: [
                     recordID.uuidString,
@@ -323,6 +424,7 @@ final class LocalRecordRepository: LocalRecordRepositoryProtocol {
                     normalizedPayloadJSON,
                     recordDate,
                     recordTime,
+                    changes?.note,
                     imagePath,
                     imageHash,
                     LocalRecordSourceKind.aiConfirmed.rawValue,
@@ -358,6 +460,7 @@ final class LocalRecordRepository: LocalRecordRepositoryProtocol {
             ) else { throw LocalDataError.recordNotFound }
             try Self.assertProfile(row, profileID: profileID)
             let status: String = row["status"]
+            if status == LocalStagingRecordStatus.discarded.rawValue { return }
             guard status == LocalStagingRecordStatus.pendingReview.rawValue else {
                 throw LocalDataError.invalidRecord
             }
@@ -369,7 +472,22 @@ final class LocalRecordRepository: LocalRecordRepositoryProtocol {
                     """,
                 arguments: [updatedAt, updatedAt, id]
             )
+            let imagePath: String? = row["image_path"]
+            if let imagePath {
+                try Self.enqueueImageCleanup(db, profileID: profileID, imagePath: imagePath, at: updatedAt)
+            }
         }
+    }
+
+    private static func enqueueImageCleanup(_ db: Database, profileID: UUID, imagePath: String, at date: Date) throws {
+        try db.execute(
+            sql: """
+                INSERT OR IGNORE INTO local_image_cleanups (
+                    id, profile_id, image_path, attempt_count, last_error, created_at, updated_at
+                ) VALUES (?, ?, ?, 0, NULL, ?, ?)
+                """,
+            arguments: [UUID().uuidString, profileID.uuidString, imagePath, date, date]
+        )
     }
 
     private static func assertProfile(_ row: Row, profileID: UUID) throws {

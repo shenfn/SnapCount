@@ -18,6 +18,25 @@ struct NativeFoodDish: Identifiable {
     var id: String { name }
 }
 
+struct NativeRecordMeasurement: Identifiable {
+    let key: String
+    let label: String
+    let value: Double
+    let unit: String
+    let isEstimated: Bool
+
+    var id: String { key }
+
+    var displayValue: String {
+        if unit == "分钟" {
+            let minutes = Int(value.rounded())
+            return minutes >= 60 ? "\(minutes / 60) 小时 \(minutes % 60) 分钟" : "\(minutes) 分钟"
+        }
+        let number = value.rounded() == value ? String(Int(value)) : String(format: "%.1f", value)
+        return unit.isEmpty ? number : "\(number) \(unit)"
+    }
+}
+
 enum NativeRecordAccountBindingStatus: Equatable {
     case bound
     case recommended
@@ -32,6 +51,44 @@ struct NativeRecordAccountBindingPresentation {
 }
 
 enum NativeRecordDetailPresentationAdapter {
+    static func measurements(for detail: NativeRecordDetail) -> [NativeRecordMeasurement] {
+        guard detail.kind == "data", let payload = detail.payload else { return [] }
+        let domain = detail.domainKey ?? ""
+        switch domain {
+        case "sleep":
+            return durationMinutes(payload: payload, minuteKeys: ["sleep_minutes", "duration_minutes"], hourKeys: ["sleep_hours", "duration_hours"])
+                .map { [NativeRecordMeasurement(key: "sleep_minutes", label: "睡眠时长", value: $0, unit: "分钟", isEstimated: false)] }
+                ?? []
+        case "food":
+            return (payload.double("total_calorie_kcal") ?? payload.double("total_calories"))
+                .map { [NativeRecordMeasurement(key: "total_calorie_kcal", label: "估算热量", value: $0, unit: "千卡", isEstimated: true)] }
+                ?? []
+        case "sport":
+            var values: [NativeRecordMeasurement] = []
+            if let minutes = payload.double("duration_minutes") {
+                values.append(NativeRecordMeasurement(key: "duration_minutes", label: "运动时长", value: minutes, unit: "分钟", isEstimated: false))
+            }
+            if let calories = payload.double("calories") ?? payload.double("calories_kcal") {
+                values.append(NativeRecordMeasurement(key: "calories", label: "消耗热量", value: calories, unit: "千卡", isEstimated: true))
+            }
+            if let distance = payload.double("distance_km") {
+                values.append(NativeRecordMeasurement(key: "distance_km", label: "距离", value: distance, unit: "公里", isEstimated: false))
+            }
+            return values
+        case "reading":
+            var values: [NativeRecordMeasurement] = []
+            if let minutes = durationMinutes(payload: payload, minuteKeys: ["reading_minutes", "duration_minutes"], hourKeys: ["reading_hours", "duration_hours"]) {
+                values.append(NativeRecordMeasurement(key: "reading_minutes", label: "阅读时长", value: minutes, unit: "分钟", isEstimated: false))
+            }
+            if let pages = payload.double("pages") ?? payload.double("pages_read") {
+                values.append(NativeRecordMeasurement(key: "pages", label: "阅读页数", value: pages, unit: "页", isEstimated: false))
+            }
+            return values
+        default:
+            return []
+        }
+    }
+
     static func basicRows(for detail: NativeRecordDetail, accountName: String?) -> [NativeDetailRow] {
         var rows = [NativeDetailRow(label: "数据域", value: domainLabel(for: detail))]
         let eventTime = eventTime(for: detail)
@@ -64,7 +121,8 @@ enum NativeRecordDetailPresentationAdapter {
                     label: "到账日期",
                     value: NativeLocalDate.financeDateKey(
                         occurredAt: detail.occurredAt,
-                        legacyDate: detail.recordDate
+                        legacyDate: detail.recordDate,
+                        createdAt: detail.createdAt
                     ) ?? "--"
                 ),
                 NativeDetailRow(label: "备注", value: detail.note ?? "无")
@@ -79,13 +137,14 @@ enum NativeRecordDetailPresentationAdapter {
             NativeDetailRow(label: "金额", value: detail.amount.map { String(format: "-¥%.2f", $0) } ?? "--"),
             NativeDetailRow(label: "商家", value: detail.merchantName ?? "未识别商家"),
             NativeDetailRow(label: "消费渠道", value: detail.platform ?? "未知"),
-            NativeDetailRow(label: "消费分类", value: detail.category ?? "未知"),
+            NativeDetailRow(label: "消费分类", value: NativeFinanceOptionCatalog.categoryTitle(for: detail.category) ?? detail.category ?? "未知"),
             NativeDetailRow(label: "支付方式", value: detail.paymentMethod ?? "未知"),
             NativeDetailRow(
                 label: "交易日期",
                 value: NativeLocalDate.financeDateKey(
                     occurredAt: detail.occurredAt,
-                    legacyDate: detail.recordDate
+                    legacyDate: detail.recordDate,
+                    createdAt: detail.createdAt
                 ) ?? "--"
             ),
             NativeDetailRow(label: "备注", value: detail.note ?? "无")
@@ -136,7 +195,8 @@ enum NativeRecordDetailPresentationAdapter {
             amount: detail.amount ?? 0,
             date: NativeLocalDate.financeDateKey(
                 occurredAt: detail.occurredAt,
-                legacyDate: detail.recordDate
+                legacyDate: detail.recordDate,
+                createdAt: detail.createdAt
             ) ?? "",
             time: NativeLocalDate.financeTimeKey(occurredAt: detail.occurredAt),
             occurredAt: detail.occurredAt,
@@ -299,6 +359,8 @@ enum NativeRecordDetailPresentationAdapter {
 
     private static func sourceLabel(for detail: NativeRecordDetail) -> String {
         switch detail.source {
+        case "local": return "本机"
+        case "imported": return "历史导入"
         case "ai_scan": return "截图识别"
         case "staging": return "中转站归档"
         case "manual", nil, "": return "手动录入"

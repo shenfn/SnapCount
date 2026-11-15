@@ -15,6 +15,38 @@ struct LocalAccountDraft: Equatable {
     let currency: String
     let openingBalanceMinor: Int64
     let createdAt: Date
+    var institution: String = ""
+    var last4: String = ""
+    var billDay: Int? = nil
+    var paymentDueDay: Int? = nil
+    var autoDebitAccountID: UUID? = nil
+    var autoConfirmRepayment: Bool = false
+    var gracePeriodDays: Int = 0
+    var lastReconciledAt: Date? = nil
+    var isDefaultExpense: Bool = false
+    var isDefaultIncome: Bool = false
+    var isArchived: Bool = false
+    var sortOrder: Int = 0
+}
+
+struct LocalAccountUpdate: Equatable {
+    let id: UUID
+    let profileID: UUID
+    let expectedVersion: Int64
+    let name: String
+    let kind: String
+    let institution: String
+    let last4: String
+    let billDay: Int?
+    let paymentDueDay: Int?
+    let autoDebitAccountID: UUID?
+    let autoConfirmRepayment: Bool
+    let gracePeriodDays: Int
+    let isDefaultExpense: Bool
+    let isDefaultIncome: Bool
+    let isArchived: Bool
+    let sortOrder: Int
+    let updatedAt: Date
 }
 
 struct LocalAccount: Equatable, Identifiable {
@@ -26,6 +58,19 @@ struct LocalAccount: Equatable, Identifiable {
     let openingBalanceMinor: Int64
     let createdAt: Date
     let origin: String
+    let institution: String
+    let last4: String
+    let billDay: Int?
+    let paymentDueDay: Int?
+    let autoDebitAccountID: UUID?
+    let autoConfirmRepayment: Bool
+    let gracePeriodDays: Int
+    let lastReconciledAt: Date?
+    let isDefaultExpense: Bool
+    let isDefaultIncome: Bool
+    let isArchived: Bool
+    let sortOrder: Int
+    let localVersion: Int64
 
     init(
         id: UUID,
@@ -35,7 +80,20 @@ struct LocalAccount: Equatable, Identifiable {
         currency: String,
         openingBalanceMinor: Int64,
         createdAt: Date,
-        origin: String = "local"
+        origin: String = "local",
+        institution: String = "",
+        last4: String = "",
+        billDay: Int? = nil,
+        paymentDueDay: Int? = nil,
+        autoDebitAccountID: UUID? = nil,
+        autoConfirmRepayment: Bool = false,
+        gracePeriodDays: Int = 0,
+        lastReconciledAt: Date? = nil,
+        isDefaultExpense: Bool = false,
+        isDefaultIncome: Bool = false,
+        isArchived: Bool = false,
+        sortOrder: Int = 0,
+        localVersion: Int64 = 1
     ) {
         self.id = id
         self.profileID = profileID
@@ -45,13 +103,72 @@ struct LocalAccount: Equatable, Identifiable {
         self.openingBalanceMinor = openingBalanceMinor
         self.createdAt = createdAt
         self.origin = origin
+        self.institution = institution
+        self.last4 = last4
+        self.billDay = billDay
+        self.paymentDueDay = paymentDueDay
+        self.autoDebitAccountID = autoDebitAccountID
+        self.autoConfirmRepayment = autoConfirmRepayment
+        self.gracePeriodDays = gracePeriodDays
+        self.lastReconciledAt = lastReconciledAt
+        self.isDefaultExpense = isDefaultExpense
+        self.isDefaultIncome = isDefaultIncome
+        self.isArchived = isArchived
+        self.sortOrder = sortOrder
+        self.localVersion = localVersion
     }
+}
+
+struct LocalRepaymentCycle: Equatable, Identifiable {
+    let id: UUID
+    let profileID: UUID
+    let accountID: UUID
+    let cycleMonth: String
+    let statementStartDate: String?
+    let statementEndDate: String?
+    let dueDate: String?
+    let statementAmountMinor: Int64
+    let paidAmountMinor: Int64
+    let remainingAmountMinor: Int64
+    let carriedOverAmountMinor: Int64
+    let originalStatementAmountMinor: Int64?
+    let minPaymentAmountMinor: Int64?
+    let refundAppliedAmountMinor: Int64
+    let status: String
+    let autoDebitAccountID: UUID?
+    let autoConfirmRepayment: Bool
+    let source: String
+    let evidenceRecordID: UUID?
+    let evidenceWalletSnapshotID: UUID?
+    let confidence: Double?
+    let note: String
+    let confirmedAt: Date?
+    let localVersion: Int64
+    let createdAt: Date
+    let updatedAt: Date
+}
+
+struct LocalLiabilityPayment: Equatable, Identifiable {
+    let id: UUID
+    let profileID: UUID
+    let accountID: UUID
+    let statementID: UUID?
+    let debitAccountID: UUID?
+    let amountMinor: Int64
+    let overpaymentAmountMinor: Int64
+    let paidAt: Date
+    let source: String
+    let evidenceRecordID: UUID?
+    let status: String
+    let note: String?
+    let createdAt: Date
+    let updatedAt: Date
 }
 
 struct LocalExpenseDraft: Equatable {
     let id: UUID
     let profileID: UUID
-    let accountID: UUID
+    let accountID: UUID?
     let amountMinor: Int64
     let currency: String
     let merchantName: String
@@ -62,12 +179,17 @@ struct LocalExpenseDraft: Equatable {
     let transactionTime: String?
     let note: String?
     let createdAt: Date
+    var imagePath: String? = nil
+    var imageHash: String? = nil
+    var perceptualHash: String? = nil
+    var companionMessage: String? = nil
+    var aiFeedbackJSON: String? = nil
 }
 
 struct LocalExpenseUpdate: Equatable {
     let id: UUID
     let expectedVersion: Int64
-    let accountID: UUID
+    let accountID: UUID?
     let amountMinor: Int64
     let currency: String
     let merchantName: String
@@ -78,12 +200,16 @@ struct LocalExpenseUpdate: Equatable {
     let transactionTime: String?
     let note: String?
     let updatedAt: Date
+    var imagePath: String? = nil
+    var imageHash: String? = nil
+    var imageData: Data? = nil
+    var removeImage: Bool = false
 }
 
 struct LocalExpense: Equatable {
     let id: UUID
     let profileID: UUID
-    let accountID: UUID
+    let accountID: UUID?
     let amountMinor: Int64
     let currency: String
     let merchantName: String
@@ -96,13 +222,10 @@ struct LocalExpense: Equatable {
     let localVersion: Int64
     let createdAt: Date
     let updatedAt: Date
-}
-
-struct LocalExpenseTombstone: Equatable {
-    let id: UUID
-    let profileID: UUID
-    let localVersion: Int64
-    let deletedAt: Date
+    var imagePath: String? = nil
+    var imageHash: String? = nil
+    var companionMessage: String? = nil
+    var aiFeedbackJSON: String? = nil
 }
 
 struct LocalIncomeDraft: Equatable {
@@ -111,26 +234,36 @@ struct LocalIncomeDraft: Equatable {
     let accountID: UUID?
     let amountMinor: Int64
     let currency: String
-    let incomeCategory: String
-    let sourceName: String?
+    let sourceName: String
+    let category: String
     let incomeDate: String
-    let incomeTime: String?
+    let occurredAt: Date?
     let note: String?
     let createdAt: Date
+    var imagePath: String? = nil
+    var imageHash: String? = nil
+    var perceptualHash: String? = nil
+    var companionMessage: String? = nil
+    var aiFeedbackJSON: String? = nil
 }
 
 struct LocalIncomeUpdate: Equatable {
     let id: UUID
+    let profileID: UUID
     let expectedVersion: Int64
     let accountID: UUID?
     let amountMinor: Int64
     let currency: String
-    let incomeCategory: String
-    let sourceName: String?
+    let sourceName: String
+    let category: String
     let incomeDate: String
-    let incomeTime: String?
+    let occurredAt: Date?
     let note: String?
     let updatedAt: Date
+    var imagePath: String? = nil
+    var imageHash: String? = nil
+    var imageData: Data? = nil
+    var removeImage: Bool = false
 }
 
 struct LocalIncome: Equatable {
@@ -139,14 +272,18 @@ struct LocalIncome: Equatable {
     let accountID: UUID?
     let amountMinor: Int64
     let currency: String
-    let incomeCategory: String
-    let sourceName: String?
+    let sourceName: String
+    let category: String
     let incomeDate: String
-    let incomeTime: String?
+    let occurredAt: Date?
     let note: String?
     let localVersion: Int64
     let createdAt: Date
     let updatedAt: Date
+    var imagePath: String? = nil
+    var imageHash: String? = nil
+    var companionMessage: String? = nil
+    var aiFeedbackJSON: String? = nil
 }
 
 struct LocalIncomeTombstone: Equatable {
@@ -156,77 +293,11 @@ struct LocalIncomeTombstone: Equatable {
     let deletedAt: Date
 }
 
-struct LocalWalletSnapshotDraft: Equatable {
-    let id: UUID
-    let profileID: UUID
-    let accountID: UUID?
-    let snapshotKind: String
-    let amountMinor: Int64
-    let minimumPaymentMinor: Int64?
-    let currency: String
-    let accountName: String
-    let accountType: String
-    let snapshotDate: String
-    let snapshotTime: String?
-    let dueDate: String?
-    let billDay: Int?
-    let note: String?
-    let payloadJSON: String
-    let imagePath: String?
-    let imageHash: String?
-    let sourceKind: String
-    let createdAt: Date
-}
-
-struct LocalWalletSnapshotUpdate: Equatable {
-    let id: UUID
-    let expectedVersion: Int64
-    let accountID: UUID?
-    let snapshotKind: String
-    let amountMinor: Int64
-    let minimumPaymentMinor: Int64?
-    let currency: String
-    let accountName: String
-    let accountType: String
-    let snapshotDate: String
-    let snapshotTime: String?
-    let dueDate: String?
-    let billDay: Int?
-    let note: String?
-    let payloadJSON: String
-    let updatedAt: Date
-}
-
-struct LocalWalletSnapshot: Equatable, Identifiable {
-    let id: UUID
-    let profileID: UUID
-    let accountID: UUID?
-    let snapshotKind: String
-    let amountMinor: Int64
-    let minimumPaymentMinor: Int64?
-    let currency: String
-    let accountName: String
-    let accountType: String
-    let snapshotDate: String
-    let snapshotTime: String?
-    let dueDate: String?
-    let billDay: Int?
-    let note: String?
-    let payloadJSON: String
-    let imagePath: String?
-    let imageHash: String?
-    let sourceKind: String
-    let localVersion: Int64
-    let createdAt: Date
-    let updatedAt: Date
-}
-
-struct LocalWalletSnapshotTombstone: Equatable {
+struct LocalExpenseTombstone: Equatable {
     let id: UUID
     let profileID: UUID
     let localVersion: Int64
     let deletedAt: Date
-    let imagePath: String?
 }
 
 struct LocalAccountEntry: Equatable {
@@ -238,8 +309,9 @@ struct LocalAccountEntry: Equatable {
     let entryKind: String
     let sourceKind: String
     let sourceID: UUID
-    let occurredAt: Date
+    let occurredAt: Date?
     let voidedAt: Date?
+    var isVoided: Bool = false
 }
 
 struct LocalOutboxOperation: Equatable {
@@ -387,7 +459,23 @@ enum LocalSyncDiagnosticFailure: String, Equatable {
     case cursorExpired
     case conflict
     case invalidResponse
+    /// 本机数据库约束拒绝写入。不是网络问题，重复重试不会改变结果。
+    case localConstraint
     case unknown
+}
+
+/// 本机 SQLite 约束失败（外键、唯一、非空）。与网络传输失败严格区分。
+struct LocalWriteConstraintError: Error, CustomNSError, Equatable {
+    /// SQLite 扩展结果码，例如 787 = 19 | (3 << 8) = `SQLITE_CONSTRAINT_FOREIGNKEY`。
+    let extendedCode: Int32
+
+    static var errorDomain: String { "JieziLocalWrite" }
+    var errorCode: Int { Int(extendedCode) }
+    var errorUserInfo: [String: Any] { [NSLocalizedDescriptionKey: description] }
+
+    var description: String {
+        "本机数据库拒绝写入（SQLite 约束 \(extendedCode)），与网络无关。"
+    }
 }
 
 struct LocalSyncDiagnostic: Equatable {
@@ -440,6 +528,7 @@ private extension LocalSyncDiagnosticFailure {
         case .cursorExpired: return "同步游标过期"
         case .conflict: return "存在数据冲突"
         case .invalidResponse: return "云端响应无效"
+        case .localConstraint: return "本机数据库写入受限"
         case .unknown: return "未知错误"
         }
     }

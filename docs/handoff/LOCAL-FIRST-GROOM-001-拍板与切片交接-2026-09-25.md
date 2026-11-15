@@ -8,13 +8,15 @@
 >
 > Worktree：D:\Business\count（根工作区存在大量用户 WIP 与未追踪素材，本轮未触碰）
 
+> **2026-11-10 口径覆盖**：本文记录的是 2026-09-25 的历史拍板。App Store 首版关于本地 AI 的实现口径已更新为本地 Companion + Planner 候选域、记忆和结果持久化，详见 `docs/handoff/2026-11-09-本地配置记忆与同步开发交接.md` 与 `docs/spec/模块/iOS本地优先/本地AI陪伴与Planner候选域规格说明.md`。本文的同步冻结结论仍有效。
+
 ## 已完成
 
 - BDD 全景梳理：`docs/spec/LOCAL-FIRST-BDD-COVERAGE.md`（LOCAL-FIRST-BDD-001）。以 iOS+PWA 完整产品能力为基线，14 个 Feature、约 70 个 Scenario（沿用既有编号 + 新增 LF-001~033），含反向遗漏检查与 8 项文档/代码差异记录（V-1~V-8）。
 - 领域收敛与切片设计：`docs/spec/LOCAL-FIRST-DOMAIN-CONVERGENCE.md`（LOCAL-FIRST-DOMAIN-001）。12 域 Capability Map、18 条 Invariant（含权威位置）、共享能力收敛结论（不新增抽象层）、6 类事务边界、10 项架构债务处置、Feature 依赖图、SL-01~09 无门 Slice + SL-A~I 决策依赖 Slice。
 - Phase 1 产品拍板：Q-01~Q-13 全部收敛，已写入领域收敛文档 §10.1/§10.2/§10.3。关键结论：
   - 收入/钱包进 Phase 1 本地化（钱包=只记快照事实最小形态）；还款/补绑/截图还款不本地化（云端 RPC 为原子权威）。
-  - BYOK 暂缓移出 Phase 1；设置未登录存本地+登录"谁改得晚谁赢"；AI Popup 本地方案 a（确定性候选文案、最小候选集、隐藏点评 UI）。
+  - BYOK 暂缓移出 Phase 1；设置未登录存本地+登录"谁改得晚谁赢"。原 AI Popup 方案 a 已被 2026-11-10 上架切片覆盖，当前改为本地 Companion + Planner，并允许本地记忆与结果持久化。
   - 双轨（未登录=本地、登录=沿用云端）定义为 Phase 1 迁移期策略，不是最终架构；长期仍是 Local-First（本地为主写入路径，Sync 为可选增强），同步解冻后收敛。
   - DM-GAP-10 不采纳（消费必须选账户）；discard 改幂等；删账号勾选框默认不勾+动态提示仅存本地的记录条数；删 App 提示为设置页常驻文案。
 

@@ -766,9 +766,20 @@ test('second-call failures preserve verified Planner feedback without impersonat
     planner_version: 'expression-shadow-auto-v0.6',
     numbers: [1, 6.28],
     count_numbers: [1],
+    evidence: [{ kind: 'current_fact', source: 'local_record', reference: 'current_fact', field: null }],
     number_facts: [
-      { value: 1, meaning: 'first_occurrence_count', role: 'count' },
-      { value: 6.28, meaning: 'current_record_amount', role: 'measure' },
+      {
+        value: 1,
+        meaning: 'first_occurrence_count',
+        role: 'count',
+        evidence: [{ kind: 'current_fact', source: 'local_record', reference: 'current_fact', field: null }],
+      },
+      {
+        value: 6.28,
+        meaning: 'current_record_amount',
+        role: 'measure',
+        evidence: [{ kind: 'current_fact', source: 'local_record', reference: 'current_fact', field: 'amount' }],
+      },
     ],
     claim_fingerprint: 'fnv1a64:first-occurrence',
   }
@@ -862,7 +873,13 @@ test('generic model copy remains Voice copy while grounded copy may claim covera
     planner_version: 'expression-shadow-auto-v0.6',
     numbers: [1],
     count_numbers: [1],
-    number_facts: [{ value: 1, meaning: 'first_occurrence_count', role: 'count' }],
+    evidence: [{ kind: 'current_fact', source: 'local_record', reference: 'current_fact', field: null }],
+    number_facts: [{
+      value: 1,
+      meaning: 'first_occurrence_count',
+      role: 'count',
+      evidence: [{ kind: 'current_fact', source: 'local_record', reference: 'current_fact', field: null }],
+    }],
     claim_fingerprint: 'fnv1a64:first-occurrence-voice',
   }
   const options = {

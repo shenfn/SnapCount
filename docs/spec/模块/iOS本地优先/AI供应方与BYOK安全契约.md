@@ -25,6 +25,8 @@ ExpressionProvider: Disabled / Hosted / BYOK
 
 启用 AI 时只发送完成当前任务所需的数据。默认不发送完整历史、账户余额、无关数据域或整份个人上下文。
 
+本地 Companion 的记忆传输遵循 `companion_memory_enabled`：开启时只附带与当前记录同域的结构化摘要（最多 8 条、每条最多 240 字），用于调整陪伴表达；关闭时不得读取或发送。Hosted 请求经芥子 Edge Function 转给当前模型服务商，BYOK 请求直接发给用户选择的服务商。Edge Function 在本次请求内消费摘要，不落业务表、记忆表、AI 原始日志或同步 outbox。本地 Planner 候选可以作为当前生成请求的上下文，但在 iOS 不显示为独立反馈卡；PWA 云端 Planner 行为保持不变。
+
 ### LOCAL-AI-003：发送前可解释
 
 设置页必须说明请求发送给谁、是否经过项目服务器、会发送哪类数据、结果保存在哪里。高敏感数据首次发送前应有明确确认。

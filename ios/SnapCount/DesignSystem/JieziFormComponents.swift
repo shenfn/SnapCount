@@ -9,12 +9,6 @@ struct JieziFormTopBar: View {
     let onSubmit: () -> Void
 
     var body: some View {
-        ZStack {
-            Text(title)
-                .font(JieziType.cardTitle)
-                .foregroundStyle(palette.ink)
-                .lineLimit(1)
-
             HStack(spacing: JieziSpacing.md) {
                 Button {
                     JieziHaptics.tap()
@@ -22,7 +16,7 @@ struct JieziFormTopBar: View {
                 } label: {
                     Image(systemName: "xmark")
                         .font(.system(size: 14, weight: .semibold))
-                        .frame(width: 40, height: 40)
+                        .frame(width: 44, height: 44)
                         .foregroundStyle(palette.ink)
                         .background(palette.paper.opacity(0.78), in: Circle())
                         .overlay(Circle().stroke(palette.brand.opacity(0.12), lineWidth: 1))
@@ -31,7 +25,13 @@ struct JieziFormTopBar: View {
                 .disabled(isWorking)
                 .accessibilityLabel("取消")
 
-                Spacer(minLength: 88)
+                Text(title)
+                    .font(JieziType.prototypeBrand)
+                    .foregroundStyle(palette.ink)
+                    .frame(maxWidth: .infinity)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityAddTraits(.isHeader)
 
                 Button {
                     JieziHaptics.confirm()
@@ -50,16 +50,15 @@ struct JieziFormTopBar: View {
                     .font(JieziFont.subheadline.weight(.semibold))
                     .foregroundStyle(.white)
                     .padding(.horizontal, JieziSpacing.md)
-                    .frame(minWidth: 80, minHeight: 40)
+                    .frame(minWidth: 80, minHeight: 44)
                     .background(palette.brand, in: RoundedRectangle(cornerRadius: JieziRadius.Semantic.input, style: .continuous))
                 }
                 .buttonStyle(JieziPressableButtonStyle(pressedScale: 0.96))
                 .disabled(isWorking)
             }
-        }
         .padding(.horizontal, JieziSpacing.Semantic.page_padding)
         .padding(.vertical, JieziSpacing.sm)
-        .background(.ultraThinMaterial)
+        .background(JieziScene.expense.surface)
         .overlay(alignment: .bottom) {
             Rectangle()
                 .fill(palette.brand.opacity(0.08))
@@ -82,20 +81,7 @@ struct JieziFormSection<Content: View>: View {
             VStack(spacing: 0) {
                 content()
             }
-            .padding(.horizontal, JieziSpacing.Semantic.item_gap)
-            .background(
-                palette.paper.opacity(0.86),
-                in: RoundedRectangle(cornerRadius: JieziRadius.Semantic.input, style: .continuous)
-            )
-            .background(
-                .ultraThinMaterial,
-                in: RoundedRectangle(cornerRadius: JieziRadius.Semantic.input, style: .continuous)
-            )
-            .overlay {
-                RoundedRectangle(cornerRadius: JieziRadius.Semantic.input, style: .continuous)
-                    .stroke(palette.brand.opacity(0.10), lineWidth: 1)
-            }
-            .jieziShadow(JieziShadows.Semantic.card(palette))
+            .jieziCard(palette: palette, solid: true)
         }
     }
 }

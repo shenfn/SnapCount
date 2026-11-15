@@ -3,6 +3,756 @@ import XCTest
 @testable import SnapCount
 
 final class LocalPhase1DataModelTests: XCTestCase {
+    func testLF03417SleepMinutesRejectFiniteIntegerOverflow() {
+        for field in ["sleep_minutes", "sleep_hours"] {
+            XCTAssertThrowsError(try LocalRecordCodec.normalizedPayload(domainKey: "sleep", payload: [field: AnyCodable(1e100)]))
+        }
+    }
+    func testLF03417CalendarDatesMustExist() throws {
+        for day in ["2026-02-29", "2026-04-31", "2026-13-01"] {
+            XCTAssertThrowsError(try LocalRecordValidation.validate(domainKey: "sport", title: "跑步", recordDate: day))
+        }
+        XCTAssertNoThrow(try LocalRecordValidation.validate(domainKey: "sport", title: "跑步", recordDate: "2024-02-29"))
+    }
+
+    func testLF00603RepeatedStagingDiscardKeepsTerminalState() async throws {
+        let databaseURL = temporaryDatabaseURL()
+        defer { removeDatabase(at: databaseURL) }
+        let database = try LocalDatabase(databaseURL: databaseURL)
+        let profile = try LocalProfileStore(database: database).activeProfile()
+        let repository = try LocalRecordRepository(database: database)
+        let useCase = LocalRecordUseCase(profileStore: LocalProfileStore(database: database), repository: repository)
+        let staged = try await useCase.stage(LocalRecordCandidate(id: "discard-idempotence", domainKey: "sport", title: "运动", summary: "候选", payload: ["sport_type": AnyCodable("跑步"), "duration_minutes": AnyCodable(20)], confidence: 0.5, recordDate: "2026-10-25", recordTime: nil, imageData: nil, createdAt: Date()))
+        try repository.discardStaging(id: staged.record.id, updatedAt: Date(), profileID: profile.id)
+        XCTAssertNoThrow(try repository.discardStaging(id: staged.record.id, updatedAt: Date(), profileID: profile.id))
+    }
+    func testLF03417StringNonFiniteDurationsAreRejectedAtSharedBoundary() throws {
+        for value in ["inf", "-inf", "nan", "1e309"] {
+            for (domain, field, required) in [
+                ("sport", "duration_minutes", "sport_type"),
+                ("reading", "reading_minutes", "book_name")
+            ] {
+                XCTAssertThrowsError(try LocalRecordCodec.normalizedPayload(
+                    domainKey: domain,
+                    payload: [field: AnyCodable(value), required: AnyCodable("合成记录")]
+                ), "\(domain) must reject \(value)")
+            }
+        }
+        let valid = try LocalRecordCodec.normalizedPayload(
+            domainKey: "sport",
+            payload: ["duration_minutes": AnyCodable("20"), "sport_type": AnyCodable("跑步")]
+        )
+        XCTAssertEqual(valid["duration_minutes"]?.value as? String, "20")
+    }
+
+    func testLF03721LocalWalletRepaymentScreenshotIsKeptAsReviewableCandidate() async throws {
+        let databaseURL = temporaryDatabaseURL()
+        defer { removeDatabase(at: databaseURL) }
+        let database = try LocalDatabase(databaseURL: databaseURL)
+        let profileStore = LocalProfileStore(database: database)
+        let recordUseCase = LocalRecordUseCase(
+            profileStore: profileStore,
+            repository: try LocalRecordRepository(database: database)
+        )
+
+        let outcome: LocalStagingOutcome
+        do {
+            outcome = try await recordUseCase.stage(LocalRecordCandidate(
+            id: "synthetic-wallet-repayment",
+            domainKey: "wallet",
+            title: "合成信用卡还款截图",
+            summary: "识别到已还款状态与金额",
+            payload: [
+                "record_kind": AnyCodable("liability_snapshot"),
+                "status": AnyCodable("paid"),
+                "amount": AnyCodable(40.0)
+            ],
+            confidence: 0.91,
+            recordDate: "2026-10-25",
+            recordTime: "12:30",
+            imageData: nil,
+            createdAt: Date(timeIntervalSince1970: 1_800_000_000),
+                evidenceFields: ["status", "amount"]
+            ))
+        } catch {
+            XCTFail("本地还款截图候选应进入待复核队列，实际失败：\(error)")
+            return
+        }
+
+        XCTAssertEqual(outcome.record.domainKey, "wallet")
+        XCTAssertEqual(outcome.record.status, .pendingReview)
+        let month = try await recordUseCase.month("2026-10")
+        XCTAssertTrue(month.records.isEmpty, "截图候选不能自动变成普通记录")
+    }
+
+    func testLF01401LocalInsightAggregatesOnlyCommittedFactsAcrossSixDomains() throws {
+        let databaseURL = temporaryDatabaseURL()
+        defer { removeDatabase(at: databaseURL) }
+        let database = try LocalDatabase(databaseURL: databaseURL)
+        let profile = try LocalProfileStore(database: database).activeProfile()
+        let expenseRepository = try LocalExpenseRepository(database: database)
+        let account = try expenseRepository.createAccount(LocalAccountDraft(
+            id: UUID(), profileID: profile.id, name: "合成现金", kind: "cash", currency: "CNY",
+            openingBalanceMinor: 0, createdAt: Date(timeIntervalSince1970: 1_800_000_000)
+        ))
+        let day = "2026-09-19"
+        _ = try expenseRepository.createExpense(LocalExpenseDraft(
+            id: UUID(), profileID: profile.id, accountID: account.id, amountMinor: 1_234, currency: "CNY",
+            merchantName: "合成消费", platform: "线下", category: "other", paymentMethod: "现金",
+            transactionDate: day, transactionTime: nil, note: nil, createdAt: Date(timeIntervalSince1970: 1_800_000_001)
+        ), operationID: UUID())
+        _ = try expenseRepository.createIncome(LocalIncomeDraft(
+            id: UUID(), profileID: profile.id, accountID: account.id, amountMinor: 5_000, currency: "CNY",
+            sourceName: "合成收入", category: "other", incomeDate: day, occurredAt: nil,
+            note: nil, createdAt: Date(timeIntervalSince1970: 1_800_000_002)
+        ))
+        let records = try LocalRecordRepository(database: database)
+        let domainFacts: [(String, [String: AnyCodable])] = [
+            ("sleep", ["sleep_hours": AnyCodable(7.0), "quality_score": AnyCodable(4)]),
+            ("sport", ["sport_type": AnyCodable("走路"), "duration_minutes": AnyCodable(30)]),
+            ("reading", ["book_name": AnyCodable("合成书"), "reading_minutes": AnyCodable(20)]),
+            ("food", ["meal_type": AnyCodable("午餐"), "total_calorie_kcal": AnyCodable(650)])
+        ]
+        for (index, domainFact) in domainFacts.enumerated() {
+            _ = try records.createRecord(LocalRecordDraft(
+                id: UUID(), profileID: profile.id, domainKey: domainFact.0, title: "合成\(domainFact.0)",
+                summary: "", payloadJSON: try LocalRecordCodec.encode(domainFact.1), recordDate: day,
+                recordTime: nil, note: nil, imagePath: nil, imageHash: nil,
+                createdAt: Date(timeIntervalSince1970: 1_800_000_010 + Double(index))
+            ))
+        }
+
+        let facts = try LocalFactReader(database: database).range(profileID: profile.id, from: day, to: day).facts
+        let rows = LocalInsightAggregator.rows(from: facts)
+
+        XCTAssertEqual(rows.count, 1)
+        let row = try XCTUnwrap(rows.first)
+        XCTAssertEqual(row.date, day)
+        XCTAssertEqual(row.expenseTotal, 12.34, accuracy: 0.001)
+        XCTAssertEqual(row.expenseCount, 1)
+        XCTAssertEqual(row.incomeTotal, 50, accuracy: 0.001)
+        XCTAssertEqual(row.incomeCount, 1)
+        XCTAssertEqual(row.sleepMinutes, 420, accuracy: 0.001)
+        XCTAssertEqual(row.sleepScoreAverage ?? 0, 4, accuracy: 0.001)
+        XCTAssertEqual(row.sleepCount, 1)
+        XCTAssertEqual(row.sportMinutes, 30, accuracy: 0.001)
+        XCTAssertEqual(row.sportCount, 1)
+        XCTAssertEqual(row.readingMinutes, 20, accuracy: 0.001)
+        XCTAssertEqual(row.readingCount, 1)
+        XCTAssertEqual(row.foodCalories, 650, accuracy: 0.001)
+        XCTAssertEqual(row.foodMeals, 1)
+        XCTAssertTrue(row.hasAnyData)
+    }
+
+    func testLF03726BillDay31ClampsLeapAndNonLeapFebruaryAndKeepsStableCycles() throws {
+        let databaseURL = temporaryDatabaseURL()
+        defer { removeDatabase(at: databaseURL) }
+        let database = try LocalDatabase(databaseURL: databaseURL)
+        let profile = try LocalProfileStore(database: database).activeProfile()
+        let repository = try LocalExpenseRepository(database: database)
+        let liabilityID = UUID()
+        let now = ISO8601DateFormatter().date(from: "2025-02-10T00:00:00+08:00")!
+        _ = try repository.createAccount(LocalAccountDraft(
+            id: liabilityID, profileID: profile.id, name: "月底账单", kind: "credit_card", currency: "CNY",
+            openingBalanceMinor: 0, createdAt: now, billDay: 31, paymentDueDay: 31
+        ))
+        for day in ["2024-01-31", "2024-02-01", "2024-02-29", "2025-01-31", "2025-02-01", "2025-02-28"] {
+            _ = try repository.createExpense(LocalExpenseDraft(
+                id: UUID(), profileID: profile.id, accountID: liabilityID, amountMinor: 100, currency: "CNY",
+                merchantName: "合成消费", platform: "", category: "other", paymentMethod: "credit_card",
+                transactionDate: day, transactionTime: nil, note: nil, createdAt: now
+            ), operationID: UUID())
+        }
+
+        let leap = try XCTUnwrap(repository.ensureRepaymentCycles(profileID: profile.id, monthKey: "2024-02", now: now).first)
+        XCTAssertEqual(leap.statementStartDate, "2024-02-01")
+        XCTAssertEqual(leap.statementEndDate, "2024-02-29")
+        XCTAssertEqual(leap.dueDate, "2024-02-29")
+        XCTAssertEqual(leap.statementAmountMinor, 200)
+
+        let nonLeap = try XCTUnwrap(repository.ensureRepaymentCycles(profileID: profile.id, monthKey: "2025-02", now: now).first)
+        XCTAssertEqual(nonLeap.statementStartDate, "2025-02-01")
+        XCTAssertEqual(nonLeap.statementEndDate, "2025-02-28")
+        XCTAssertEqual(nonLeap.dueDate, "2025-02-28")
+        XCTAssertEqual(nonLeap.statementAmountMinor, 200)
+        XCTAssertEqual(try repository.ensureRepaymentCycles(profileID: profile.id, monthKey: "2025-02", now: now).count, 1)
+    }
+
+    func testLF03725BillWindowUsesShanghaiInclusiveEdgesAndExcludesVoidedAndIncomeEntries() throws {
+        let databaseURL = temporaryDatabaseURL()
+        defer { removeDatabase(at: databaseURL) }
+        let database = try LocalDatabase(databaseURL: databaseURL)
+        let profile = try LocalProfileStore(database: database).activeProfile()
+        let repository = try LocalExpenseRepository(database: database)
+        let accountID = UUID()
+        let now = ISO8601DateFormatter().date(from: "2026-03-20T00:00:00+08:00")!
+        _ = try repository.createAccount(LocalAccountDraft(
+            id: accountID, profileID: profile.id, name: "账单窗口边界", kind: "credit_card", currency: "CNY",
+            openingBalanceMinor: 0, createdAt: now, billDay: 15, paymentDueDay: 20
+        ))
+        let createdAt: (String) -> Date = { day in
+            ISO8601DateFormatter().date(from: "\(day)T12:00:00+08:00")!
+        }
+        let createExpense: (String, Int64) throws -> UUID = { day, amount in
+            let id = UUID()
+            _ = try repository.createExpense(LocalExpenseDraft(
+                id: id, profileID: profile.id, accountID: accountID, amountMinor: amount, currency: "CNY",
+                merchantName: "合成边界消费", platform: "线下", category: "other", paymentMethod: "信用卡",
+                transactionDate: day, transactionTime: nil, note: nil, createdAt: createdAt(day)
+            ), operationID: UUID())
+            return id
+        }
+        _ = try createExpense("2026-02-15", 100)
+        _ = try createExpense("2026-02-16", 200)
+        let voidedExpenseID = try createExpense("2026-03-01", 500)
+        _ = try createExpense("2026-03-15", 300)
+        _ = try createExpense("2026-03-16", 400)
+        _ = try repository.createIncome(LocalIncomeDraft(
+            id: UUID(), profileID: profile.id, accountID: accountID, amountMinor: 600, currency: "CNY",
+            sourceName: "合成收入", category: "other", incomeDate: "2026-03-10", occurredAt: createdAt("2026-03-10"),
+            note: nil, createdAt: createdAt("2026-03-10")
+        ))
+        try database.writer.write { db in
+            try db.execute(sql: """
+                UPDATE local_account_entries SET voided_at = ?
+                WHERE source_kind = 'expense' AND source_id = ? AND voided_at IS NULL
+                """, arguments: [now, voidedExpenseID.uuidString])
+        }
+
+        let cycle = try XCTUnwrap(repository.ensureRepaymentCycles(
+            profileID: profile.id, monthKey: "2026-03", now: now
+        ).first)
+
+        XCTAssertEqual(cycle.statementStartDate, "2026-02-16")
+        XCTAssertEqual(cycle.statementEndDate, "2026-03-15")
+        XCTAssertEqual(cycle.statementAmountMinor, 500)
+    }
+
+    func testLF03725And30ReconciliationCutoffAndHistoricalGraceTransitionPersistLocally() throws {
+        let databaseURL = temporaryDatabaseURL()
+        defer { removeDatabase(at: databaseURL) }
+        let database = try LocalDatabase(databaseURL: databaseURL)
+        let profile = try LocalProfileStore(database: database).activeProfile()
+        let repository = try LocalExpenseRepository(database: database)
+        let accountID = UUID()
+        let now = ISO8601DateFormatter().date(from: "2026-03-20T00:00:00+08:00")!
+        let reconciledAt = ISO8601DateFormatter().date(from: "2026-02-20T00:00:00+08:00")!
+        _ = try repository.createAccount(LocalAccountDraft(
+            id: accountID, profileID: profile.id, name: "已对账账户", kind: "credit_card", currency: "CNY",
+            openingBalanceMinor: 0, createdAt: now, billDay: 15, paymentDueDay: 20,
+            gracePeriodDays: 2, lastReconciledAt: reconciledAt
+        ))
+        for (day, amount) in [("2026-02-20", 700), ("2026-02-21", 200)] {
+            let createdAt = ISO8601DateFormatter().date(from: "\(day)T00:00:00+08:00")!
+            _ = try repository.createExpense(LocalExpenseDraft(
+                id: UUID(), profileID: profile.id, accountID: accountID, amountMinor: Int64(amount), currency: "CNY",
+                merchantName: "合成消费", platform: "", category: "other", paymentMethod: "credit_card",
+                transactionDate: day, transactionTime: nil, note: nil, createdAt: createdAt
+            ), operationID: UUID())
+        }
+        try database.writer.write { db in
+            try db.execute(sql: """
+                INSERT INTO local_repayment_cycles (
+                    id, profile_id, account_id, cycle_month, due_date, status, source, created_at, updated_at
+                ) VALUES (?, ?, ?, '2026-02', '2026-03-17', 'overdue_unconfirmed', 'system', ?, ?)
+                """, arguments: [UUID().uuidString, profile.id.uuidString, accountID.uuidString, now, now])
+        }
+
+        let march = try XCTUnwrap(repository.ensureRepaymentCycles(profileID: profile.id, monthKey: "2026-03", now: now).first)
+        XCTAssertEqual(march.statementAmountMinor, 200)
+        XCTAssertEqual(try repository.accounts(profileID: profile.id).first?.lastReconciledAt, reconciledAt)
+        let february = try XCTUnwrap(repository.repaymentCycles(accountID: accountID).first { $0.cycleMonth == "2026-02" })
+        XCTAssertEqual(february.status, "historical_unconfirmed")
+    }
+
+    func testLF03719And46RevocationRecalculatesRemainingPaymentAndDueDateStatus() throws {
+        let databaseURL = temporaryDatabaseURL()
+        defer { removeDatabase(at: databaseURL) }
+        let database = try LocalDatabase(databaseURL: databaseURL)
+        let profile = try LocalProfileStore(database: database).activeProfile()
+        let repository = try LocalExpenseRepository(database: database)
+        let accountID = UUID()
+        let now = ISO8601DateFormatter().date(from: "2026-03-20T00:00:00+08:00")!
+        _ = try repository.createAccount(LocalAccountDraft(
+            id: accountID, profileID: profile.id, name: "撤销边界", kind: "credit_card", currency: "CNY",
+            openingBalanceMinor: 0, createdAt: now, billDay: 15, paymentDueDay: 20
+        ))
+        _ = try repository.createExpense(LocalExpenseDraft(
+            id: UUID(), profileID: profile.id, accountID: accountID, amountMinor: 10_000, currency: "CNY",
+            merchantName: "合成消费", platform: "", category: "other", paymentMethod: "credit_card",
+            transactionDate: "2026-03-01", transactionTime: nil, note: nil, createdAt: now
+        ), operationID: UUID())
+        let cycle = try XCTUnwrap(repository.ensureRepaymentCycles(profileID: profile.id, monthKey: "2026-03", now: now).first)
+
+        let firstPaymentID = UUID()
+        let secondPaymentID = UUID()
+        try database.writer.write { db in
+            for (id, amount) in [(firstPaymentID, 3_000), (secondPaymentID, 1_000)] {
+                try db.execute(sql: """
+                    INSERT INTO local_liability_payments (
+                        id, profile_id, account_id, statement_id, amount_minor, overpayment_amount_minor,
+                        paid_at, source, status, note, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, 0, ?, 'manual', 'confirmed', '', ?, ?)
+                    """, arguments: [id.uuidString, profile.id.uuidString, accountID.uuidString,
+                                      cycle.id.uuidString, Int64(amount), now, now, now])
+            }
+            try db.execute(sql: "UPDATE local_repayment_cycles SET min_payment_amount_minor = 1_000 WHERE id = ?", arguments: [cycle.id.uuidString])
+        }
+
+        let afterFirst = try XCTUnwrap(repository.revokeLiabilityPayment(
+            id: firstPaymentID, profileID: profile.id, reason: "撤销较大付款", now: now
+        ))
+        XCTAssertEqual(afterFirst.paidAmountMinor, 1_000)
+        XCTAssertEqual(afterFirst.remainingAmountMinor, 9_000)
+        XCTAssertEqual(afterFirst.status, "minimum_paid")
+
+        let afterLast = try XCTUnwrap(repository.revokeLiabilityPayment(
+            id: secondPaymentID, profileID: profile.id, reason: "撤销最后付款", now: now
+        ))
+        XCTAssertEqual(afterLast.paidAmountMinor, 0)
+        XCTAssertEqual(afterLast.remainingAmountMinor, 10_000)
+        XCTAssertEqual(afterLast.status, "due_today")
+
+        for (dueDate, expectedStatus) in [("2026-03-19", "overdue_unconfirmed"), ("2026-03-20", "due_today"), ("2026-03-21", "pending")] {
+            try database.writer.write { db in
+                try db.execute(sql: "UPDATE local_repayment_cycles SET due_date = ? WHERE id = ?", arguments: [dueDate, cycle.id.uuidString])
+            }
+            let payment = try repository.confirmRepayment(
+                cycleID: cycle.id, profileID: profile.id, paidAmountMinor: 500,
+                debitAccountID: nil, status: nil, note: "状态合成样本", paidAt: now
+            )
+            XCTAssertEqual(payment.status, "partial_paid")
+            let revoked = try XCTUnwrap(repository.revokeLiabilityPayment(
+                id: try XCTUnwrap(repository.liabilityPayments(accountID: accountID).first { $0.status == "confirmed" }).id,
+                profileID: profile.id, reason: "状态合成撤销", now: now
+            ))
+            XCTAssertEqual(revoked.paidAmountMinor, 0)
+            XCTAssertEqual(revoked.remainingAmountMinor, 10_000)
+            XCTAssertEqual(revoked.status, expectedStatus)
+        }
+    }
+
+    func testLF03715DebitAccountUsesExplicitThenCycleThenLiabilityDefaultAndRejectsInvalidExplicit() throws {
+        let databaseURL = temporaryDatabaseURL()
+        defer { removeDatabase(at: databaseURL) }
+        let database = try LocalDatabase(databaseURL: databaseURL)
+        let profile = try LocalProfileStore(database: database).activeProfile()
+        let repository = try LocalExpenseRepository(database: database)
+        let now = ISO8601DateFormatter().date(from: "2026-03-10T00:00:00+08:00")!
+        let accountDefaultID = UUID(), cycleDefaultID = UUID(), explicitID = UUID(), liabilityID = UUID()
+        for (id, name, balance) in [
+            (accountDefaultID, "账户默认", Int64(20_000)),
+            (cycleDefaultID, "账期默认", Int64(30_000)),
+            (explicitID, "显式扣款", Int64(40_000))
+        ] {
+            _ = try repository.createAccount(LocalAccountDraft(
+                id: id, profileID: profile.id, name: name, kind: "cash", currency: "CNY",
+                openingBalanceMinor: balance, createdAt: now
+            ))
+        }
+        _ = try repository.createAccount(LocalAccountDraft(
+            id: liabilityID, profileID: profile.id, name: "优先级信用卡", kind: "credit_card", currency: "CNY",
+            openingBalanceMinor: 0, createdAt: now, billDay: 15, paymentDueDay: 20,
+            autoDebitAccountID: accountDefaultID
+        ))
+        _ = try repository.createExpense(LocalExpenseDraft(
+            id: UUID(), profileID: profile.id, accountID: liabilityID, amountMinor: 10_000, currency: "CNY",
+            merchantName: "合成账单消费", platform: "线下", category: "other", paymentMethod: "信用卡",
+            transactionDate: "2026-03-01", transactionTime: nil, note: nil, createdAt: now
+        ), operationID: UUID())
+        let cycle = try XCTUnwrap(repository.ensureRepaymentCycles(
+            profileID: profile.id, monthKey: "2026-03", now: now
+        ).first)
+        try database.writer.write { db in
+            try db.execute(sql: "UPDATE local_repayment_cycles SET auto_debit_account_id = ? WHERE id = ?",
+                           arguments: [cycleDefaultID.uuidString, cycle.id.uuidString])
+        }
+
+        XCTAssertThrowsError(try repository.confirmRepayment(
+            cycleID: cycle.id, profileID: profile.id, paidAmountMinor: 1_000,
+            debitAccountID: liabilityID, status: nil, note: "显式非法账户不得回退", paidAt: now
+        ))
+        XCTAssertTrue(try repository.liabilityPayments(accountID: liabilityID).isEmpty)
+        XCTAssertEqual(try repository.accountBalanceMinor(accountID: liabilityID), 10_000)
+        XCTAssertEqual(try repository.accountBalanceMinor(accountID: accountDefaultID), 20_000)
+        XCTAssertEqual(try repository.accountBalanceMinor(accountID: cycleDefaultID), 30_000)
+        XCTAssertEqual(try repository.accountBalanceMinor(accountID: explicitID), 40_000)
+
+        _ = try repository.confirmRepayment(
+            cycleID: cycle.id, profileID: profile.id, paidAmountMinor: 1_000,
+            debitAccountID: explicitID, status: nil, note: "显式优先", paidAt: now
+        )
+        var confirmed = try XCTUnwrap(repository.liabilityPayments(accountID: liabilityID).first { $0.status == "confirmed" })
+        XCTAssertEqual(confirmed.debitAccountID, explicitID)
+        XCTAssertEqual(try repository.accountBalanceMinor(accountID: explicitID), 39_000)
+        XCTAssertEqual(try repository.accountBalanceMinor(accountID: cycleDefaultID), 30_000)
+
+        _ = try repository.confirmRepayment(
+            cycleID: cycle.id, profileID: profile.id, paidAmountMinor: 2_000,
+            debitAccountID: nil, status: nil, note: "账期默认优先于账户默认", paidAt: now.addingTimeInterval(1)
+        )
+        confirmed = try XCTUnwrap(repository.liabilityPayments(accountID: liabilityID).first { $0.status == "confirmed" })
+        XCTAssertEqual(confirmed.debitAccountID, cycleDefaultID)
+        XCTAssertEqual(try repository.accountBalanceMinor(accountID: explicitID), 40_000)
+        XCTAssertEqual(try repository.accountBalanceMinor(accountID: cycleDefaultID), 28_000)
+
+        try database.writer.write { db in
+            try db.execute(sql: "UPDATE local_repayment_cycles SET auto_debit_account_id = NULL WHERE id = ?",
+                           arguments: [cycle.id.uuidString])
+        }
+        _ = try repository.confirmRepayment(
+            cycleID: cycle.id, profileID: profile.id, paidAmountMinor: 3_000,
+            debitAccountID: nil, status: nil, note: "使用负债账户默认", paidAt: now.addingTimeInterval(2)
+        )
+        confirmed = try XCTUnwrap(repository.liabilityPayments(accountID: liabilityID).first { $0.status == "confirmed" })
+        XCTAssertEqual(confirmed.debitAccountID, accountDefaultID)
+        XCTAssertEqual(try repository.accountBalanceMinor(accountID: accountDefaultID), 17_000)
+        XCTAssertEqual(try repository.accountBalanceMinor(accountID: cycleDefaultID), 30_000)
+        XCTAssertEqual(try repository.accountBalanceMinor(accountID: explicitID), 40_000)
+        XCTAssertEqual(try repository.accountBalanceMinor(accountID: liabilityID), 7_000)
+
+        XCTAssertThrowsError(try repository.confirmRepayment(
+            cycleID: cycle.id, profileID: profile.id, paidAmountMinor: 4_000,
+            debitAccountID: liabilityID, status: nil, note: "非法显式账户不得破坏原付款", paidAt: now.addingTimeInterval(3)
+        ))
+        confirmed = try XCTUnwrap(repository.liabilityPayments(accountID: liabilityID).first { $0.status == "confirmed" })
+        XCTAssertEqual(confirmed.amountMinor, 3_000)
+        XCTAssertEqual(try repository.accountBalanceMinor(accountID: accountDefaultID), 17_000)
+        XCTAssertEqual(try repository.accountBalanceMinor(accountID: liabilityID), 7_000)
+    }
+
+    func testLF03711To18LocalRepaymentReconfirmationAndRevocationAreAtomicAndIdempotent() throws {
+        let databaseURL = temporaryDatabaseURL()
+        defer { removeDatabase(at: databaseURL) }
+        let database = try LocalDatabase(databaseURL: databaseURL)
+        let profile = try LocalProfileStore(database: database).activeProfile()
+        let repository = try LocalExpenseRepository(database: database)
+        let debitID = UUID(), liabilityID = UUID()
+        let date = ISO8601DateFormatter().date(from: "2026-03-10T00:00:00+08:00")!
+        _ = try repository.createAccount(LocalAccountDraft(
+            id: debitID, profileID: profile.id, name: "扣款账户", kind: "cash", currency: "CNY",
+            openingBalanceMinor: 20_000, createdAt: date
+        ))
+        _ = try repository.createAccount(LocalAccountDraft(
+            id: liabilityID, profileID: profile.id, name: "信用卡", kind: "credit_card", currency: "CNY",
+            openingBalanceMinor: 0, createdAt: date, billDay: 15, paymentDueDay: 20,
+            autoDebitAccountID: debitID
+        ))
+        for (id, day, amount) in [
+            (UUID(), "2026-02-15", 1_000), (UUID(), "2026-02-16", 2_000),
+            (UUID(), "2026-03-15", 6_000), (UUID(), "2026-03-16", 4_000)
+        ] {
+            _ = try repository.createExpense(LocalExpenseDraft(
+                id: id, profileID: profile.id, accountID: liabilityID, amountMinor: Int64(amount), currency: "CNY",
+                merchantName: "合成消费", platform: "", category: "other", paymentMethod: "credit_card",
+                transactionDate: day, transactionTime: nil, note: nil, createdAt: date
+            ), operationID: UUID())
+        }
+
+        let cycles = try repository.ensureRepaymentCycles(profileID: profile.id, monthKey: "2026-03", now: date)
+        let cycle = try XCTUnwrap(cycles.first { $0.accountID == liabilityID })
+        XCTAssertEqual(cycle.statementStartDate, "2026-02-16")
+        XCTAssertEqual(cycle.statementEndDate, "2026-03-15")
+        XCTAssertEqual(cycle.dueDate, "2026-03-20")
+        XCTAssertEqual(cycle.statementAmountMinor, 8_000)
+        XCTAssertEqual(try repository.ensureRepaymentCycles(profileID: profile.id, monthKey: "2026-03", now: date).count, 1)
+
+        try database.writer.write { db in
+            try db.execute(sql: """
+                CREATE TRIGGER fail_synthetic_repayment_entry BEFORE INSERT ON local_account_entries
+                WHEN NEW.entry_kind = 'transfer'
+                BEGIN SELECT RAISE(ABORT, 'synthetic repayment entry failure'); END;
+                """)
+        }
+        XCTAssertThrowsError(try repository.confirmRepayment(
+            cycleID: cycle.id, profileID: profile.id, paidAmountMinor: 3_000,
+            debitAccountID: nil, status: nil, note: "原子性失败注入", paidAt: date
+        ))
+        XCTAssertEqual(try repository.accountBalanceMinor(accountID: liabilityID), 13_000)
+        XCTAssertEqual(try repository.accountBalanceMinor(accountID: debitID), 20_000)
+        XCTAssertTrue(try repository.liabilityPayments(accountID: liabilityID).isEmpty)
+        XCTAssertEqual(try XCTUnwrap(repository.repaymentCycles(accountID: liabilityID).first).status, "pending")
+        try database.writer.write { db in try db.execute(sql: "DROP TRIGGER fail_synthetic_repayment_entry") }
+
+        try database.writer.write { db in
+            try db.execute(sql: """
+                CREATE TRIGGER fail_synthetic_repayment_second_side BEFORE INSERT ON local_account_entries
+                WHEN NEW.entry_kind = 'transfer' AND NEW.account_id = '\(debitID.uuidString)'
+                BEGIN SELECT RAISE(ABORT, 'synthetic second-side failure'); END;
+                """)
+        }
+        XCTAssertThrowsError(try repository.confirmRepayment(
+            cycleID: cycle.id, profileID: profile.id, paidAmountMinor: 3_000,
+            debitAccountID: nil, status: nil, note: "第二侧失败注入", paidAt: date
+        ))
+        XCTAssertEqual(try repository.accountBalanceMinor(accountID: liabilityID), 13_000)
+        XCTAssertEqual(try repository.accountBalanceMinor(accountID: debitID), 20_000)
+        XCTAssertTrue(try repository.liabilityPayments(accountID: liabilityID).isEmpty)
+        XCTAssertEqual(try XCTUnwrap(repository.repaymentCycles(accountID: liabilityID).first).status, "pending")
+        try database.writer.write { db in try db.execute(sql: "DROP TRIGGER fail_synthetic_repayment_second_side") }
+
+        try database.writer.write { db in
+            try db.execute(sql: """
+                CREATE TRIGGER fail_synthetic_repayment_cycle BEFORE UPDATE ON local_repayment_cycles
+                WHEN OLD.id = '\(cycle.id.uuidString)'
+                BEGIN SELECT RAISE(ABORT, 'synthetic repayment cycle failure'); END;
+                """)
+        }
+        XCTAssertThrowsError(try repository.confirmRepayment(
+            cycleID: cycle.id, profileID: profile.id, paidAmountMinor: 3_000,
+            debitAccountID: nil, status: nil, note: "周期更新失败注入", paidAt: date
+        ))
+        XCTAssertEqual(try repository.accountBalanceMinor(accountID: liabilityID), 13_000)
+        XCTAssertEqual(try repository.accountBalanceMinor(accountID: debitID), 20_000)
+        XCTAssertTrue(try repository.liabilityPayments(accountID: liabilityID).isEmpty)
+        XCTAssertEqual(try repository.accountEntries(accountID: liabilityID).filter { $0.voidedAt == nil }.count, 4)
+        XCTAssertEqual(try repository.accountEntries(accountID: debitID).filter { $0.voidedAt == nil }.count, 0)
+        XCTAssertEqual(try XCTUnwrap(repository.repaymentCycles(accountID: liabilityID).first).status, "pending")
+        try database.writer.write { db in try db.execute(sql: "DROP TRIGGER fail_synthetic_repayment_cycle") }
+
+        let first = try repository.confirmRepayment(
+            cycleID: cycle.id, profileID: profile.id, paidAmountMinor: 3_000,
+            debitAccountID: nil, status: nil, note: "第一次", paidAt: date
+        )
+        XCTAssertEqual(first.paidAmountMinor, 3_000)
+        XCTAssertEqual(first.remainingAmountMinor, 5_000)
+        XCTAssertEqual(try repository.accountBalanceMinor(accountID: liabilityID), 10_000)
+        XCTAssertEqual(try repository.accountBalanceMinor(accountID: debitID), 17_000)
+
+        _ = try repository.confirmRepayment(
+            cycleID: cycle.id, profileID: profile.id, paidAmountMinor: 4_000,
+            debitAccountID: nil, status: nil, note: "替代金额", paidAt: date.addingTimeInterval(1)
+        )
+        XCTAssertEqual(try repository.accountBalanceMinor(accountID: liabilityID), 9_000)
+        XCTAssertEqual(try repository.accountBalanceMinor(accountID: debitID), 16_000)
+
+        let overpaid = try repository.confirmRepayment(
+            cycleID: cycle.id, profileID: profile.id, paidAmountMinor: 16_000,
+            debitAccountID: nil, status: nil, note: "溢缴", paidAt: date.addingTimeInterval(2)
+        )
+        XCTAssertEqual(overpaid.paidAmountMinor, 16_000)
+        XCTAssertEqual(overpaid.remainingAmountMinor, 0)
+        XCTAssertEqual(try repository.accountBalanceMinor(accountID: liabilityID), 0)
+        XCTAssertEqual(try repository.accountBalanceMinor(accountID: debitID), 4_000)
+        let confirmed = try XCTUnwrap(repository.liabilityPayments(accountID: liabilityID).first { $0.status == "confirmed" })
+        XCTAssertEqual(confirmed.overpaymentAmountMinor, 3_000)
+
+        let revoked = try XCTUnwrap(repository.revokeLiabilityPayment(
+            id: confirmed.id, profileID: profile.id, reason: "测试撤销", now: date.addingTimeInterval(3)
+        ))
+        XCTAssertEqual(revoked.paidAmountMinor, 0)
+        XCTAssertEqual(revoked.remainingAmountMinor, 8_000)
+        XCTAssertEqual(revoked.status, "pending")
+        XCTAssertEqual(try repository.accountBalanceMinor(accountID: liabilityID), 13_000)
+        XCTAssertEqual(try repository.accountBalanceMinor(accountID: debitID), 20_000)
+        XCTAssertEqual(try repository.revokeLiabilityPayment(
+            id: confirmed.id, profileID: profile.id, reason: "重复撤销", now: date.addingTimeInterval(4)
+        ), revoked)
+        XCTAssertEqual(try repository.liabilityPayments(accountID: liabilityID).filter { $0.status == "voided" }.count, 3)
+        XCTAssertEqual(try repository.accountEntries(accountID: liabilityID).filter { $0.voidedAt == nil }.count, 4)
+
+        try database.writer.write { db in
+            try db.execute(sql: "UPDATE local_accounts SET auto_debit_account_id = NULL WHERE id = ?", arguments: [liabilityID.uuidString])
+            try db.execute(sql: "UPDATE local_repayment_cycles SET auto_debit_account_id = NULL WHERE id = ?", arguments: [cycle.id.uuidString])
+        }
+        _ = try repository.confirmRepayment(
+            cycleID: cycle.id, profileID: profile.id, paidAmountMinor: 5_000,
+            debitAccountID: nil, status: nil, note: "无扣款账户仍可还款", paidAt: date.addingTimeInterval(5)
+        )
+        let unlinkedPayment = try XCTUnwrap(repository.liabilityPayments(accountID: liabilityID).first { $0.status == "confirmed" })
+        XCTAssertNil(unlinkedPayment.debitAccountID)
+        XCTAssertEqual(try repository.accountBalanceMinor(accountID: liabilityID), 8_000)
+        XCTAssertEqual(try repository.accountBalanceMinor(accountID: debitID), 20_000)
+    }
+
+    func testLF03738LiabilityAccountConfigurationPersistsAcrossDatabaseReopen() throws {
+        let databaseURL = temporaryDatabaseURL()
+        defer { removeDatabase(at: databaseURL) }
+        let database = try LocalDatabase(databaseURL: databaseURL)
+        let profile = try LocalProfileStore(database: database).activeProfile()
+        let repository = try LocalExpenseRepository(database: database)
+        let debitAccountID = UUID(uuidString: "22222222-2222-2222-2222-222222222222")!
+        _ = try repository.createAccount(LocalAccountDraft(
+            id: debitAccountID, profileID: profile.id, name: "现金", kind: "cash", currency: "CNY",
+            openingBalanceMinor: 20_000, createdAt: Date(timeIntervalSince1970: 1_000)
+        ))
+        let liabilityID = UUID(uuidString: "33333333-3333-3333-3333-333333333333")!
+        _ = try repository.createAccount(LocalAccountDraft(
+            id: liabilityID, profileID: profile.id, name: "示例信用卡", kind: "credit_card", currency: "CNY",
+            openingBalanceMinor: 50_000, createdAt: Date(timeIntervalSince1970: 2_000),
+            institution: "示例银行", last4: "1234", billDay: 15, paymentDueDay: 25,
+            autoDebitAccountID: debitAccountID, autoConfirmRepayment: false, gracePeriodDays: 3,
+            isDefaultExpense: false, isDefaultIncome: false, isArchived: false, sortOrder: 1
+        ))
+        _ = try repository.createExpense(LocalExpenseDraft(
+            id: UUID(uuidString: "44444444-4444-4444-4444-444444444444")!,
+            profileID: profile.id, accountID: liabilityID, amountMinor: 3_000, currency: "CNY",
+            merchantName: "示例消费", platform: "", category: "other", paymentMethod: "credit_card",
+            transactionDate: "2026-10-25", transactionTime: nil, note: nil,
+            createdAt: Date(timeIntervalSince1970: 3_000)
+        ), operationID: UUID())
+
+        let reopened = try LocalExpenseRepository(database: LocalDatabase(databaseURL: databaseURL))
+        let saved = try XCTUnwrap(reopened.accounts(profileID: profile.id).first { $0.id == liabilityID })
+        XCTAssertEqual(saved.kind, "credit_card")
+        XCTAssertEqual(saved.openingBalanceMinor, 50_000)
+        XCTAssertEqual(saved.institution, "示例银行")
+        XCTAssertEqual(saved.last4, "1234")
+        XCTAssertEqual(saved.billDay, 15)
+        XCTAssertEqual(saved.paymentDueDay, 25)
+        XCTAssertEqual(saved.autoDebitAccountID, debitAccountID)
+        XCTAssertEqual(saved.gracePeriodDays, 3)
+        XCTAssertFalse(saved.isArchived)
+        XCTAssertEqual(try reopened.accountBalanceMinor(accountID: liabilityID), 53_000, "信用消费增加待还金额")
+        XCTAssertEqual(try reopened.accountEntries(sourceID: UUID(uuidString: "44444444-4444-4444-4444-444444444444")!).first?.direction, "in")
+        _ = try reopened.createIncome(LocalIncomeDraft(
+            id: UUID(), profileID: profile.id, accountID: liabilityID, amountMinor: 500, currency: "CNY",
+            sourceName: "按既有流水合同记入账户", category: "other", incomeDate: "2026-10-25",
+            occurredAt: nil, note: nil, createdAt: Date()
+        ))
+        XCTAssertEqual(try reopened.accountBalanceMinor(accountID: liabilityID), 53_500)
+    }
+
+    func testLF03739LocalDefaultsArchiveAndAutoDebitCleanupAreTransactional() throws {
+        let databaseURL = temporaryDatabaseURL()
+        defer { removeDatabase(at: databaseURL) }
+        let database = try LocalDatabase(databaseURL: databaseURL)
+        let profile = try LocalProfileStore(database: database).activeProfile()
+        let repository = try LocalExpenseRepository(database: database)
+        let assetID = UUID(), secondAssetID = UUID(), liabilityID = UUID()
+        let createdAt = Date(timeIntervalSince1970: 1_000)
+        _ = try repository.createAccount(LocalAccountDraft(
+            id: assetID, profileID: profile.id, name: "现金", kind: "cash", currency: "CNY",
+            openingBalanceMinor: 20_000, createdAt: createdAt,
+            isDefaultExpense: true, isDefaultIncome: true
+        ))
+        _ = try repository.createAccount(LocalAccountDraft(
+            id: secondAssetID, profileID: profile.id, name: "银行卡", kind: "debit_card", currency: "CNY",
+            openingBalanceMinor: 10_000, createdAt: createdAt
+        ))
+        _ = try repository.createAccount(LocalAccountDraft(
+            id: liabilityID, profileID: profile.id, name: "信用卡", kind: "credit_card", currency: "CNY",
+            openingBalanceMinor: 50_000, createdAt: createdAt, autoDebitAccountID: assetID,
+            isDefaultIncome: true
+        ))
+        let asset = try XCTUnwrap(repository.accounts(profileID: profile.id).first { $0.id == assetID })
+        _ = try repository.updateAccount(LocalAccountUpdate(
+            id: secondAssetID, profileID: profile.id, expectedVersion: 1, name: "银行卡", kind: "debit_card",
+            institution: "", last4: "", billDay: nil, paymentDueDay: nil, autoDebitAccountID: nil,
+            autoConfirmRepayment: false, gracePeriodDays: 0, isDefaultExpense: true, isDefaultIncome: false,
+            isArchived: false, sortOrder: 1, updatedAt: Date()
+        ))
+        var accounts = try repository.accounts(profileID: profile.id)
+        XCTAssertFalse(try XCTUnwrap(accounts.first { $0.id == assetID }).isDefaultExpense)
+        XCTAssertTrue(try XCTUnwrap(accounts.first { $0.id == secondAssetID }).isDefaultExpense)
+        XCTAssertTrue(try XCTUnwrap(accounts.first { $0.id == liabilityID }).isDefaultIncome)
+
+        _ = try repository.updateAccount(LocalAccountUpdate(
+            id: asset.id, profileID: profile.id, expectedVersion: asset.localVersion, name: "现金", kind: "cash",
+            institution: "", last4: "", billDay: nil, paymentDueDay: nil, autoDebitAccountID: nil,
+            autoConfirmRepayment: false, gracePeriodDays: 0, isDefaultExpense: true, isDefaultIncome: true,
+            isArchived: true, sortOrder: 0, updatedAt: Date()
+        ))
+        accounts = try repository.accounts(profileID: profile.id)
+        let archivedAsset = try XCTUnwrap(accounts.first { $0.id == assetID })
+        let liability = try XCTUnwrap(accounts.first { $0.id == liabilityID })
+        XCTAssertTrue(archivedAsset.isArchived)
+        XCTAssertFalse(archivedAsset.isDefaultExpense)
+        XCTAssertFalse(archivedAsset.isDefaultIncome)
+        XCTAssertNil(liability.autoDebitAccountID, "归档扣款资产时清除仍有效的扣款配置")
+    }
+
+    func testLF03710LiabilityTypeChangeRejectsExistingRelationshipsWithoutPartialMutation() throws {
+        let databaseURL = temporaryDatabaseURL()
+        defer { removeDatabase(at: databaseURL) }
+        let database = try LocalDatabase(databaseURL: databaseURL)
+        let profile = try LocalProfileStore(database: database).activeProfile()
+        let repository = try LocalExpenseRepository(database: database)
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let debitID = UUID(), referencedLiabilityID = UUID(), cycleOnlyID = UUID()
+        _ = try repository.createAccount(LocalAccountDraft(
+            id: debitID, profileID: profile.id, name: "资产扣款账户", kind: "cash", currency: "CNY",
+            openingBalanceMinor: 20_000, createdAt: now
+        ))
+        _ = try repository.createAccount(LocalAccountDraft(
+            id: referencedLiabilityID, profileID: profile.id, name: "绑定信用卡", kind: "credit_card", currency: "CNY",
+            openingBalanceMinor: 30_000, createdAt: now, billDay: 15, paymentDueDay: 25,
+            autoDebitAccountID: debitID
+        ))
+        _ = try repository.createAccount(LocalAccountDraft(
+            id: cycleOnlyID, profileID: profile.id, name: "仅有账期的信用额度", kind: "credit_line", currency: "CNY",
+            openingBalanceMinor: 10_000, createdAt: now, billDay: 10, paymentDueDay: 20
+        ))
+        let cycleID = UUID()
+        try database.writer.write { db in
+            try db.execute(sql: """
+                INSERT INTO local_repayment_cycles (
+                    id, profile_id, account_id, cycle_month, statement_amount_minor,
+                    remaining_amount_minor, status, source, created_at, updated_at
+                ) VALUES (?, ?, ?, '2026-09', 1_000, 1_000, 'pending', 'manual', ?, ?)
+                """, arguments: [cycleID.uuidString, profile.id.uuidString, cycleOnlyID.uuidString, now, now])
+        }
+
+        let debitAccount = try XCTUnwrap(repository.accounts(profileID: profile.id).first { $0.id == debitID })
+        XCTAssertThrowsError(try repository.updateAccount(LocalAccountUpdate(
+            id: debitID, profileID: profile.id, expectedVersion: debitAccount.localVersion,
+            name: "改成负债后不得破坏扣款引用", kind: "credit_card", institution: "", last4: "",
+            billDay: 15, paymentDueDay: 25, autoDebitAccountID: nil, autoConfirmRepayment: false,
+            gracePeriodDays: 0, isDefaultExpense: false, isDefaultIncome: false,
+            isArchived: false, sortOrder: debitAccount.sortOrder, updatedAt: now
+        )))
+        XCTAssertEqual(try repository.accounts(profileID: profile.id).first { $0.id == debitID }?.kind, "cash")
+        XCTAssertEqual(try repository.accounts(profileID: profile.id).first { $0.id == referencedLiabilityID }?.autoDebitAccountID, debitID)
+
+        let cycleAccount = try XCTUnwrap(repository.accounts(profileID: profile.id).first { $0.id == cycleOnlyID })
+        XCTAssertThrowsError(try repository.updateAccount(LocalAccountUpdate(
+            id: cycleOnlyID, profileID: profile.id, expectedVersion: cycleAccount.localVersion,
+            name: "有账期的账户不可改成资产", kind: "cash", institution: "", last4: "",
+            billDay: nil, paymentDueDay: nil, autoDebitAccountID: nil, autoConfirmRepayment: false,
+            gracePeriodDays: 0, isDefaultExpense: false, isDefaultIncome: false,
+            isArchived: false, sortOrder: cycleAccount.sortOrder, updatedAt: now
+        )))
+        XCTAssertEqual(try repository.accounts(profileID: profile.id).first { $0.id == cycleOnlyID }?.kind, "credit_line")
+        XCTAssertEqual(try repository.repaymentCycles(accountID: cycleOnlyID).map(\.id), [cycleID])
+    }
+
+    func testIOSV2POLISH003F10WakeDateRoutesLegacyLocalFactAcrossMonthsWithoutRewriting() async throws {
+        let databaseURL = temporaryDatabaseURL()
+        defer { removeDatabase(at: databaseURL) }
+        let database = try LocalDatabase(databaseURL: databaseURL)
+        let profile = try LocalProfileStore(database: database).activeProfile()
+        let repository = try LocalRecordRepository(database: database)
+        let payload = ["sleep_minutes": AnyCodable(420), "wake_at": AnyCodable("2026-09-30T16:30:00Z")]
+        let legacy = try repository.createRecord(LocalRecordDraft(
+            id: UUID(), profileID: profile.id, domainKey: "sleep", title: "补录睡眠", summary: "",
+            payloadJSON: try LocalRecordCodec.encode(payload), recordDate: "2026-11-10", recordTime: nil,
+            note: nil, imagePath: nil, imageHash: nil, createdAt: Date()
+        ))
+        let reader = try LocalFactReader(database: database)
+        let wakeMonth = try reader.month(profileID: profile.id, monthKey: "2026-10")
+        let queuedWakeMonth = try await reader.activeMonth(monthKey: "2026-10")
+        XCTAssertEqual(queuedWakeMonth, wakeMonth, "异步队列读取与原事实语义一致，不改业务日期或历史行")
+        XCTAssertEqual(wakeMonth.facts.first?.businessDate, "2026-10-01")
+        XCTAssertTrue(try reader.month(profileID: profile.id, monthKey: "2026-11").facts.isEmpty)
+        XCTAssertEqual(try repository.record(id: legacy.id)?.recordDate, "2026-11-10", "不静默重写历史行")
+        XCTAssertEqual(try repository.records(profileID: profile.id, monthKey: "2026-10").count, 1)
+        XCTAssertEqual(NativeSleepFacts.businessDate(domainKey: "sleep", payload: ["sleep_minutes": AnyCodable(420)], fallback: "2026-09-28"), "2026-09-28")
+        let useCase = LocalRecordUseCase(profileStore: LocalProfileStore(database: database), repository: repository)
+        let created = try await useCase.create(LocalRecordCommand(
+            id: UUID(), domainKey: "sleep", title: "补录睡眠", summary: "", payload: payload,
+            recordDate: "2026-11-10", recordTime: nil, note: nil, imageData: nil, createdAt: Date()
+        ))
+        XCTAssertEqual(created.record.recordDate, "2026-10-01")
+        XCTAssertNil(created.record.recordTime)
+        let staged = try await useCase.stage(LocalRecordCandidate(
+            id: "wake-date-candidate", domainKey: "sleep", title: "候选睡眠", summary: "", payload: payload,
+            confidence: 0.4, recordDate: "2026-11-10", recordTime: nil, imageData: nil, createdAt: Date()
+        ))
+        XCTAssertEqual(staged.record.recordDate, "2026-10-01")
+        let confirmed = try await useCase.confirmStaging(id: staged.record.id, recordID: UUID())
+        XCTAssertEqual(confirmed.record.recordDate, "2026-10-01")
+    }
+
     func testLOCALP1DM002IntakePreservesCandidateAndFormalSourceKinds() async throws {
         let databaseURL = temporaryDatabaseURL()
         defer { removeDatabase(at: databaseURL) }
@@ -323,6 +1073,20 @@ final class LocalPhase1DataModelTests: XCTestCase {
             note: nil,
             createdAt: Date(timeIntervalSince1970: 1_100)
         ), operationID: UUID())
+        let incomeID = UUID()
+        _ = try expenseRepository.createIncome(LocalIncomeDraft(
+            id: incomeID,
+            profileID: profile.id,
+            accountID: account.id,
+            amountMinor: 3_000,
+            currency: "CNY",
+            sourceName: "稿费",
+            category: "other",
+            incomeDate: "2026-09-19",
+            occurredAt: nil,
+            note: nil,
+            createdAt: Date(timeIntervalSince1970: 3_150)
+        ))
 
         let useCase = LocalRecordUseCase(
             profileStore: LocalProfileStore(database: database),
@@ -385,10 +1149,11 @@ final class LocalPhase1DataModelTests: XCTestCase {
 
         XCTAssertEqual(month.facts.map(\.reference), [
             "data/\(activeSportID.uuidString)",
-            "expense/\(expenseID.uuidString)"
+            "expense/\(expenseID.uuidString)",
+            "income/\(incomeID.uuidString)"
         ])
-        XCTAssertEqual(month.facts.map(\.domainKey), ["sport", "expense"])
-        XCTAssertEqual(month.facts.map(\.kind), [.record, .expense])
+        XCTAssertEqual(month.facts.map(\.domainKey), ["sport", "expense", "income"])
+        XCTAssertEqual(month.facts.map(\.kind), [.record, .expense, .income])
         XCTAssertEqual(month.facts.last?.payloadJSON.contains("amount_minor"), true)
         XCTAssertFalse(month.facts.contains { $0.id == deletedReadingID })
         let stagingRecords = try await useCase.stagingRecords()
@@ -496,13 +1261,27 @@ final class LocalPhase1DataModelTests: XCTestCase {
             note: nil,
             createdAt: Date(timeIntervalSince1970: 3_100)
         ), operationID: UUID())
+        let incomeID = UUID()
+        _ = try expenseRepository.createIncome(LocalIncomeDraft(
+            id: incomeID,
+            profileID: profile.id,
+            accountID: account.id,
+            amountMinor: 3_000,
+            currency: "CNY",
+            sourceName: "稿费",
+            category: "other",
+            incomeDate: "2026-09-19",
+            occurredAt: nil,
+            note: nil,
+            createdAt: Date(timeIntervalSince1970: 3_150)
+        ))
         let recordID = UUID()
         let recordRepository = try LocalRecordRepository(database: database)
         _ = try recordRepository.createRecord(LocalRecordDraft(
             id: recordID,
             profileID: profile.id,
             domainKey: "reading",
-            title: "原则",
+            title: "=1+1",
             summary: "25 分钟",
             payloadJSON: try LocalRecordCodec.encode([
                 "book_name": AnyCodable("原则"),
@@ -530,9 +1309,12 @@ final class LocalPhase1DataModelTests: XCTestCase {
         XCTAssertEqual(archive.format, LocalFactArchive.currentFormat)
         XCTAssertEqual(Set(archive.facts.map(\.reference)), [
             "expense/\(expenseID.uuidString)",
+            "income/\(incomeID.uuidString)",
             "data/\(recordID.uuidString)"
         ])
         XCTAssertTrue(archive.facts.contains { $0.payloadJSON.contains("reading_minutes") })
+        XCTAssertEqual(archive.facts.first(where: { $0.kind == "income" })?.occurredAt, nil)
+        XCTAssertTrue(archive.facts.first(where: { $0.kind == "income" })?.payloadJSON.contains("amount_minor") == true)
 
         request.format = .csv
         request.includeFullPayload = false
@@ -544,8 +1326,16 @@ final class LocalPhase1DataModelTests: XCTestCase {
             as: UTF8.self
         )
         XCTAssertTrue(csv.contains("expense/\(expenseID.uuidString)"))
+        XCTAssertTrue(csv.contains("income/\(incomeID.uuidString)"))
         XCTAssertTrue(csv.contains("data/\(recordID.uuidString)"))
         XCTAssertTrue(csv.contains(",{}"))
+        XCTAssertTrue(csv.contains("'=1+1"), "LF-030.06 spreadsheet formulas must be exported as text")
+        for (content, expected) in [(NativeExportContent.expense, Set(["expense"])), (.income, Set(["income"])), (.allFinance, Set(["expense", "income"]))] {
+            request.content = content
+            request.format = .json
+            let filtered = try JSONDecoder.iso8601.decode(LocalFactArchive.self, from: portability.exportArchive(request: request, exportedAt: Date(timeIntervalSince1970: 1_800_000_000)))
+            XCTAssertEqual(Set(filtered.facts.map(\.kind)), expected)
+        }
     }
 
     private func temporaryDatabaseURL() -> URL {

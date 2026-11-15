@@ -6,6 +6,11 @@ struct MonthlyReportContent: View {
     @State private var selectedMonthKey = Self.currentMonthKey
     @State private var selectedDomainKey = "expense"
 
+    init(initialMonthKey: String = NativeMonthKey.current(), initialDomainKey: String = "expense") {
+        _selectedMonthKey = State(initialValue: initialMonthKey)
+        _selectedDomainKey = State(initialValue: initialDomainKey)
+    }
+
     private var snapshot: DashboardSnapshot { appState.reportSnapshot(monthKey: selectedMonthKey) }
     private var domains: [NativeDomainDefinition] { snapshot.domains }
     private var selectedDomain: NativeDomainDefinition? {
@@ -20,7 +25,7 @@ struct MonthlyReportContent: View {
             )
         }
     }
-    private var isLoading: Bool { appState.loadingRecordMonthKey == selectedMonthKey }
+    private var isLoading: Bool { appState.isLoadingRecordMonth(selectedMonthKey) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
@@ -81,7 +86,7 @@ struct MonthlyReportContent: View {
             .pickerStyle(.menu)
         }
         .padding(14)
-        .background(.white.opacity(0.88), in: RoundedRectangle(cornerRadius: 8))
+        .jieziPrototypePanel()
     }
 
     private func reportSummary(_ report: NativeDomainPresentation) -> some View {
@@ -122,7 +127,7 @@ struct MonthlyReportContent: View {
             .frame(height: 190)
         }
         .padding(16)
-        .background(.white.opacity(0.88), in: RoundedRectangle(cornerRadius: 8))
+        .jieziPrototypePanel()
     }
 
     private func distributionSection(_ report: NativeDomainPresentation) -> some View {
@@ -146,7 +151,7 @@ struct MonthlyReportContent: View {
             }
         }
         .padding(16)
-        .background(.white.opacity(0.88), in: RoundedRectangle(cornerRadius: 8))
+        .jieziPrototypePanel()
     }
 
     @ViewBuilder
@@ -169,7 +174,7 @@ struct MonthlyReportContent: View {
             }
         }
         .padding(16)
-        .background(.white.opacity(0.88), in: RoundedRectangle(cornerRadius: 8))
+        .jieziPrototypePanel()
     }
 
     private func recentRecordsSection(_ report: NativeDomainPresentation) -> some View {
@@ -196,7 +201,7 @@ struct MonthlyReportContent: View {
             }
         }
         .padding(16)
-        .background(.white.opacity(0.88), in: RoundedRectangle(cornerRadius: 8))
+        .jieziPrototypePanel()
     }
 
     private var platformBreakdown: [BreakdownItem] { breakdown(keyPath: \.platform) }

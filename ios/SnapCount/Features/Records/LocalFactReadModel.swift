@@ -16,21 +16,20 @@ enum LocalFactReadModel {
                     let domainKey: String?
                     if fact.kind == .expense {
                         kind = .expense
-                        value = currencyValue(from: fact, prefix: "")
+                        value = expenseValue(from: fact)
                         domainKey = nil
-                    } else if fact.domainKey == "income" {
+                    } else if fact.kind == .income {
                         kind = .income
-                        value = currencyValue(from: fact, prefix: "+")
+                        value = incomeValue(from: fact)
                         domainKey = "income"
-                    } else if fact.domainKey == "wallet" {
-                        kind = .wallet
-                        value = currencyValue(from: fact, prefix: "")
-                        domainKey = "wallet"
                     } else {
                         kind = NativeDayRecordKind(rawValue: fact.domainKey) ?? .all
                         value = ""
                         domainKey = fact.domainKey
                     }
+                    let incomeAmountMinor = fact.kind == .income
+                        ? (try? LocalRecordCodec.decode(fact.payloadJSON))?.double("amount_minor")
+                        : nil
                     return NativeDayRecord(
                         id: fact.id.uuidString,
                         reference: fact.reference,
@@ -40,10 +39,14 @@ enum LocalFactReadModel {
                         title: fact.title,
                         subtitle: fact.summary,
                         value: value,
-                        timeLabel: fact.recordTime,
+                        timeLabel: NativeLocalDate.listTimeLabel(
+                            recordTime: fact.recordTime,
+                            uploadedAt: fact.createdAt
+                        ),
                         systemImage: kind == .expense ? "creditcard" : kind.systemImage,
                         transactionType: fact.domainKey,
-                        status: "local"
+                        status: "local",
+                        amount: incomeAmountMinor.map { $0 / 100 }
                     )
                 }
             )
@@ -65,38 +68,32 @@ enum LocalFactReadModel {
         imageStore: LocalImageStore? = nil
     ) -> NativeRecordDetail {
         let payload = (try? LocalRecordCodec.decode(fact.payloadJSON)) ?? [:]
-        let amount = fact.kind == .expense || fact.domainKey == "income" || fact.domainKey == "wallet"
+        let amount = fact.kind == .expense || fact.kind == .income
             ? payload.double("amount_minor").map { $0 / 100 }
             : nil
         let imageURL = localImageURL(fact.imagePath, imageStore: imageStore)
         let base = NativeRecordDetail(
             id: fact.reference,
             rawId: fact.id.uuidString,
-            kind: fact.kind == .expense ? "expense" : fact.domainKey == "income" ? "income" : "data",
+            kind: fact.kind == .expense ? "expense" : fact.kind == .income ? "income" : "data",
             title: fact.title,
             subtitle: fact.recordTime.map { "\(fact.businessDate) \($0)" } ?? fact.businessDate,
-            value: fact.kind == .expense
-                ? currencyValue(from: fact, prefix: "")
-                : fact.domainKey == "income" || fact.domainKey == "wallet"
-                    ? currencyValue(from: fact, prefix: fact.domainKey == "income" ? "+" : "")
-                    : fact.summary,
+            value: fact.kind == .expense ? expenseValue(from: fact) : fact.kind == .income ? incomeValue(from: fact) : fact.summary,
             detailRows: [],
             imageURL: imageURL,
             imageLoadError: fact.imagePath != nil && imageURL == nil,
             imagePath: fact.imagePath,
             imageHash: fact.imageHash,
             amount: amount,
-            merchantName: fact.kind == .expense || fact.domainKey == "income" ? fact.title : nil,
+            merchantName: fact.kind == .expense || fact.kind == .income ? fact.title : nil,
             platform: payload.string("platform"),
-            category: fact.kind == .expense ? payload.string("category") : fact.domainKey == "income" ? payload.string("income_category") : nil,
+            category: fact.kind == .expense || fact.kind == .income ? payload.string("category") : nil,
             paymentMethod: payload.string("payment_method"),
             recordDate: fact.businessDate,
             note: fact.note,
-            companionMessage: nil,
+            companionMessage: fact.companionMessage ?? payload.string("companion_message"),
             accountId: payload.string("account_id"),
-            systemImage: fact.kind == .expense
-                ? "creditcard"
-                : NativeDayRecordKind(rawValue: fact.domainKey)?.systemImage ?? "square.grid.2x2",
+            systemImage: fact.kind == .expense ? "creditcard" : NativeDayRecordKind(rawValue: fact.domainKey)?.systemImage ?? "square.grid.2x2",
             payload: payload,
             createdAt: iso8601(fact.createdAt),
             occurredAt: fact.occurredAt,
@@ -104,7 +101,8 @@ enum LocalFactReadModel {
             domainKey: fact.kind == .expense ? nil : fact.domainKey,
             source: fact.sourceKind,
             status: "local",
-            domainVersion: fact.domainVersion
+            domainVersion: fact.domainVersion,
+            localVersion: fact.localVersion
         )
         return NativeRecordDetail(
             id: base.id,
@@ -135,14 +133,24 @@ enum LocalFactReadModel {
             domainKey: base.domainKey,
             source: base.source,
             status: base.status,
-            domainVersion: base.domainVersion
+            domainVersion: base.domainVersion,
+            aiFeedback: NativeAIFeedback(payload: payload.dictionary("ai_feedback")),
+            plannerAiFeedback: NativeAIFeedback(payload: payload.dictionary("planner_ai_feedback")),
+            aiSummary: base.aiSummary,
+            localVersion: base.localVersion
         )
     }
 
-    private static func currencyValue(from fact: LocalFact, prefix: String) -> String {
+    private static func expenseValue(from fact: LocalFact) -> String {
         let payload = (try? LocalRecordCodec.decode(fact.payloadJSON)) ?? [:]
         let amount = (payload.double("amount_minor") ?? 0) / 100
-        return String(format: "%@¥%.2f", prefix, amount)
+        return String(format: "¥%.2f", amount)
+    }
+
+    private static func incomeValue(from fact: LocalFact) -> String {
+        let payload = (try? LocalRecordCodec.decode(fact.payloadJSON)) ?? [:]
+        let amount = (payload.double("amount_minor") ?? 0) / 100
+        return String(format: "+¥%.2f", amount)
     }
 
     private static func isNewer(_ lhs: LocalFact, _ rhs: LocalFact) -> Bool {

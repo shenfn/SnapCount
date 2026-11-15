@@ -12,23 +12,33 @@ protocol LocalRecordUseCaseProtocol {
     func ingest(_ candidate: LocalRecordCandidate, recordID: UUID?) async throws -> LocalRecordIntakeOutcome
     func staging(id: String) async throws -> LocalStagingRecord?
     func stagingRecords() async throws -> [LocalStagingRecord]
-    func confirmStaging(id: String, recordID: UUID) async throws -> LocalRecordOutcome
+    func retryPendingImageCleanups() throws -> [LocalImageCleanup]
+    func confirmStaging(id: String, recordID: UUID, changes: LocalStagingConfirmation?) async throws -> LocalRecordOutcome
     func discardStaging(id: String) async throws
+}
+
+extension LocalRecordUseCaseProtocol {
+    func confirmStaging(id: String, recordID: UUID) async throws -> LocalRecordOutcome {
+        try await confirmStaging(id: id, recordID: recordID, changes: nil)
+    }
 }
 
 final class LocalRecordUseCase: LocalRecordUseCaseProtocol {
     private let profileStore: LocalProfileStoreProtocol
     private let repository: LocalRecordRepositoryProtocol
     private let imageStore: LocalImageStore?
+    private let expressionPersistence: LocalExpressionPersistence?
 
     init(
         profileStore: LocalProfileStoreProtocol,
         repository: LocalRecordRepositoryProtocol,
-        imageStore: LocalImageStore? = nil
+        imageStore: LocalImageStore? = nil,
+        expressionPersistence: LocalExpressionPersistence? = nil
     ) {
         self.profileStore = profileStore
         self.repository = repository
         self.imageStore = imageStore
+        self.expressionPersistence = expressionPersistence
     }
 
     func create(_ command: LocalRecordCommand) async throws -> LocalRecordOutcome {
@@ -36,7 +46,7 @@ final class LocalRecordUseCase: LocalRecordUseCaseProtocol {
         try LocalRecordValidation.validate(
             domainKey: command.domainKey,
             title: command.title,
-            recordDate: command.recordDate,
+            recordDate: NativeSleepFacts.businessDate(domainKey: command.domainKey, payload: command.payload, fallback: command.recordDate),
             recordTime: command.recordTime
         )
         let payloadJSON = try LocalRecordCodec.encode(
@@ -65,7 +75,7 @@ final class LocalRecordUseCase: LocalRecordUseCaseProtocol {
             title: command.title.trimmingCharacters(in: .whitespacesAndNewlines),
             summary: command.summary,
             payloadJSON: payloadJSON,
-            recordDate: command.recordDate,
+            recordDate: NativeSleepFacts.businessDate(domainKey: command.domainKey, payload: command.payload, fallback: command.recordDate),
             recordTime: command.recordTime,
             note: command.note,
             imagePath: imageReference?.path,
@@ -76,6 +86,7 @@ final class LocalRecordUseCase: LocalRecordUseCaseProtocol {
         )
         do {
             let record = try repository.createRecord(draft)
+            expressionPersistence?.refresh(record: record)
             return LocalRecordOutcome(record: record, profileID: profile.id)
         } catch {
             try? imageStore?.remove(path: imageReference?.path)
@@ -86,31 +97,61 @@ final class LocalRecordUseCase: LocalRecordUseCaseProtocol {
     func update(_ command: LocalRecordUpdateCommand) async throws -> LocalRecordOutcome {
         let profile = try profileStore.activeProfile()
         let domainKey = try currentDomainKey(for: command.id, profileID: profile.id)
+        guard let current = try repository.record(id: command.id) else { throw LocalDataError.recordNotFound }
         try LocalRecordValidation.validate(
             domainKey: domainKey,
             title: command.title,
             recordDate: command.recordDate,
             recordTime: command.recordTime
         )
+        let payload = try LocalRecordCodec.normalizedPayload(domainKey: domainKey, payload: command.payload)
+        if command.imageData != nil, imageStore == nil { throw LocalDataError.invalidRecord }
+        let replacementReference: LocalImageReference?
+        if let imageData = command.imageData {
+            replacementReference = try imageStore?.save(
+                data: imageData,
+                owner: "record-\(command.id.uuidString)-\(UUID().uuidString)",
+                bucket: "records"
+            )
+        } else {
+            replacementReference = nil
+        }
+        let imagePath = replacementReference?.path ?? (command.removeImage ? nil : current.imagePath)
+        let imageHash = replacementReference?.hash ?? (command.removeImage ? nil : current.imageHash)
         let normalized = LocalRecordUpdateCommand(
             id: command.id,
             expectedVersion: command.expectedVersion,
             title: command.title,
             summary: command.summary,
-            payload: try LocalRecordCodec.normalizedPayload(domainKey: domainKey, payload: command.payload),
-            recordDate: command.recordDate,
+            payload: payload,
+            recordDate: NativeSleepFacts.businessDate(domainKey: domainKey, payload: command.payload, fallback: command.recordDate),
             recordTime: command.recordTime,
             note: command.note,
-            updatedAt: command.updatedAt
+            updatedAt: command.updatedAt,
+            imagePath: imagePath,
+            imageHash: imageHash
         )
-        let record = try repository.updateRecord(normalized, profileID: profile.id)
+        let record: LocalRecord
+        do {
+            record = try repository.updateRecord(normalized, profileID: profile.id)
+        } catch {
+            try? imageStore?.remove(path: replacementReference?.path)
+            throw error
+        }
+        if current.imagePath != record.imagePath { _ = try? retryPendingImageCleanups() }
+        expressionPersistence?.refresh(record: record)
         return LocalRecordOutcome(record: record, profileID: profile.id)
     }
 
     func delete(_ command: LocalRecordDeleteCommand) async throws -> LocalRecordDeleteOutcome {
         let profile = try profileStore.activeProfile()
         let tombstone = try repository.deleteRecord(command, profileID: profile.id)
-        try? imageStore?.remove(path: tombstone.imagePath)
+        if tombstone.imagePath != nil { _ = try? retryPendingImageCleanups() }
+        expressionPersistence?.deleteSource(
+            sourceTable: "local_records",
+            sourceID: tombstone.id.uuidString,
+            profileID: tombstone.profileID
+        )
         return LocalRecordDeleteOutcome(tombstone: tombstone, profileID: profile.id)
     }
 
@@ -143,19 +184,39 @@ final class LocalRecordUseCase: LocalRecordUseCaseProtocol {
 
     func stage(_ candidate: LocalRecordCandidate) async throws -> LocalStagingOutcome {
         let profile = try profileStore.activeProfile()
-        try LocalRecordValidation.validate(
+        guard LocalRecordValidation.supportedStagingDomainKeys.contains(candidate.domainKey) else {
+            throw LocalDataError.invalidRecord
+        }
+        let businessDate = NativeSleepFacts.businessDate(
             domainKey: candidate.domainKey,
-            title: candidate.title,
-            recordDate: candidate.recordDate,
-            recordTime: candidate.recordTime
+            payload: candidate.payload,
+            fallback: candidate.recordDate
         )
-        let payloadJSON = try LocalRecordCodec.encode(
-            LocalRecordCodec.normalizedPayload(
+        if candidate.domainKey == "wallet" {
+            try LocalRecordValidation.validateWalletRepaymentCandidate(candidate.payload)
+            guard !candidate.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                  businessDate.range(of: #"^\d{4}-\d{2}-\d{2}$"#, options: .regularExpression) != nil,
+                  candidate.recordTime.map({
+                      $0.range(of: #"^(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d)?$"#, options: .regularExpression) != nil
+                  }) ?? true else {
+                throw LocalDataError.invalidRecord
+            }
+        } else {
+            try LocalRecordValidation.validate(
+                domainKey: candidate.domainKey,
+                title: candidate.title,
+                recordDate: businessDate,
+                recordTime: candidate.recordTime
+            )
+        }
+        let normalizedPayload = candidate.domainKey == "wallet"
+            ? candidate.payload
+            : try LocalRecordCodec.normalizedPayload(
                 domainKey: candidate.domainKey,
                 payload: candidate.payload,
                 requireFacts: false
             )
-        )
+        let payloadJSON = try LocalRecordCodec.encode(normalizedPayload)
         if (candidate.imageData != nil || candidate.imageReference != nil), imageStore == nil {
             throw LocalDataError.invalidRecord
         }
@@ -183,7 +244,7 @@ final class LocalRecordUseCase: LocalRecordUseCaseProtocol {
             title: candidate.title.trimmingCharacters(in: .whitespacesAndNewlines),
             summary: candidate.summary,
             payloadJSON: payloadJSON,
-            recordDate: candidate.recordDate,
+            recordDate: businessDate,
             recordTime: candidate.recordTime,
             imagePath: imageReference?.path,
             imageHash: imageReference?.hash,
@@ -193,6 +254,7 @@ final class LocalRecordUseCase: LocalRecordUseCaseProtocol {
         )
         do {
             let record = try repository.createStaging(draft)
+            expressionPersistence?.refresh(staging: record)
             return LocalStagingOutcome(record: record, profileID: profile.id)
         } catch {
             try? imageStore?.remove(path: imageReference?.path)
@@ -216,6 +278,9 @@ final class LocalRecordUseCase: LocalRecordUseCaseProtocol {
             case .discarded, .failed:
                 break
             }
+        }
+        if candidate.domainKey == "wallet" {
+            return .staged(try await stage(candidate))
         }
         switch LocalRecordIntakeRouter.route(
             domainKey: candidate.domainKey,
@@ -255,22 +320,46 @@ final class LocalRecordUseCase: LocalRecordUseCaseProtocol {
         return try repository.stagingRecords(profileID: profile.id)
     }
 
-    func confirmStaging(id: String, recordID: UUID) async throws -> LocalRecordOutcome {
+    func confirmStaging(id: String, recordID: UUID, changes: LocalStagingConfirmation?) async throws -> LocalRecordOutcome {
         let profile = try profileStore.activeProfile()
         let record = try repository.archiveStaging(
             id: id,
             recordID: recordID,
             updatedAt: Date(),
-            profileID: profile.id
+            profileID: profile.id,
+            changes: changes
         )
+        expressionPersistence?.refresh(record: record)
         return LocalRecordOutcome(record: record, profileID: profile.id)
     }
 
     func discardStaging(id: String) async throws {
         let profile = try profileStore.activeProfile()
-        let staging = try repository.staging(id: id)
         try repository.discardStaging(id: id, updatedAt: Date(), profileID: profile.id)
-        try? imageStore?.remove(path: staging?.imagePath)
+        _ = try? retryPendingImageCleanups()
+    }
+
+    func retryPendingImageCleanups() throws -> [LocalImageCleanup] {
+        let profile = try profileStore.activeProfile()
+        let pending = try repository.pendingImageCleanups(profileID: profile.id)
+        guard let imageStore else { return pending }
+        for cleanup in pending {
+            do {
+                let isReferenced = try repository.hasImageReference(path: cleanup.imagePath)
+                if !isReferenced {
+                    try imageStore.remove(path: cleanup.imagePath)
+                }
+                try repository.finishImageCleanup(id: cleanup.id, profileID: profile.id)
+            } catch {
+                try repository.failImageCleanup(
+                    id: cleanup.id,
+                    profileID: profile.id,
+                    message: "本机原图清理失败，可重试",
+                    at: Date()
+                )
+            }
+        }
+        return try repository.pendingImageCleanups(profileID: profile.id)
     }
 
     private func currentDomainKey(for id: UUID, profileID: UUID) throws -> String {

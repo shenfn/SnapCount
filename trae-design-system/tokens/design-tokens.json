@@ -246,7 +246,10 @@
       "ios": {
         "system": ".system",
         "default_rounded": ".system(.rounded, design: .rounded)",
-        "default_serif": ".system(.serif, design: .serif)"
+        "default_serif": ".system(.serif, design: .serif)",
+        "prototype_sans": "system",
+        "prototype_serif": "NotoSerifSC-ExtraLight",
+        "prototype_numeric": "Nunito-ExtraLight"
       },
       "pwa": {
         "sans": "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif",
@@ -464,5 +467,120 @@
       { "id": "modal",     "value": 10000 },
       { "id": "toast",     "value": 100000 }
     ]
+  },
+
+  "ios_prototype": {
+    "$description": "Jiezi App.dc.html iOS 场景、布局和动作参数。独立于 PWA theme，避免 iOS 原型换肤隐性改变网页。",
+    "card": { "surface_alpha": 0.66, "solid_alpha": 0.92, "stroke_alpha": 0.11, "shadow_alpha": 0.07, "shadow_radius": 22, "shadow_y": 12 },
+    "typography": {
+      "prototypeBrand": { "family": "serif", "size": 20, "relative_to": "title2", "weight": "bold" },
+      "prototypeHero": { "family": "numeric", "size": 44, "relative_to": "largeTitle", "weight": "bold" },
+      "prototypeSleepHero": { "family": "numeric", "size": 40, "relative_to": "largeTitle", "weight": "bold" },
+      "prototypeBook": { "family": "serif", "size": 32, "relative_to": "title", "weight": "bold" },
+      "prototypeOnboarding": { "family": "serif", "size": 32, "relative_to": "largeTitle", "weight": "bold" }
+    },
+    "domains": {
+      "expense": { "background": ["#EADCC4", "#F1E8D8", "#F5F1E7"], "data_accent": "#C2410C", "pager_accent": "#C2410C", "accent": "#426E63", "foreground": "#202A27", "muted": "#6E7773", "surface": "#FBF9F4", "texture": "none", "glow": "#DCBF74", "glow_opacity": 0.45 },
+      "sleep":   { "background": ["#1C2140", "#17312D", "#0F1E1C"], "data_accent": "#9A96F0", "pager_accent": "#9A96F0", "accent": "#DCBF74", "foreground": "#F5F1E7", "muted": "#C7C9D0", "surface": "#10211F", "texture": "none", "glow": "#6E78C8", "glow_opacity": 0.35 },
+      "food":    { "background": ["#F2DCC4", "#F4EADB", "#F5F1E7"], "data_accent": "#EA580C", "pager_accent": "#EA580C", "accent": "#C2410C", "foreground": "#202A27", "muted": "#6E7773", "surface": "#FBF9F4", "texture": "none", "glow": "#EA580C", "glow_opacity": 0.22 },
+      "sport":   { "background": ["#D5E2D6", "#E6EBE0", "#F5F1E7"], "data_accent": "#B45309", "pager_accent": "#B45309", "accent": "#426E63", "foreground": "#202A27", "muted": "#6E7773", "surface": "#FBF9F4", "texture": "none", "glow": "#DCBF74", "glow_opacity": 0.4 },
+      "reading": { "background": ["#4A5E6E", "#43566A", "#10211F"], "data_accent": "#DCBF74", "pager_accent": "#DCBF74", "accent": "#DCBF74", "foreground": "#F5F1E7", "muted": "#C7C9D0", "surface": "#17312D", "texture": "diagonal", "glow": "#10211F", "glow_opacity": 0, "stripe_width": 10, "wash": [{ "color": "#10211F", "opacity": 0.35, "location": 0 }, { "color": "#10211F", "opacity": 0.82, "location": 0.6 }, { "color": "#10211F", "opacity": 1, "location": 1 }] }
+    },
+    "cat_paths": {
+      "expense": "M 34 138 C 18 140 16 168 46 168 C 60 168 58 140 64 118 C 68 104 62 92 66 80 C 66 70 66 60 70 52 C 76 58 82 64 88 66 C 96 64 104 64 112 66 C 118 60 124 54 130 50 C 132 60 132 70 130 78 C 134 92 124 104 108 106 C 112 114 116 120 122 124 C 122 130.627417 127.372583 136 134 136 C 140.627417 136 146 130.627417 146 124 C 146 117.372583 140.627417 112 134 112 C 127.372583 112 122 117.372583 122 124 C 122 140 118 154 126 166 C 130 168 136 168 164 168",
+      "sleep": "M 20 168 C 20 168 40 168 40 168 C 34 156 36 140 48 134 C 48 124 50 116 54 110 C 60 116 64 120 70 122 C 74 116 80 110 86 106 C 88 116 88 124 86 130 C 110 112 154 116 166 140 C 174 156 164 168 144 168 C 120 168 92 168 72 162 C 62 158 64 148 74 150",
+      "food": "M 34 138 C 18 140 16 168 46 168 C 60 168 58 140 64 118 C 68 104 62 92 66 80 C 66 70 66 60 70 52 C 76 58 82 64 88 66 C 96 64 104 64 112 66 C 118 60 124 54 130 50 C 132 60 132 70 130 78 C 134 92 124 104 108 106 C 104 116 96 122 88 126 C 88 146 102 156 120 156 C 138 156 152 146 152 126 C 152 142 148 160 158 168 C 158 168 172 168 172 168",
+      "sport": "M 174 62 C 178 56 170 50 164 58 C 156 68 160 84 150 98 C 158 116 158 146 160 168 C 160 168 146 168 146 168 C 146 156 140 148 128 146 C 108 144 86 150 72 160 C 72 160 22 168 22 168 C 30 162 40 156 46 148 C 42 136 42 124 44 116 C 50 120 56 124 62 124 C 66 118 72 112 78 108 C 80 118 80 128 78 136 C 88 140 100 142 112 134 C 126 122 138 100 150 98",
+      "reading": "M 34 138 C 18 140 16 168 46 168 C 60 168 58 140 64 118 C 68 104 62 92 66 80 C 66 70 66 60 70 52 C 76 58 82 64 88 66 C 96 64 104 64 112 66 C 118 60 124 54 130 50 C 132 60 132 70 130 78 C 134 92 124 104 108 106 C 110 114 104 118 96 118 C 96 118 84 116 84 116 C 84 126 86 136 88 144 C 98 146 110 148 118 152 C 118 142 118 132 118 124 C 128 118 140 116 152 116 C 150 126 150 136 148 144 C 138 146 126 148 118 152 C 120 160 124 166 134 168 C 134 168 164 168 164 168"
+    },
+    "cat_face_paths": {
+      "expense": "M 90 88 C 90 88 90 89.5 90 89.5 M 110 88 C 110 88 110 89.5 110 89.5",
+      "sleep": "M 50 140 C 52 142 54 142 56 140 M 64 140 C 66 142 68 142 70 140 M 100 92 C 100 92 108 92 108 92 C 108 92 100 100 100 100 C 100 100 108 100 108 100 M 114 78 C 114 78 120 78 120 78 C 120 78 114 84 114 84 C 114 84 120 84 120 84",
+      "food": "M 83 88 C 85.666667 85.333333 88.333333 85.333333 91 88 M 105 88 C 107.666667 85.333333 110.333333 85.333333 113 88",
+      "sport": "M 54 133 C 54 133 54 134.5 54 134.5 M 68 131 C 68 131 68 132.5 68 132.5",
+      "reading": "M 88 90 C 88 90 88 91.2 88 91.2 M 108 90 C 108 90 108 91.2 108 91.2"
+    },
+    "cat_decorations": {
+      "expense": {
+        "cx": 134,
+        "cy": 124,
+        "rx": 12,
+        "ry": 12,
+        "color": "#DCBF74",
+        "opacity": 0.6
+      },
+      "sleep": {
+        "cx": 162,
+        "cy": 46,
+        "rx": 14,
+        "ry": 14,
+        "color": "#F3E3A6",
+        "opacity": 0.9
+      },
+      "food": {
+        "cx": 120,
+        "cy": 124,
+        "rx": 30,
+        "ry": 7,
+        "color": "#FFFFFF",
+        "opacity": 0.95
+      },
+      "sport": {
+        "cx": 92,
+        "cy": 171,
+        "rx": 78,
+        "ry": 4,
+        "color": "#426E63",
+        "opacity": 0.28
+      },
+      "reading": {
+        "cx": 156,
+        "cy": 56,
+        "rx": 10,
+        "ry": 10,
+        "color": "#F3D99A",
+        "opacity": 0.85
+      }
+    },
+    "layout": {
+      "page_inset": 14,
+      "metric_inset": 20,
+      "hero_min_height": 170,
+      "cat_width": 140,
+      "cat_height": 150,
+      "cat_viewbox_size": 200,
+      "cat_stroke_width": 2.4,
+      "cat_face_stroke_width": 3.4,
+      "column_gap": 12,
+      "card_inset": 16,
+      "card_radius": 24,
+      "sheet_radius": 32,
+      "selected_page_width": 22,
+      "page_dot_size": 8,
+      "page_dot_gap": 6,
+      "page_dot_hit_width": 44,
+      "page_dot_drag_distance": 8,
+      "add_button_size": 48,
+      "week_day_height": 52,
+      "date_strip_month_threshold": 40,
+      "calendar_day_height": 44,
+      "calendar_arrow_hit_size": 44,
+      "food_energy_reference_height": 90,
+      "food_energy_point_size": 64,
+      "food_photo_size": 64,
+      "food_photo_radius": 12
+    },
+    "motion": {
+      "page_transition_ms": 450,
+      "background_ms": 700,
+      "cat_retract_ms": 360,
+      "cat_draw_ms": 1150,
+      "cat_face_delay_ms": 850,
+      "cat_face_hide_ms": 120,
+      "cat_reset_frame_ms": 16,
+      "cat_face_fade_ms": 350,
+      "cat_decoration_fade_ms": 500,
+      "calendar_feedback_ms": 260
+    }
   }
 }

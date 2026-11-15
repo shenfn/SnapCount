@@ -11,12 +11,13 @@ final class LocalImageStore {
     private let fileManager: FileManager
 
     init(rootDirectory: URL, fileManager: FileManager = .default) throws {
-        self.rootDirectory = rootDirectory.standardizedFileURL
-        self.fileManager = fileManager
+        let standardizedRoot = rootDirectory.standardizedFileURL
         try fileManager.createDirectory(
-            at: self.rootDirectory,
+            at: standardizedRoot,
             withIntermediateDirectories: true
         )
+        self.rootDirectory = standardizedRoot.resolvingSymlinksInPath().standardizedFileURL
+        self.fileManager = fileManager
         try? fileManager.setAttributes(
             [.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication],
             ofItemAtPath: self.rootDirectory.path
@@ -33,8 +34,7 @@ final class LocalImageStore {
 
     func save(data: Data, owner: String, bucket: String = "records") throws -> LocalImageReference {
         let hash = Self.sha256(data)
-        let filename = Self.sha256(Data(owner.utf8)) + ".jpg"
-        let relativePath = "\(bucket)/\(filename)"
+        let relativePath = Self.relativePath(owner: owner, bucket: bucket)
         let destination = try validatedURL(for: relativePath)
         try fileManager.createDirectory(
             at: destination.deletingLastPathComponent(),
@@ -42,6 +42,38 @@ final class LocalImageStore {
         )
         try data.write(to: destination, options: .atomic)
         return LocalImageReference(path: relativePath, hash: hash)
+    }
+
+    @discardableResult
+    func restore(data: Data, at relativePath: String, expectedHash: String) throws -> Bool {
+        guard Self.sha256(data) == expectedHash else { throw LocalDataError.invalidRecord }
+        let destination = try validatedURL(for: relativePath)
+        if fileManager.fileExists(atPath: destination.path) {
+            let existing = try Data(contentsOf: destination)
+            guard Self.sha256(existing) == expectedHash, existing == data else {
+                throw LocalDataError.invalidRecord
+            }
+            return false
+        }
+        try fileManager.createDirectory(
+            at: destination.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try data.write(to: destination, options: .atomic)
+        do {
+            try fileManager.setAttributes(
+                [.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication],
+                ofItemAtPath: destination.path
+            )
+        } catch {
+            try? fileManager.removeItem(at: destination)
+            throw error
+        }
+        return true
+    }
+
+    static func relativePath(owner: String, bucket: String) -> String {
+        "\(bucket)/\(sha256(Data(owner.utf8))).jpg"
     }
 
     func move(_ reference: LocalImageReference, to bucket: String) throws -> LocalImageReference {
@@ -67,6 +99,10 @@ final class LocalImageStore {
         (try? validatedURL(for: relativePath)) ?? rootDirectory.appendingPathComponent("invalid")
     }
 
+    func data(at relativePath: String) throws -> Data {
+        try Data(contentsOf: validatedURL(for: relativePath))
+    }
+
     func remove(path: String?) throws {
         guard let path, !path.isEmpty else { return }
         let fileURL = try validatedURL(for: path)
@@ -89,7 +125,12 @@ final class LocalImageStore {
         guard candidate.path == rootDirectory.path || candidate.path.hasPrefix(rootDirectory.path + "/") else {
             throw LocalDataError.invalidIdentifier
         }
-        return candidate
+        let resolvedCandidate = candidate.resolvingSymlinksInPath().standardizedFileURL
+        guard resolvedCandidate.path == rootDirectory.path
+                || resolvedCandidate.path.hasPrefix(rootDirectory.path + "/") else {
+            throw LocalDataError.invalidIdentifier
+        }
+        return resolvedCandidate
     }
 
     static func sha256(_ data: Data) -> String {

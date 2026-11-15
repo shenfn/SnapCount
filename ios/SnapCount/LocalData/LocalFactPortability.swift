@@ -91,7 +91,15 @@ final class LocalFactPortability {
             from: dateRange.start,
             to: dateRange.end
         )
-        let facts = month.facts.map { fact in
+        let selected = month.facts.filter { fact in
+            switch request.content {
+            case .expense: return fact.kind == .expense
+            case .income: return fact.kind == .income
+            case .allFinance: return fact.kind == .expense || fact.kind == .income
+            case .universal: return true
+            }
+        }
+        let facts = selected.map { fact in
             LocalFactArchive.Fact(
                 fact: fact,
                 includeFullPayload: request.includeFullPayload,
@@ -168,6 +176,9 @@ final class LocalFactPortability {
     }
 
     private static func csvField(_ value: String) -> String {
+        let first = value.trimmingCharacters(in: .whitespacesAndNewlines).first
+        let dangerous = first.map { "=+-@".contains($0) } ?? false
+        let value = dangerous || value.hasPrefix("\t") || value.hasPrefix("\r") ? "'" + value : value
         guard value.contains(",") || value.contains("\"") || value.contains("\n") else { return value }
         return "\"\(value.replacingOccurrences(of: "\"", with: "\"\""))\""
     }

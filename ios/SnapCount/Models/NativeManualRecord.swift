@@ -133,6 +133,10 @@ struct NativeManualRecordDraft {
     var imagePath: String?
     var imageHash: String?
     var imageData: Data?
+    var existingImageData: Data?
+    var removeImage = false
+    var localVersion: Int64?
+    var isLocalRecord = false
 
     init(
         kind: NativeManualRecordKind = .expense,
@@ -162,24 +166,23 @@ struct NativeManualRecordDraft {
     }
 
     init(detail: NativeRecordDetail) {
-        let detailKind: NativeManualRecordKind
-        switch detail.kind {
-        case "expense": detailKind = .expense
-        case "income": detailKind = .income
-        default: detailKind = .universal
-        }
-        self.init(kind: detailKind, domainKey: detail.domainKey ?? detail.category ?? "sport")
+        let kind: NativeManualRecordKind = detail.kind == "expense" ? .expense : detail.kind == "income" ? .income : .universal
+        self.init(kind: kind, domainKey: detail.domainKey ?? detail.category ?? "sport")
         existingRawId = detail.rawId
+        localVersion = detail.localVersion
+        isLocalRecord = detail.status == "local"
+        accountId = detail.accountId
+        if kind != .universal {
+            amountText = detail.amount.map { String(format: "%.2f", $0) } ?? ""
+            platform = detail.platform ?? ""
+            category = detail.category ?? ""
+            paymentMethod = detail.paymentMethod ?? ""
+        }
         originalPayload = detail.payload ?? [:]
         title = detail.title
         note = detail.note ?? ""
         imagePath = detail.imagePath
         imageHash = detail.imageHash
-        accountId = detail.accountId
-        if detailKind == .income {
-            amountText = detail.amount.map { String(format: "%.2f", $0) } ?? ""
-            category = originalPayload.string("income_category") ?? detail.category ?? "other"
-        }
         if let recordDate = detail.recordDate, let parsedDate = Self.dateFormatter.date(from: recordDate) {
             date = parsedDate
         }
@@ -194,16 +197,8 @@ struct NativeManualRecordDraft {
             }
         }
         if domainKey == "wallet" {
-            walletRecordKind = originalPayload.string("record_kind")
-                ?? (originalPayload.string("snapshot_kind") == "liability"
-                    ? "liability_snapshot"
-                    : "cash_snapshot")
+            walletRecordKind = originalPayload.string("record_kind") ?? "cash_snapshot"
             walletAccountType = originalPayload.string("account_type") ?? "other"
-            primaryValueText = originalPayload.double("amount_minor")
-                .map { String(format: "%.2f", $0 / 100) }
-                ?? originalPayload.double("amount")
-                    .map { String(format: "%.2f", $0) }
-                    ?? ""
             walletDueDate = originalPayload.string("due_date") ?? ""
             walletBillDay = originalPayload.double("bill_day").map { String(Int($0)) } ?? ""
         }
@@ -275,11 +270,8 @@ struct NativeManualRecordDraft {
             guard !category.isEmpty else { return "请选择收入类型" }
         case .universal:
             let metadata = NativeManualDomainMetadata.resolve(domain, fallbackDomainKey: domainKey)
-            let value = domainKey == "wallet"
-                ? nonNegativeNumber(primaryValueText)
-                : primaryValue
-            guard let value, value <= metadata.maximumValue else { return "请输入有效(metadata.primaryLabel)" }
-            guard !dimension.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return "请填写(metadata.dimensionLabel)" }
+            guard let primaryValue, primaryValue <= metadata.maximumValue else { return "请输入有效\(metadata.primaryLabel)" }
+            guard !dimension.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return "请填写\(metadata.dimensionLabel)" }
             if domainKey == "wallet", walletRecordKind == "liability_snapshot", !walletBillDay.isEmpty {
                 guard let billDay = Int(walletBillDay), (1...31).contains(billDay) else { return "每月还款日必须是 1-31 之间的整数" }
             }
@@ -289,9 +281,7 @@ struct NativeManualRecordDraft {
 
     func universalPayload(domain: NativeDomainDefinition?) -> [String: AnyCodable] {
         let metadata = NativeManualDomainMetadata.resolve(domain, fallbackDomainKey: domainKey)
-        let value = domainKey == "wallet"
-            ? nonNegativeNumber(primaryValueText) ?? 0
-            : primaryValue ?? 0
+        let value = primaryValue ?? 0
         let cleanDimension = dimension.trimmingCharacters(in: .whitespacesAndNewlines)
         var payload = originalPayload
         payload[metadata.primaryKey] = AnyCodable(value)
@@ -344,11 +334,6 @@ struct NativeManualRecordDraft {
 
     private func positiveNumber(_ text: String) -> Double? {
         guard let value = Double(text.replacingOccurrences(of: ",", with: ".")), value > 0 else { return nil }
-        return value
-    }
-
-    private func nonNegativeNumber(_ text: String) -> Double? {
-        guard let value = Double(text.replacingOccurrences(of: ",", with: ".")), value >= 0 else { return nil }
         return value
     }
 

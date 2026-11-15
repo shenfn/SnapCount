@@ -6,6 +6,7 @@ struct ManualRecordSheet: View {
     @Environment(\.dismiss) private var dismiss
     @State private var draft: NativeManualRecordDraft
     @State private var localMessage: String?
+    @State private var hasCommittedRecord = false
     @State private var showLocalCameraPicker = false
     @State private var showLocalPhotoLibraryPicker = false
     @State private var showLocalPhotoOptions = false
@@ -23,10 +24,10 @@ struct ManualRecordSheet: View {
         )
     }
 
-    init(initialImageData: Data?) {
+    init(initialImageData: Data?, onResolved: (() -> Void)? = nil) {
         stagingRecord = nil
         preserveInboxNavigation = false
-        onResolved = nil
+        self.onResolved = onResolved
         var initialDraft = NativeManualRecordDraft(kind: .universal, domainKey: "sport")
         initialDraft.imageData = initialImageData
         _draft = State(initialValue: initialDraft)
@@ -50,6 +51,11 @@ struct ManualRecordSheet: View {
 
     private var selectedDomain: NativeDomainDefinition? {
         universalDomains.first { $0.id == draft.domainKey }
+    }
+
+    private var selectedDomainTitle: String {
+        selectedDomain?.shortName ?? AppDomain(rawValue: draft.domainKey)?.title
+            ?? (draft.domainKey == "wallet" ? "钱包" : "其他记录")
     }
 
     private var metadata: NativeManualDomainMetadata {
@@ -138,14 +144,15 @@ struct ManualRecordSheet: View {
                 VStack(spacing: 0) {
                     JieziFormTopBar(
                         title: sheetTitle,
-                        primaryTitle: stagingRecord == nil ? "保存" : "收下",
+                        primaryTitle: hasCommittedRecord ? "完成" : (stagingRecord == nil ? "保存" : "收下"),
                         isWorking: isSaving,
                         onCancel: { dismiss() },
-                        onSubmit: { Task { await save() } }
+                        onSubmit: { if hasCommittedRecord { dismiss() } else { Task { await save() } } }
                     )
 
                     ScrollView {
                         VStack(alignment: .leading, spacing: JieziSpacing.xl2) {
+                            Group {
                             recordContextSection
 
                             switch draft.kind {
@@ -163,9 +170,18 @@ struct ManualRecordSheet: View {
 
                             dateFields
                             noteSection
+                            }.disabled(hasCommittedRecord)
 
                             if let message = localMessage ?? appState.manualRecordMessage {
                                 JieziFormMessage(message: message)
+                            }
+                            if hasCommittedRecord, appState.localProjectionRefreshMessage != nil {
+                                Button("只重试列表刷新") {
+                                    Task {
+                                        await appState.retryLocalProjectionRefresh()
+                                        localMessage = appState.localProjectionRefreshMessage ?? "记录已保存，列表已刷新。"
+                                    }
+                                }
                             }
                         }
                         .padding(.horizontal, JieziSpacing.Semantic.page_padding)
@@ -184,6 +200,12 @@ struct ManualRecordSheet: View {
             if appState.accounts.isEmpty { await appState.loadAccounts() }
             await appState.loadFinanceVocabulary()
             normalizeDomainSelection()
+            if draft.isLocalRecord,
+               draft.imageData == nil,
+               let existingRawId = draft.existingRawId,
+               draft.imagePath != nil {
+                draft.existingImageData = try? await appState.localImageDataForRecord(id: existingRawId)
+            }
             if stagingRecord != nil {
                 if draft.kind == .universal { hydrateUniversalFields() }
             } else if draft.existingRawId == nil {
@@ -207,7 +229,8 @@ struct ManualRecordSheet: View {
     }
 
     private var canAttachLocalImage: Bool {
-        !appState.isSignedIn && draft.kind == .universal && draft.existingRawId == nil
+        appState.supportsLocalDomainRecords
+            && (draft.existingRawId == nil || draft.isLocalRecord)
     }
 
     private var localImageSection: some View {
@@ -215,7 +238,7 @@ struct ManualRecordSheet: View {
             title: "本地图片",
             subtitle: "图片只保存在本机，并随这条记录一起导出或删除。"
         ) {
-            if let imageData = draft.imageData,
+            if let imageData = draft.imageData ?? draft.existingImageData,
                let image = UIImage(data: imageData) {
                 Image(uiImage: image)
                     .resizable()
@@ -226,8 +249,29 @@ struct ManualRecordSheet: View {
                 HStack(spacing: JieziSpacing.md) {
                     Button("重新选择") { showLocalPhotoOptions = true }
                         .buttonStyle(.bordered)
-                    Button("移除图片", role: .destructive) { draft.imageData = nil }
+                    Button("移除图片", role: .destructive) {
+                        draft.imageData = nil
+                        draft.existingImageData = nil
+                        draft.imagePath = nil
+                        draft.existingImageData = nil
+                        draft.imageHash = nil
+                        draft.removeImage = true
+                    }
                         .buttonStyle(.bordered)
+                }
+            } else if draft.imagePath != nil && !draft.removeImage {
+                Text("当前保留一张本机原图")
+                    .font(.subheadline)
+                    .foregroundStyle(JieziTheme.muted)
+                HStack(spacing: JieziSpacing.md) {
+                    Button("重新选择") { showLocalPhotoOptions = true }
+                        .buttonStyle(.bordered)
+                    Button("移除图片", role: .destructive) {
+                        draft.imagePath = nil
+                        draft.imageHash = nil
+                        draft.removeImage = true
+                    }
+                    .buttonStyle(.bordered)
                 }
             } else {
                 HStack(spacing: JieziSpacing.md) {
@@ -256,6 +300,8 @@ struct ManualRecordSheet: View {
             CameraPicker { data in
                 showLocalCameraPicker = false
                 draft.imageData = data
+                draft.existingImageData = nil
+                draft.removeImage = false
             } onCancel: {
                 showLocalCameraPicker = false
             }
@@ -265,6 +311,8 @@ struct ManualRecordSheet: View {
             PhotoLibraryPicker { data in
                 showLocalPhotoLibraryPicker = false
                 draft.imageData = data
+                draft.existingImageData = nil
+                draft.removeImage = false
             } onCancel: {
                 showLocalPhotoLibraryPicker = false
             }
@@ -273,7 +321,8 @@ struct ManualRecordSheet: View {
 
     private var sheetTitle: String {
         if stagingRecord != nil { return "核对并收下" }
-        return draft.existingRawId == nil ? "手动记录" : "编辑记录"
+        if draft.existingRawId != nil { return "编辑记录" }
+        return draft.kind == .universal ? "\(selectedDomainTitle)记录" : "手动记录"
     }
 
     @ViewBuilder
@@ -290,7 +339,7 @@ struct ManualRecordSheet: View {
                 JieziFormRow(title: "准备归档到", systemImage: "tray.and.arrow.down") {
                     Text(
                         draft.kind == .universal
-                            ? selectedDomain?.shortName ?? draft.domainKey
+                            ? selectedDomainTitle
                             : draft.kind.title
                     )
                     .jieziInputSurface()
@@ -301,7 +350,7 @@ struct ManualRecordSheet: View {
                 JieziFormRow(title: "类型", systemImage: "square.grid.2x2") {
                     Picker("记录类型", selection: $draft.kind) {
                         ForEach(NativeManualRecordKind.allCases) { kind in
-                            Text(kind.title).tag(kind)
+                            Text(kind == .universal ? "生活记录" : kind.title).tag(kind)
                         }
                     }
                     .pickerStyle(.segmented)
@@ -309,8 +358,8 @@ struct ManualRecordSheet: View {
             }
         } else {
             JieziFormSection(title: "记录类型") {
-                JieziFormRow(title: "当前数据域", systemImage: "square.grid.2x2") {
-                    Text(selectedDomain?.shortName ?? "数据域")
+                JieziFormRow(title: "当前类别", systemImage: "square.grid.2x2") {
+                    Text(selectedDomainTitle)
                         .jieziInputSurface()
                 }
             }
@@ -379,8 +428,8 @@ struct ManualRecordSheet: View {
 
     private var universalFields: some View {
         VStack(spacing: JieziSpacing.xl2) {
-            JieziFormSection(title: "数据域字段", subtitle: "只填写能从原图或文字事实中确认的内容。") {
-                JieziFormRow(title: "数据域", systemImage: "square.grid.2x2", showsDivider: true) {
+            JieziFormSection(title: "记录内容", subtitle: "只填写能从原图或文字事实中确认的内容。") {
+                JieziFormRow(title: "记录类别", systemImage: "square.grid.2x2", showsDivider: true) {
                     Menu {
                         ForEach(universalDomains) { domain in
                             Button("\(domain.icon) \(domain.shortName)") {
@@ -388,9 +437,10 @@ struct ManualRecordSheet: View {
                             }
                         }
                     } label: {
-                        selectorLabel(selectedDomain?.shortName ?? draft.domainKey, placeholder: "选择数据域")
+                        selectorLabel(selectedDomainTitle, placeholder: "选择记录类别")
                     }
                     .buttonStyle(.plain)
+                    .disabled(universalDomains.isEmpty)
                 }
                 JieziFormRow(title: "标题", systemImage: "textformat", showsDivider: true) {
                     TextField("标题（可选）", text: $draft.title)
@@ -656,7 +706,11 @@ struct ManualRecordSheet: View {
                 localMessage = appState.inboxActionMessage ?? "归档失败，请稍后重试。"
             }
         } else if await appState.createManualRecord(draft, domain: selectedDomain) {
-            dismiss()
+            onResolved?()
+            if let warning = appState.localProjectionRefreshMessage {
+                hasCommittedRecord = true
+                localMessage = warning
+            } else { dismiss() }
         } else {
             localMessage = appState.manualRecordMessage ?? "保存失败，请稍后重试。"
         }

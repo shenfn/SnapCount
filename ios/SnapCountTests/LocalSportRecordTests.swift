@@ -219,6 +219,205 @@ final class LocalSportRecordTests: XCTestCase {
         XCTAssertEqual(tombstone?.localVersion, 3)
     }
 
+    func testLF00301ReplacingLocalImageKeepsNewReferenceAndRemovesOldFileAfterCommit() async throws {
+        let databaseURL = temporaryDatabaseURL()
+        let imageDirectory = temporaryDirectoryURL()
+        defer {
+            removeDatabase(at: databaseURL)
+            try? FileManager.default.removeItem(at: imageDirectory)
+        }
+        let database = try LocalDatabase(databaseURL: databaseURL)
+        let store = try LocalProfileStore(database: database)
+        let imageStore = try LocalImageStore(rootDirectory: imageDirectory)
+        let useCase = LocalRecordUseCase(
+            profileStore: store,
+            repository: try LocalRecordRepository(database: database),
+            imageStore: imageStore
+        )
+        let recordID = UUID(uuidString: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")!
+        let oldImage = Data("lf003-old-image".utf8)
+        let newImage = Data("lf003-replacement-image".utf8)
+        let created = try await useCase.create(LocalRecordCommand(
+            id: recordID,
+            domainKey: "sport",
+            title: "跑步",
+            summary: "旧图",
+            payload: ["sport_type": AnyCodable("跑步"), "duration_minutes": AnyCodable(30)],
+            recordDate: "2026-10-25",
+            recordTime: nil,
+            note: nil,
+            imageData: oldImage,
+            createdAt: Date()
+        ))
+        let oldPath = try XCTUnwrap(created.record.imagePath)
+
+        let replaced = try await useCase.update(LocalRecordUpdateCommand(
+            id: recordID,
+            expectedVersion: created.record.localVersion,
+            title: "跑步",
+            summary: "新图",
+            payload: ["sport_type": AnyCodable("跑步"), "duration_minutes": AnyCodable(30)],
+            recordDate: "2026-10-25",
+            recordTime: nil,
+            note: nil,
+            updatedAt: Date(),
+            imageData: newImage
+        ))
+
+        let newPath = try XCTUnwrap(replaced.record.imagePath)
+        XCTAssertNotEqual(newPath, oldPath)
+        XCTAssertEqual(replaced.record.imageHash, LocalImageStore.sha256(newImage))
+        XCTAssertEqual(try imageStore.data(at: newPath), newImage)
+        XCTAssertFalse(imageStore.contains(path: oldPath))
+        let persistedRecord = try await useCase.record(id: recordID)
+        XCTAssertEqual(persistedRecord?.imagePath, newPath)
+
+        let failedReplacement = Data("lf003-failed-replacement".utf8)
+        do {
+            _ = try await useCase.update(LocalRecordUpdateCommand(
+                id: recordID,
+                expectedVersion: created.record.localVersion,
+                title: "跑步",
+                summary: "不应保存",
+                payload: ["sport_type": AnyCodable("跑步"), "duration_minutes": AnyCodable(30)],
+                recordDate: "2026-10-25",
+                recordTime: nil,
+                note: nil,
+                updatedAt: Date(),
+                imageData: failedReplacement
+            ))
+            XCTFail("旧版本替换应被CAS拒绝")
+        } catch let LocalDataError.versionConflict(expected, actual) {
+            XCTAssertEqual(expected, created.record.localVersion)
+            XCTAssertEqual(actual, replaced.record.localVersion)
+        }
+        let unchanged = try await useCase.record(id: recordID)
+        XCTAssertEqual(unchanged?.imagePath, newPath)
+        XCTAssertEqual(try imageStore.data(at: newPath), newImage)
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: imageStore.url(for: newPath).deletingLastPathComponent().path).count, 1)
+
+        let removed = try await useCase.update(LocalRecordUpdateCommand(
+            id: recordID,
+            expectedVersion: replaced.record.localVersion,
+            title: "跑步",
+            summary: "移除图片",
+            payload: ["sport_type": AnyCodable("跑步"), "duration_minutes": AnyCodable(30)],
+            recordDate: "2026-10-25",
+            recordTime: nil,
+            note: nil,
+            updatedAt: Date(),
+            removeImage: true
+        ))
+        XCTAssertNil(removed.record.imagePath)
+        XCTAssertNil(removed.record.imageHash)
+        XCTAssertFalse(imageStore.contains(path: newPath))
+    }
+
+    func testLF00502DeletingOneRecordKeepsAnImageStillReferencedByAnother() async throws {
+        let databaseURL = temporaryDatabaseURL()
+        let imageDirectory = temporaryDirectoryURL()
+        defer {
+            removeDatabase(at: databaseURL)
+            try? FileManager.default.removeItem(at: imageDirectory)
+        }
+        let database = try LocalDatabase(databaseURL: databaseURL)
+        let imageStore = try LocalImageStore(rootDirectory: imageDirectory)
+        let profileStore = LocalProfileStore(database: database)
+        let useCase = LocalRecordUseCase(
+            profileStore: profileStore,
+            repository: try LocalRecordRepository(database: database),
+            imageStore: imageStore
+        )
+        let sharedImage = Data("lf005-shared-image".utf8)
+        let firstID = UUID(uuidString: "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")!
+        let secondID = UUID(uuidString: "cccccccc-cccc-cccc-cccc-cccccccccccc")!
+        let first = try await useCase.create(LocalRecordCommand(
+            id: firstID,
+            domainKey: "sport",
+            title: "记录一",
+            summary: "共享图片",
+            payload: ["sport_type": AnyCodable("跑步"), "duration_minutes": AnyCodable(20)],
+            recordDate: "2026-10-25",
+            recordTime: nil,
+            note: nil,
+            imageData: sharedImage,
+            createdAt: Date()
+        ))
+        let imagePath = try XCTUnwrap(first.record.imagePath)
+        _ = try await useCase.create(LocalRecordCommand(
+            id: secondID,
+            domainKey: "sport",
+            title: "记录二",
+            summary: "共享图片",
+            payload: ["sport_type": AnyCodable("骑行"), "duration_minutes": AnyCodable(25)],
+            recordDate: "2026-10-25",
+            recordTime: nil,
+            note: nil,
+            imageData: nil,
+            imageReference: LocalImageReference(path: imagePath, hash: LocalImageStore.sha256(sharedImage)),
+            createdAt: Date()
+        ))
+
+        _ = try await useCase.delete(LocalRecordDeleteCommand(
+            id: firstID,
+            expectedVersion: first.record.localVersion,
+            deletedAt: Date()
+        ))
+
+        XCTAssertTrue(imageStore.contains(path: imagePath))
+        XCTAssertEqual(try imageStore.data(at: imagePath), sharedImage)
+        let remaining = try await useCase.record(id: secondID)
+        XCTAssertEqual(remaining?.imagePath, imagePath)
+    }
+
+    func testLF00501ImageCleanupFailurePersistsAndCanBeRetried() async throws {
+        let databaseURL = temporaryDatabaseURL()
+        let imageDirectory = temporaryDirectoryURL()
+        defer {
+            try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: imageDirectory.appendingPathComponent("records").path)
+            removeDatabase(at: databaseURL)
+            try? FileManager.default.removeItem(at: imageDirectory)
+        }
+        let database = try LocalDatabase(databaseURL: databaseURL)
+        let profileStore = LocalProfileStore(database: database)
+        let repository = try LocalRecordRepository(database: database)
+        let imageStore = try LocalImageStore(rootDirectory: imageDirectory)
+        let useCase = LocalRecordUseCase(profileStore: profileStore, repository: repository, imageStore: imageStore)
+        let recordID = UUID(uuidString: "dddddddd-dddd-dddd-dddd-dddddddddddd")!
+        let imageData = Data("lf005-cleanup-retry-image".utf8)
+        let created = try await useCase.create(LocalRecordCommand(
+            id: recordID,
+            domainKey: "sport",
+            title: "清理失败测试",
+            summary: "本机图片",
+            payload: ["sport_type": AnyCodable("跑步"), "duration_minutes": AnyCodable(15)],
+            recordDate: "2026-10-25",
+            recordTime: nil,
+            note: nil,
+            imageData: imageData,
+            createdAt: Date()
+        ))
+        let imagePath = try XCTUnwrap(created.record.imagePath)
+        let recordsDirectory = imageStore.url(for: imagePath).deletingLastPathComponent()
+        try FileManager.default.setAttributes([.posixPermissions: 0o555], ofItemAtPath: recordsDirectory.path)
+
+        _ = try await useCase.delete(LocalRecordDeleteCommand(
+            id: recordID,
+            expectedVersion: created.record.localVersion,
+            deletedAt: Date()
+        ))
+        let failedCleanup = try XCTUnwrap(repository.pendingImageCleanups(profileID: created.record.profileID).first)
+        XCTAssertEqual(failedCleanup.imagePath, imagePath)
+        XCTAssertEqual(failedCleanup.attemptCount, 1)
+        XCTAssertNotNil(failedCleanup.lastError)
+        XCTAssertEqual(try imageStore.data(at: imagePath), imageData)
+
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: recordsDirectory.path)
+        let retried = try useCase.retryPendingImageCleanups()
+        XCTAssertTrue(retried.isEmpty)
+        XCTAssertFalse(imageStore.contains(path: imagePath))
+    }
+
     func testLOCALP1SPORT001CConfidenceBoundaryRoutesPerSportDomainThreshold() {
         let payload: [String: AnyCodable] = [
             "sport_type": AnyCodable("跑步"),

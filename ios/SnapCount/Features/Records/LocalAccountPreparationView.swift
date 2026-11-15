@@ -40,6 +40,9 @@ struct LocalAccountPreparationView: View {
                     }
                 }
             }
+            .scrollContentBackground(.hidden)
+            .background(JieziTheme.pageBackground)
+            .tint(JieziTheme.brand)
             .navigationTitle("准备本地账户")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -96,6 +99,10 @@ struct LocalAccountsView: View {
                 }
             }
         }
+        .scrollContentBackground(.hidden)
+        .background(JieziTheme.pageBackground)
+        .listStyle(.insetGrouped)
+        .tint(JieziTheme.brand)
         .navigationTitle("本地账户")
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {

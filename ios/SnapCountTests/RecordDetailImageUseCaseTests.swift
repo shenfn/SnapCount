@@ -22,10 +22,12 @@ final class RecordDetailImageUseCaseTests: XCTestCase {
 
         async let first = useCase.perform(detail(), reference: "expense/record-1")
         await gate.waitUntilEntered()
-        async let duplicate = useCase.perform(detail(), reference: "expense/record-1")
-        await gate.release()
-
-        let (firstResult, duplicateResult) = await (first, duplicate)
+        // 同一 MainActor 任务直接进入重复调用，先命中在途请求再允许 transport 返回。
+        // async let 仅排队，可能直到首请求已完成才执行，不能证明重叠复用。
+        let release = Task { @MainActor in await gate.release() }
+        let duplicateResult = await useCase.perform(detail(), reference: "expense/record-1")
+        let firstResult = await first
+        await release.value
         XCTAssertEqual(firstResult.transaction, .hydrated)
         XCTAssertEqual(duplicateResult.transaction, .hydrated)
         let callCount = await repository.callCount

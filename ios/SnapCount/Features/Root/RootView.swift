@@ -8,63 +8,43 @@ struct RootView: View {
         Group {
             if appState.isBootstrapping {
                 ProgressView()
-                    .tint(JieziTheme.mint)
+                    .tint(JieziTheme.brand)
             } else {
-                unifiedTabRoot
+                MainShellView()
+                    .safeAreaInset(edge: .top, spacing: 0) {
+                        if let message = appState.localStorageInitializationMessage {
+                            localStorageFailureBanner(message)
+                        }
+                    }
             }
         }
         .fullScreenCover(isPresented: $appState.isOnboardingPresented) {
             OnboardingFlowView()
                 .environmentObject(appState)
         }
+        .preferredColorScheme(.light)
+        .tint(JieziTheme.brand)
     }
 
-    private var unifiedTabRoot: some View {
-        TabView(selection: $appState.selectedTab) {
-            NavigationStack(path: $appState.todayPath) {
-                TodayView()
-                    .navigationDestination(for: NativeDayDetailRoute.self) { route in
-                        DayDetailView(route: route)
-                    }
-                    .navigationDestination(for: NativeRecordRoute.self) { route in
-                        RecordDetailView(reference: route.reference)
-                    }
+    private func localStorageFailureBanner(_ message: String) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            VStack(alignment: .leading, spacing: 4) {
+                Label("本地数据暂不可用", systemImage: "externaldrive.badge.exclamationmark")
+                    .font(.subheadline.weight(.semibold))
+                Text("普通记录不会改存到云端；原数据库文件已保留。可打开数据恢复选项。")
+                    .font(.footnote)
+                Text(message)
+                    .font(.caption)
+                    .textSelection(.enabled)
             }
-            .tabItem { Label(AppTab.today.title, systemImage: AppTab.today.systemImage) }
-            .tag(AppTab.today)
-
-            NavigationStack(path: $appState.inboxPath) {
-                InboxView()
+            Spacer(minLength: 0)
+            Button("恢复选项") {
+                appState.presentedOverlay = .settings
             }
-            .tabItem { Label(AppTab.inbox.title, systemImage: AppTab.inbox.systemImage) }
-            .tag(AppTab.inbox)
-
-            NavigationStack(path: $appState.recordsPath) {
-                RecordsView()
-            }
-            .tabItem { Label(AppTab.records.title, systemImage: AppTab.records.systemImage) }
-            .tag(AppTab.records)
-
-            NavigationStack {
-                InsightsView()
-            }
-            .tabItem { Label(AppTab.insights.title, systemImage: AppTab.insights.systemImage) }
-            .tag(AppTab.insights)
-
-            NavigationStack {
-                SettingsView()
-            }
-            .tabItem { Label(AppTab.settings.title, systemImage: AppTab.settings.systemImage) }
-            .tag(AppTab.settings)
+            .buttonStyle(.bordered)
+            .accessibilityHint("打开设置中的数据导入与本地备份恢复")
         }
-        .tint(themeManager.palette.brand)
-        .toolbarBackground(themeManager.palette.paper.opacity(0.94), for: .tabBar)
-        .toolbarBackground(.visible, for: .tabBar)
-        .onChange(of: appState.selectedTab) { tab in
-            guard [.today, .inbox, .records].contains(tab) else { return }
-            Task {
-                await appState.refreshDashboardIfStale()
-            }
-        }
+        .padding(12)
+        .background(.regularMaterial)
     }
 }

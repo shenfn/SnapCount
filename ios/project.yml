@@ -30,6 +30,9 @@ targets:
       - path: SnapCount
         excludes:
           - Info.plist
+          - Resources/Fonts
+      - path: SnapCount/Resources/Fonts
+        type: folder
     info:
       path: SnapCount/Info.plist
       properties:
@@ -40,12 +43,14 @@ targets:
         CFBundleInfoDictionaryVersion: "6.0"
         CFBundleName: SnapCount
         CFBundlePackageType: APPL
+        UIAppFonts:
+          - Fonts/Nunito-Variable.ttf
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         ITSAppUsesNonExemptEncryption: false
         LSRequiresIPhoneOS: true
-        NSCameraUsageDescription: 用于拍摄账单、食物、运动等截图或照片，并上传给 AI 识别为个人记录。
-        NSPhotoLibraryUsageDescription: 用于选择截图或照片，并上传给 AI 识别为个人记录。
+        NSCameraUsageDescription: 用于拍摄照片并添加到本机记录；拍摄不会自动授权 AI 识别或上传。
+        NSPhotoLibraryUsageDescription: 用于选择照片并添加到本机记录；选择不会自动授权 AI 识别或上传。
         NSPhotoLibraryAddUsageDescription: 用于在你主动保存图片时写入相册。
         SupabaseURL: $(SNAPCOUNT_SUPABASE_URL)
         SupabaseFunctionsURL: $(SNAPCOUNT_SUPABASE_FUNCTIONS_URL)
@@ -97,6 +102,10 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.jiezi.app.tests
         DEVELOPMENT_TEAM: G6592SL596
+        # 单元测试 bundle 之前没有 Info.plist，也没开自动生成，
+        # `xcodebuild test` 会直接卡在 code sign：Cannot code sign because the target
+        # does not have an Info.plist file。打开自动生成即可，不需要真的写一个 plist。
+        GENERATE_INFOPLIST_FILE: YES
 
 schemes:
   SnapCount:

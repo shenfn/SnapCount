@@ -1,4 +1,5 @@
 import type { DomainSignal } from "./signals.ts";
+import type { PlannerEvidenceReference } from "./local-expression-contract.ts";
 
 export type MemoryOrigin = "user_explicit" | "record_derived" | "model_inferred" | "unknown";
 export type MemoryAuthority = "confirmed" | "supported" | "hypothesis";
@@ -37,11 +38,20 @@ export interface ContextPacketCandidate {
     value: number;
     meaning: string | null;
     role: "count" | "measure";
+    evidence?: PlannerEvidenceReference[];
   }>;
+  evidence?: PlannerEvidenceReference[];
   source: "domain_profile_signal" | "expression_planner";
   source_surface: string | null;
   planner_version: string | null;
   claim_fingerprint?: string | null;
+}
+
+export interface LocalMemoryContextEntry {
+  key: string;
+  type: string;
+  summary: string;
+  confidence: number;
 }
 
 export interface ContextPacket {
@@ -56,6 +66,7 @@ export interface ContextPacket {
     domain_key: string | null;
     entity_key: string | null;
   }>;
+  local_memory_context: LocalMemoryContextEntry[];
   expression_preferences: Record<string, unknown>;
   recent_expression_context: string[];
   trace: {
@@ -98,6 +109,35 @@ function contentFingerprint(value: unknown): string {
 
 function stringValue(value: unknown): string | null {
   return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+export function normalizeLocalMemoryContext(
+  value: unknown,
+  domainKey: string,
+): LocalMemoryContextEntry[] {
+  if (!isRecord(value) || !Array.isArray(value.facts)) return [];
+  if (value.enabled === false) return [];
+  const allowedDomains = new Set(["expense", "income", "food", "sleep", "sport", "reading", "wallet"]);
+  if (!allowedDomains.has(domainKey)) return [];
+  const prefixes = [`local_ai.${domainKey}.`, `${domainKey}.`];
+  const normalized: LocalMemoryContextEntry[] = [];
+  for (const raw of value.facts) {
+    if (!isRecord(raw)) continue;
+    const key = stringValue(raw.key);
+    const type = stringValue(raw.type);
+    const summary = stringValue(raw.value) ?? stringValue(raw.content) ?? stringValue(raw.summary);
+    const confidence = numberValue(raw.confidence);
+    if (!key || !prefixes.some((prefix) => key.startsWith(prefix)) || !type || !summary || confidence === null) continue;
+    if (confidence < 0 || confidence > 1 || type.length > 32 || summary.length > 240) continue;
+    normalized.push({
+      key,
+      type,
+      summary,
+      confidence,
+    });
+    if (normalized.length >= 8) break;
+  }
+  return normalized;
 }
 
 function numberValue(value: unknown): number | null {
@@ -264,6 +304,7 @@ export function buildContextPacket(input: {
   signals: DomainSignal[];
   selectedCandidates?: ContextPacketCandidate[];
   memory?: Record<string, unknown> | null;
+  localMemoryContext?: unknown;
   expressionPreferences?: Record<string, unknown>;
   recentExpressionContext?: string[];
   fallbackReason?: string | null;
@@ -271,7 +312,7 @@ export function buildContextPacket(input: {
   const normalizedMemories = normalizeSemanticMemories(input.memory);
   const semantic = normalizedMemories.filter((item) => isRelevant(item, input.domainKey, input.recordFacts)).slice(0, 3);
   const packetCreatedAt = new Date().toISOString();
-  const selectedCandidates = (input.selectedCandidates ?? input.signals.map((signal) => ({
+  const rawSelectedCandidates = (input.selectedCandidates ?? input.signals.map((signal) => ({
     candidate_id: null,
     semantic_key: signal.kind,
     kind: signal.kind,
@@ -283,11 +324,19 @@ export function buildContextPacket(input: {
       value,
       meaning: null,
       role: (signal.countNumbers ?? []).includes(value) ? "count" as const : "measure" as const,
+      evidence: [],
     })),
     source: "domain_profile_signal" as const,
     source_surface: null,
     planner_version: null,
   }))).slice(0, 2);
+  // A Planner candidate without explicit evidence cannot reach a provider.
+  // Legacy domain signals remain usable as deterministic fallback inputs.
+  const selectedCandidates = rawSelectedCandidates.filter((candidate) =>
+    candidate.source !== "expression_planner"
+      || (Array.isArray(candidate.evidence) && candidate.evidence.length > 0
+        && candidate.claim_fingerprint)
+  );
   const packetCore = {
     packet_version: "context-packet-v2" as const,
     record_facts: input.recordFacts,
@@ -300,6 +349,7 @@ export function buildContextPacket(input: {
       domain_key: item.domainKey,
       entity_key: item.entityKey,
     })),
+    local_memory_context: normalizeLocalMemoryContext(input.localMemoryContext, input.domainKey),
     expression_preferences: input.expressionPreferences ?? {},
     recent_expression_context: (input.recentExpressionContext ?? []).slice(0, 5),
   };

@@ -222,6 +222,7 @@ struct NativeAccountDraft: Identifiable, Equatable {
     var initialBalanceText: String
     var billDayText: String
     var paymentDueDayText: String
+    var gracePeriodDaysText: String
     var autoDebitAccountId: String?
     var autoConfirmRepayment: Bool
     var isDefaultExpense: Bool
@@ -240,6 +241,7 @@ struct NativeAccountDraft: Identifiable, Equatable {
         initialBalanceText = account.map { String(format: "%.2f", $0.initialBalance) } ?? ""
         billDayText = account?.billDay.map(String.init) ?? ""
         paymentDueDayText = account?.paymentDueDay.map(String.init) ?? ""
+        gracePeriodDaysText = account.map { String($0.gracePeriodDays) } ?? "0"
         autoDebitAccountId = account?.autoDebitAccountId
         autoConfirmRepayment = account?.autoConfirmRepayment ?? false
         isDefaultExpense = account?.isDefaultExpense ?? false
@@ -260,6 +262,8 @@ struct NativeAccountDraft: Identifiable, Equatable {
         if type.isLiability {
             if let message = dayValidationMessage(billDayText, label: "账单日") { return message }
             if let message = dayValidationMessage(paymentDueDayText, label: "还款日") { return message }
+            if let days = Int(gracePeriodDaysText), days < 0 { return "宽限期不能小于 0 天" }
+            if !gracePeriodDaysText.isEmpty && Int(gracePeriodDaysText) == nil { return "宽限期必须是非负整数" }
         }
         return nil
     }

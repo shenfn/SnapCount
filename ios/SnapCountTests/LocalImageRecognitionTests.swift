@@ -3,6 +3,367 @@ import XCTest
 @testable import SnapCount
 
 final class LocalImageRecognitionTests: XCTestCase {
+    func testLOCALP1FOOD001HostedFoodPayloadArchivesWithoutDatabaseError() async throws {
+        let context = try makeContext()
+        defer { cleanup(context) }
+        let payload: [String: AnyCodable] = [
+            "dishes": AnyCodable([
+                ["name": "白米饭", "estimated_grams": 200, "calorie_kcal": 230,
+                 "protein_g": 4.6, "carb_g": 50, "fat_g": 0.5],
+                ["name": "蟹柳", "estimated_grams": 100, "calorie_kcal": 110,
+                 "protein_g": 10, "carb_g": 5, "fat_g": 4]
+            ]),
+            "meal_type": AnyCodable("lunch"),
+            "total_calorie_kcal": AnyCodable(340),
+            "source_app": AnyCodable("截图识别")
+        ]
+        let provider = StubLocalImageRecognitionProvider(candidate: makeCandidate(
+            domainKey: "food", confidence: 0.85, payload: payload))
+        let recognition = LocalImageRecognitionUseCase(
+            localRecordUseCase: context.useCase,
+            imageStore: context.imageStore,
+            intakeRepository: context.intakeRepository,
+            provider: provider
+        )
+
+        let outcome = try await recognition.ingest(
+            imageData: Data("food-photo".utf8), captureKind: "photo", filename: "food.jpg")
+        guard case .archived(let archived) = outcome.result else {
+            return XCTFail("完整饮食候选应直接写入本地正式记录")
+        }
+        XCTAssertEqual(archived.record.domainKey, "food")
+        XCTAssertEqual(try LocalRecordCodec.decode(archived.record.payloadJSON)["meal_type"]?.stringValue, "lunch")
+        XCTAssertEqual(try LocalRecordCodec.decode(archived.record.payloadJSON).double("total_calorie_kcal"), 340)
+        XCTAssertTrue(try context.imageStore.contains(path: XCTUnwrap(archived.record.imagePath)))
+    }
+
+    func testLF03731IncompleteFinanceFactsWaitForConfirmationAndKeepOriginal() async throws {
+        let context = try makeContext()
+        defer { cleanup(context) }
+        let pending = LocalPendingFinancialRepository(database: context.database)
+        let provider = StubLocalImageRecognitionProvider(candidate: makeCandidate(
+            domainKey: "expense", confidence: 1, payload: ["amount": AnyCodable(20)], missingFields: []))
+        let recognition = LocalImageRecognitionUseCase(localRecordUseCase: context.useCase,
+            imageStore: context.imageStore, intakeRepository: context.intakeRepository,
+            provider: provider, pendingRepository: pending)
+        let data = Data("financial-original".utf8)
+        let outcome = try await recognition.ingest(imageData: data, captureKind: "screenshot", filename: "expense.jpg")
+        guard case .financialPending(let id) = outcome.result else {
+            return XCTFail("缺少渠道、分类或支付方式的记账仍需人工确认")
+        }
+        let profile = try context.intakeRepository.activeProfile()
+        let candidate = try XCTUnwrap(pending.record(profileID: profile.id, id: id))
+        XCTAssertEqual(candidate.amountMinor, 2000)
+        XCTAssertEqual(try context.imageStore.data(at: XCTUnwrap(candidate.imagePath)), data)
+        let repeated = try await recognition.ingest(imageData: data, captureKind: "screenshot", filename: "expense.jpg")
+        // The deduplicated outcome rebuilds from persisted data and intentionally
+        // has no provider confidence, so equality must cover the stable payload.
+        XCTAssertEqual(repeated.result, outcome.result)
+        XCTAssertEqual(repeated.imageHash, outcome.imageHash)
+        XCTAssertEqual(repeated.notificationText, outcome.notificationText)
+        XCTAssertEqual(repeated.feedback, outcome.feedback)
+        XCTAssertNil(repeated.feedbackConfidence)
+        XCTAssertEqual(outcome.feedbackConfidence, 1)
+        XCTAssertEqual(provider.callCount, 1)
+        XCTAssertEqual(try pending.pending(profileID: profile.id).count, 1)
+        XCTAssertTrue(try LocalExpenseRepository(database: context.database).expenses(profileID: profile.id, monthKey: "2026-09").isEmpty)
+        XCTAssertTrue(try context.useCase.retryPendingImageCleanups().isEmpty)
+        XCTAssertEqual(try context.imageStore.data(at: XCTUnwrap(candidate.imagePath)), data)
+    }
+
+    func testLF03731CompleteFinanceFactsArchiveWithoutConfirmation() async throws {
+        let context = try makeContext()
+        defer { cleanup(context) }
+        let pending = LocalPendingFinancialRepository(database: context.database)
+        let payload: [String: AnyCodable] = [
+            "amount": AnyCodable(20),
+            "merchant_name": AnyCodable("沈氏牛肉汤春波店"),
+            "platform": AnyCodable("微信"),
+            "category": AnyCodable("food"),
+            "payment_method": AnyCodable("银行卡")
+        ]
+        let provider = StubLocalImageRecognitionProvider(candidate: makeCandidate(
+            domainKey: "expense", confidence: 0.92, payload: payload, missingFields: []))
+        let recognition = LocalImageRecognitionUseCase(localRecordUseCase: context.useCase,
+            imageStore: context.imageStore, intakeRepository: context.intakeRepository,
+            provider: provider, pendingRepository: pending)
+        let data = Data("financial-auto-archive".utf8)
+        let outcome = try await recognition.ingest(imageData: data, captureKind: "screenshot", filename: "expense.jpg")
+        guard case .financialArchived(let id) = outcome.result else {
+            return XCTFail("四要素齐全且置信度达标时应直接归档")
+        }
+        let profile = try context.intakeRepository.activeProfile()
+        let expenses = try LocalExpenseRepository(database: context.database)
+            .expenses(profileID: profile.id, monthKey: "2026-09")
+        let archived = try XCTUnwrap(expenses.first { $0.id == id })
+        XCTAssertEqual(archived.amountMinor, 2000)
+        XCTAssertEqual(archived.merchantName, "沈氏牛肉汤春波店")
+        XCTAssertEqual(archived.platform, "微信")
+        XCTAssertEqual(archived.category, "food")
+        XCTAssertEqual(archived.paymentMethod, "银行卡")
+        XCTAssertTrue(try pending.pending(profileID: profile.id).isEmpty)
+
+        let repeated = try await recognition.ingest(imageData: data, captureKind: "screenshot", filename: "expense.jpg")
+        // The deduplicated outcome rebuilds from persisted data and intentionally
+        // has no provider confidence, so equality must cover the stable payload.
+        XCTAssertEqual(repeated.result, outcome.result)
+        XCTAssertEqual(repeated.imageHash, outcome.imageHash)
+        XCTAssertEqual(repeated.notificationText, outcome.notificationText)
+        XCTAssertEqual(repeated.feedback, outcome.feedback)
+        XCTAssertNil(repeated.feedbackConfidence)
+        XCTAssertEqual(outcome.feedbackConfidence, 0.92)
+        XCTAssertEqual(provider.callCount, 1)
+        XCTAssertEqual(try LocalExpenseRepository(database: context.database)
+            .expenses(profileID: profile.id, monthKey: "2026-09").count, 1)
+    }
+
+    /// 自动归档必须把「AI 陪伴」与结构化反馈一起落库。
+    /// 只存记账字段时详情页只剩一句机械摘要，真机上看起来就是「AI 点评没了」。
+    func testLF03731ArchivedExpenseKeepsCompanionAndFeedback() async throws {
+        let context = try makeContext()
+        defer { cleanup(context) }
+        let pending = LocalPendingFinancialRepository(database: context.database)
+        let payload: [String: AnyCodable] = [
+            "amount": AnyCodable(15),
+            "merchant_name": AnyCodable("巡面（杭州滨江江陵路店）"),
+            "platform": AnyCodable("微信"),
+            "category": AnyCodable("food"),
+            "payment_method": AnyCodable("银行卡")
+        ]
+        let feedback: [String: AnyCodable] = [
+            "badge": AnyCodable("小额餐饮"),
+            "icon": AnyCodable("💸"),
+            "emotion_line": AnyCodable("巡面（杭州滨江江陵路店）¥15.00，这笔小额已落账。"),
+            "utility_line": AnyCodable("分类记到餐饮，后面看一周频率。"),
+            "detail_reason": AnyCodable("支出识别完整并已入账，本次反馈优先强调记录完整性。")
+        ]
+        let provider = StubLocalImageRecognitionProvider(candidate: makeCandidate(
+            domainKey: "expense", confidence: 0.92, payload: payload, missingFields: [],
+            companionMessage: "巡面这顿 15 块，今天小额外食第 1 笔。", aiFeedback: feedback))
+        let recognition = LocalImageRecognitionUseCase(localRecordUseCase: context.useCase,
+            imageStore: context.imageStore, intakeRepository: context.intakeRepository,
+            provider: provider, pendingRepository: pending)
+        let outcome = try await recognition.ingest(
+            imageData: Data("financial-expression".utf8), captureKind: "screenshot", filename: "expense.jpg")
+        guard case .financialArchived(let id) = outcome.result else {
+            return XCTFail("四要素齐全且置信度达标时应直接归档")
+        }
+        let profile = try context.intakeRepository.activeProfile()
+        let archived = try XCTUnwrap(try LocalExpenseRepository(database: context.database)
+            .expenses(profileID: profile.id, monthKey: "2026-09").first { $0.id == id })
+        XCTAssertEqual(archived.companionMessage, "巡面这顿 15 块，今天小额外食第 1 笔。")
+        XCTAssertNotNil(archived.aiFeedbackJSON)
+
+        let detail = LocalExpenseReadModel.detail(from: archived)
+        XCTAssertEqual(detail.companionMessage, "巡面这顿 15 块，今天小额外食第 1 笔。")
+        XCTAssertEqual(detail.aiFeedback?.badge, "小额餐饮")
+        XCTAssertEqual(detail.aiFeedback?.utilityLine, "分类记到餐饮，后面看一周频率。")
+    }
+
+    /// 同一笔账单重新截图：首张自动归档，第二张必须停在待确认。
+    /// 这条覆盖整条装配链路（UseCase → 候选查询 → 两道判重 → stage）。只测规则函数的
+    /// 单测发现不了「仓库没注入」这种静默失效——两边都返回空候选，判重永远不命中。
+    func testLF03731DuplicateScreenshotStopsAtPending() async throws {
+        let context = try makeContext()
+        defer { cleanup(context) }
+        let pending = LocalPendingFinancialRepository(database: context.database)
+        let payload: [String: AnyCodable] = [
+            "amount": AnyCodable(15),
+            "merchant_name": AnyCodable("巡面（杭州滨江江陵路店）"),
+            "platform": AnyCodable("美团"),
+            "category": AnyCodable("food"),
+            "payment_method": AnyCodable("兴业银行储蓄卡")
+        ]
+        let provider = StubLocalImageRecognitionProvider(candidate: makeCandidate(
+            domainKey: "expense", confidence: 0.92, payload: payload, missingFields: []))
+        let recognition = LocalImageRecognitionUseCase(localRecordUseCase: context.useCase,
+            imageStore: context.imageStore, intakeRepository: context.intakeRepository,
+            provider: provider, pendingRepository: pending,
+            duplicateReviewRepository: LocalFinancialDuplicateReviewRepository(database: context.database))
+
+        let first = try await recognition.ingest(
+            imageData: Data("bill-screenshot-a".utf8), captureKind: "screenshot", filename: "bill.png")
+        guard case .financialArchived = first.result else {
+            return XCTFail("首张账单四要素齐全时应直接归档")
+        }
+        let profile = try context.intakeRepository.activeProfile()
+
+        // 重新截图后字节完全不同，精确哈希挡不住，只能靠字段判重。
+        let second = try await recognition.ingest(
+            imageData: Data("bill-screenshot-b".utf8), captureKind: "screenshot", filename: "bill.png")
+        guard case .financialPending(let pendingID) = second.result else {
+            return XCTFail("同金额、同商家、同支付方式在 3 分钟内重复出现，不能自动归档成第二笔")
+        }
+        let staged = try XCTUnwrap(pending.record(profileID: profile.id, id: pendingID))
+        XCTAssertEqual(staged.reviewReason, "possible_duplicate")
+        XCTAssertEqual(try LocalExpenseRepository(database: context.database)
+            .expenses(profileID: profile.id, monthKey: "2026-09").count, 1)
+    }
+
+    func testLF03731LowConfidenceFinanceFactsStayPending() async throws {
+        let context = try makeContext()
+        defer { cleanup(context) }
+        let pending = LocalPendingFinancialRepository(database: context.database)
+        let payload: [String: AnyCodable] = [
+            "amount": AnyCodable(20),
+            "platform": AnyCodable("微信"),
+            "category": AnyCodable("food"),
+            "payment_method": AnyCodable("银行卡")
+        ]
+        let provider = StubLocalImageRecognitionProvider(candidate: makeCandidate(
+            domainKey: "expense", confidence: 0.55, payload: payload, missingFields: []))
+        let recognition = LocalImageRecognitionUseCase(localRecordUseCase: context.useCase,
+            imageStore: context.imageStore, intakeRepository: context.intakeRepository,
+            provider: provider, pendingRepository: pending)
+        let outcome = try await recognition.ingest(
+            imageData: Data("financial-low-confidence".utf8),
+            captureKind: "screenshot",
+            filename: "expense.jpg"
+        )
+        guard case .financialPending = outcome.result else {
+            return XCTFail("置信度不足时不能自动归档")
+        }
+        let profile = try context.intakeRepository.activeProfile()
+        XCTAssertEqual(try pending.pending(profileID: profile.id).count, 1)
+        XCTAssertTrue(try LocalExpenseRepository(database: context.database)
+            .expenses(profileID: profile.id, monthKey: "2026-09").isEmpty)
+    }
+
+    func testLF03604InvalidFinanceCandidateNeverCreatesZeroAmount() async throws {
+        let context = try makeContext()
+        defer { cleanup(context) }
+        let pending = LocalPendingFinancialRepository(database: context.database)
+        let provider = StubLocalImageRecognitionProvider(candidate: makeCandidate(
+            domainKey: "expense", confidence: 1, payload: [:], missingFields: ["amount"]))
+        let recognition = LocalImageRecognitionUseCase(
+            localRecordUseCase: context.useCase,
+            imageStore: context.imageStore,
+            intakeRepository: context.intakeRepository,
+            provider: provider,
+            pendingRepository: pending
+        )
+        let imageData = Data("financial-missing-amount".utf8)
+
+        do {
+            _ = try await recognition.ingest(
+                imageData: imageData,
+                captureKind: "shortcut",
+                filename: "expense.jpg"
+            )
+            XCTFail("缺少金额的财务候选不能静默生成 0 元待确认记录")
+        } catch let error as LocalImageRecognitionError {
+            XCTAssertEqual(error, .invalidFinancialAmount)
+        }
+
+        let profile = try context.intakeRepository.activeProfile()
+        let intakeID = "\(profile.id.uuidString)-\(LocalImageStore.sha256(imageData))"
+        let intake = try XCTUnwrap(context.intakeRepository.intake(id: intakeID, profileID: profile.id))
+        XCTAssertEqual(intake.status, .failed)
+        XCTAssertEqual(try pending.pending(profileID: profile.id).count, 0)
+        XCTAssertEqual(try context.imageStore.data(at: intake.imagePath), imageData)
+    }
+
+    func testLF03506LocalCandidatePersistsCompanionAndFeedbackForFormalRecord() async throws {
+        let context = try makeContext()
+        defer { cleanup(context) }
+        let feedback: [String: AnyCodable] = [
+            "badge": AnyCodable("节奏稳定"),
+            "emotion_line": AnyCodable("今天跑得很稳。"),
+            "utility_line": AnyCodable("继续保持这个节奏。"),
+            "detail_reason": AnyCodable("来自本次运动记录。")
+        ]
+        let provider = StubLocalImageRecognitionProvider(candidate: makeCandidate(
+            domainKey: "sport",
+            confidence: 0.95,
+            payload: [
+                "sport_type": AnyCodable("跑步"),
+                "duration_minutes": AnyCodable(35)
+            ],
+            missingFields: [],
+            companionMessage: "今天跑得很稳。",
+            aiFeedback: feedback
+        ))
+        let recognition = LocalImageRecognitionUseCase(
+            localRecordUseCase: context.useCase,
+            imageStore: context.imageStore,
+            intakeRepository: context.intakeRepository,
+            provider: provider
+        )
+
+        let outcome = try await recognition.ingest(
+            imageData: Data("candidate-with-ai-fields".utf8),
+            captureKind: "shortcut",
+            filename: "sport.jpg"
+        )
+        guard case let .archived(recordOutcome) = outcome.result else {
+            return XCTFail("完整高置信度候选应成为正式本地记录")
+        }
+
+        let profile = try LocalProfileStore(database: context.database).activeProfile()
+        let detail = LocalFactReadModel.detail(from: try XCTUnwrap(
+            LocalFactReader(database: context.database).month(profileID: profile.id, monthKey: "2026-09").facts.first
+        ))
+        XCTAssertEqual(detail.companionMessage, "今天跑得很稳。")
+        XCTAssertEqual(detail.aiFeedback?.badge, "节奏稳定")
+        XCTAssertEqual(LocalRecordReadModel.detail(from: recordOutcome.record).companionMessage, "今天跑得很稳。")
+    }
+    func testLF03507DisabledRecognitionPersistsImageForManualProcessingWithoutProviderCall() async throws {
+        let context = try makeContext()
+        defer { cleanup(context) }
+        let provider = StubLocalImageRecognitionProvider(candidate: makeCandidate(
+            id: "must-not-be-requested", confidence: 1, payload: [:], missingFields: []
+        ))
+        let useCase = LocalImageRecognitionUseCase(
+            localRecordUseCase: context.useCase,
+            imageStore: context.imageStore,
+            intakeRepository: context.intakeRepository,
+            provider: provider
+        )
+        let imageData = Data("disabled-mode-local-image".utf8)
+
+        let intake = try useCase.receiveForManual(
+            imageData: imageData,
+            captureKind: "screenshot",
+            filename: "local-only.jpg"
+        )
+
+        XCTAssertEqual(intake.status, .failed)
+        XCTAssertEqual(intake.retryCount, 0)
+        XCTAssertTrue(intake.failureMessage?.contains("AI 识别已关闭") == true)
+        XCTAssertEqual(intake.imageHash, LocalImageStore.sha256(imageData))
+        XCTAssertEqual(try context.imageStore.data(at: intake.imagePath), imageData)
+        XCTAssertEqual(try context.intakeRepository.failedIntakes(profileID: intake.profileID), [intake])
+        XCTAssertEqual(provider.callCount, 0)
+        let records = try await context.useCase.records(monthKey: "2026-09")
+        XCTAssertTrue(records.isEmpty)
+    }
+
+    func testLocalVisionModePersistsInDevicePreferences() {
+        let suite = "local-vision-mode-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+
+        XCTAssertEqual(LocalVisionModeStore(defaults: defaults).mode, .disabled)
+        LocalVisionModeStore(defaults: defaults).save(.disabled)
+        XCTAssertEqual(LocalVisionModeStore(defaults: defaults).mode, .disabled)
+    }
+
+    func testUnreleasedBYOKPreferenceFallsBackToDisabled() {
+        let suite = "local-vision-mode-byok-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+
+        defaults.set(LocalVisionMode.byok.rawValue, forKey: "local_vision_mode")
+
+        let store = LocalVisionModeStore(defaults: defaults)
+        XCTAssertEqual(store.mode, .disabled)
+        XCTAssertEqual(defaults.string(forKey: "local_vision_mode"), LocalVisionMode.disabled.rawValue)
+
+        store.save(.byok)
+        XCTAssertEqual(store.mode, .disabled)
+        XCTAssertEqual(defaults.string(forKey: "local_vision_mode"), LocalVisionMode.disabled.rawValue)
+    }
+
     func testLOCALP1SPORT001JHighConfidenceCompleteImageBecomesLocalFormalFact() async throws {
         let context = try makeContext()
         defer { cleanup(context) }
@@ -20,6 +381,7 @@ final class LocalImageRecognitionTests: XCTestCase {
         let useCase = LocalImageRecognitionUseCase(
             localRecordUseCase: context.useCase,
             imageStore: context.imageStore,
+            intakeRepository: context.intakeRepository,
             provider: provider
         )
 
@@ -37,6 +399,11 @@ final class LocalImageRecognitionTests: XCTestCase {
         XCTAssertEqual(recordOutcome.record.imageHash, outcome.imageHash)
         XCTAssertTrue(recordOutcome.record.imagePath?.hasPrefix("records/") == true)
         XCTAssertTrue(context.imageStore.contains(path: recordOutcome.record.imagePath))
+        let profile = try context.intakeRepository.activeProfile()
+        let intakeID = "\(profile.id.uuidString)-\(outcome.imageHash)"
+        let intake = try XCTUnwrap(context.intakeRepository.intake(id: intakeID, profileID: profile.id))
+        XCTAssertEqual(intake.status, .completed)
+        XCTAssertFalse(context.imageStore.contains(path: intake.imagePath))
         let formalRecords = try await context.useCase.records(monthKey: "2026-09")
         let stagingRecords = try await context.useCase.stagingRecords()
         XCTAssertEqual(formalRecords.count, 1)
@@ -59,6 +426,7 @@ final class LocalImageRecognitionTests: XCTestCase {
         let useCase = LocalImageRecognitionUseCase(
             localRecordUseCase: context.useCase,
             imageStore: context.imageStore,
+            intakeRepository: context.intakeRepository,
             provider: provider
         )
 
@@ -93,6 +461,7 @@ final class LocalImageRecognitionTests: XCTestCase {
         let useCase = LocalImageRecognitionUseCase(
             localRecordUseCase: context.useCase,
             imageStore: context.imageStore,
+            intakeRepository: context.intakeRepository,
             provider: provider
         )
 
@@ -131,6 +500,7 @@ final class LocalImageRecognitionTests: XCTestCase {
         let recognition = LocalImageRecognitionUseCase(
             localRecordUseCase: useCase,
             imageStore: store,
+            intakeRepository: LocalImageIntakeRepository(database: database),
             provider: StubLocalImageRecognitionProvider(candidate: makeCandidate())
         )
 
@@ -152,19 +522,22 @@ final class LocalImageRecognitionTests: XCTestCase {
         XCTAssertTrue(stagingRecords.isEmpty)
     }
 
-    func testLOCALP1SPORT001JProviderFailureCleansTheLocalIntakeImageWithoutDatabaseRow() async throws {
+    @MainActor
+    func testLF03602ProviderFailureKeepsImageAndFailureAcrossDatabaseReopen() async throws {
         let context = try makeContext()
         defer { cleanup(context) }
 
         let recognition = LocalImageRecognitionUseCase(
             localRecordUseCase: context.useCase,
             imageStore: context.imageStore,
+            intakeRepository: context.intakeRepository,
             provider: StubLocalImageRecognitionProvider(error: StubProviderError.failed)
         )
 
+        let imageData = Data("j-provider-failure-image".utf8)
         do {
             _ = try await recognition.ingest(
-                imageData: Data("j-provider-failure-image".utf8),
+                imageData: imageData,
                 captureKind: "camera",
                 filename: "camera.jpg"
             )
@@ -178,9 +551,202 @@ final class LocalImageRecognitionTests: XCTestCase {
         let stagingRecords = try await context.useCase.stagingRecords()
         XCTAssertTrue(formalRecords.isEmpty)
         XCTAssertTrue(stagingRecords.isEmpty)
-        XCTAssertFalse(context.imageStore.contains(path: "intake/anything.jpg"))
-        let persistedRecords = try LocalRecordRepository(database: context.database).records(profileID: profile.id, monthKey: "2026-09")
-        XCTAssertEqual(persistedRecords.count, 0)
+        let intakeID = "\(profile.id.uuidString)-\(LocalImageStore.sha256(imageData))"
+        let intake = try XCTUnwrap(context.intakeRepository.intake(id: intakeID, profileID: profile.id))
+        XCTAssertEqual(intake.status, .failed)
+        XCTAssertEqual(intake.attemptCount, 1)
+        XCTAssertNotNil(intake.failureMessage)
+        XCTAssertEqual(try context.imageStore.data(at: intake.imagePath), imageData)
+
+        let reopenedDatabase = try LocalDatabase(databaseURL: context.databaseURL)
+        let reopenedRepository = LocalImageIntakeRepository(database: reopenedDatabase)
+        let reopenedIntake = try XCTUnwrap(reopenedRepository.intake(id: intakeID, profileID: profile.id))
+        XCTAssertEqual(reopenedIntake.status, .failed)
+        XCTAssertEqual(try context.imageStore.data(at: reopenedIntake.imagePath), imageData)
+
+        let appState = AppState(
+            localRecordUseCase: context.useCase,
+            localImageStore: context.imageStore,
+            localImageIntakeRepository: reopenedRepository
+        )
+        await appState.refreshFailedLocalImageIntakes()
+        XCTAssertEqual(appState.failedLocalImageIntakes.map(\.id), [intakeID])
+    }
+
+    func testLF03003CredentialReplacementDropsLateRecognitionAndKeepsImage() async throws {
+        let context = try makeContext()
+        defer { cleanup(context) }
+        let credentialValidity = RecognitionCredentialValidity()
+        let imageData = Data("synthetic-key-replacement-image".utf8)
+        let recognition = LocalImageRecognitionUseCase(
+            localRecordUseCase: context.useCase,
+            imageStore: context.imageStore,
+            intakeRepository: context.intakeRepository,
+            provider: CredentialInvalidatingLocalImageRecognitionProvider(
+                candidate: makeCandidate(),
+                credentialValidity: credentialValidity
+            ),
+            isRecognitionRequestCurrent: { credentialValidity.isCurrent }
+        )
+
+        do {
+            _ = try await recognition.ingest(
+                imageData: imageData, captureKind: "camera", filename: "synthetic.jpg"
+            )
+            XCTFail("旧 Key 请求的晚回包不应写入本地候选或正式记录")
+        } catch {
+            XCTAssertTrue(error is CancellationError)
+        }
+
+        let profile = try context.intakeRepository.activeProfile()
+        let intakeID = "\(profile.id.uuidString)-\(LocalImageStore.sha256(imageData))"
+        let intake = try XCTUnwrap(context.intakeRepository.intake(id: intakeID, profileID: profile.id))
+        XCTAssertEqual(intake.status, .failed)
+        XCTAssertFalse(credentialValidity.isCurrent)
+        XCTAssertEqual(try context.imageStore.data(at: intake.imagePath), imageData)
+        let records = try await context.useCase.records(monthKey: "2026-09")
+        let stagingRecords = try await context.useCase.stagingRecords()
+        XCTAssertTrue(records.isEmpty)
+        XCTAssertTrue(stagingRecords.isEmpty)
+    }
+
+    func testLF00701RetryUsesSameIntakeAndStoresRetryCount() async throws {
+        let context = try makeContext()
+        defer { cleanup(context) }
+        let imageData = Data("lf007-retry-stable-image".utf8)
+        let firstUseCase = LocalImageRecognitionUseCase(
+            localRecordUseCase: context.useCase,
+            imageStore: context.imageStore,
+            intakeRepository: context.intakeRepository,
+            provider: StubLocalImageRecognitionProvider(error: StubProviderError.failed)
+        )
+        do {
+            _ = try await firstUseCase.ingest(imageData: imageData, captureKind: "camera", filename: "retry.jpg")
+            XCTFail("首次识别失败应保留为可重试输入")
+        } catch {
+            XCTAssertEqual(error as? StubProviderError, .failed)
+        }
+
+        let profile = try context.intakeRepository.activeProfile()
+        let intakeID = "\(profile.id.uuidString)-\(LocalImageStore.sha256(imageData))"
+        let retryUseCase = LocalImageRecognitionUseCase(
+            localRecordUseCase: context.useCase,
+            imageStore: context.imageStore,
+            intakeRepository: context.intakeRepository,
+            provider: StubLocalImageRecognitionProvider(candidate: makeCandidate())
+        )
+        let retried = try await retryUseCase.retry(intakeID: intakeID)
+        guard case .archived = retried.result else {
+            return XCTFail("重试成功应复用稳定记录身份并落本地事实")
+        }
+        let intake = try XCTUnwrap(context.intakeRepository.intake(id: intakeID, profileID: profile.id))
+        XCTAssertEqual(intake.status, .completed)
+        XCTAssertEqual(intake.retryCount, 1)
+        XCTAssertEqual(intake.attemptCount, 2)
+        XCTAssertFalse(context.imageStore.contains(path: intake.imagePath))
+        let records = try await context.useCase.records(monthKey: "2026-09")
+        XCTAssertEqual(records.count, 1)
+    }
+
+    func testLF00702ThreeRetriesKeepManualAndDiscardExit() async throws {
+        let context = try makeContext()
+        defer { cleanup(context) }
+        let imageData = Data("lf007-retry-limit-image".utf8)
+        let failedUseCase = LocalImageRecognitionUseCase(
+            localRecordUseCase: context.useCase,
+            imageStore: context.imageStore,
+            intakeRepository: context.intakeRepository,
+            provider: StubLocalImageRecognitionProvider(error: StubProviderError.failed)
+        )
+        do {
+            _ = try await failedUseCase.ingest(imageData: imageData, captureKind: "camera", filename: "limit.jpg")
+            XCTFail("首次识别应失败并创建可重试输入")
+        } catch {
+            XCTAssertEqual(error as? StubProviderError, .failed)
+        }
+        let profile = try context.intakeRepository.activeProfile()
+        let intakeID = "\(profile.id.uuidString)-\(LocalImageStore.sha256(imageData))"
+        for _ in 0..<3 {
+            do { _ = try await failedUseCase.retry(intakeID: intakeID) }
+            catch { XCTAssertEqual(error as? StubProviderError, .failed) }
+        }
+        do {
+            _ = try await failedUseCase.retry(intakeID: intakeID)
+            XCTFail("第四次重试请求应被拒绝")
+        } catch {
+            XCTAssertEqual(error as? LocalImageRecognitionError, .retryLimitReached)
+        }
+        let intake = try XCTUnwrap(context.intakeRepository.intake(id: intakeID, profileID: profile.id))
+        XCTAssertEqual(intake.retryCount, 3)
+        XCTAssertTrue(context.imageStore.contains(path: intake.imagePath))
+        XCTAssertEqual(try context.imageStore.data(at: intake.imagePath), imageData)
+    }
+
+    func testLF03604UnsupportedDomainRemainsLocalAndDoesNotCreateBusinessFact() async throws {
+        let context = try makeContext()
+        defer { cleanup(context) }
+        let imageData = Data("lf036-unsupported-domain".utf8)
+        let useCase = LocalImageRecognitionUseCase(
+            localRecordUseCase: context.useCase,
+            imageStore: context.imageStore,
+            intakeRepository: context.intakeRepository,
+            provider: StubLocalImageRecognitionProvider(candidate: makeCandidate(domainKey: "tax"))
+        )
+        do {
+            _ = try await useCase.ingest(imageData: imageData, captureKind: "camera", filename: "wallet.jpg")
+            XCTFail("当前本地不支持的候选必须进入失败输入状态")
+        } catch {
+            XCTAssertEqual(error as? LocalImageRecognitionError, .unsupportedDomain("tax"))
+        }
+
+        let profile = try context.intakeRepository.activeProfile()
+        let intakeID = "\(profile.id.uuidString)-\(LocalImageStore.sha256(imageData))"
+        let intake = try XCTUnwrap(context.intakeRepository.intake(id: intakeID, profileID: profile.id))
+        XCTAssertEqual(intake.status, .failed)
+        XCTAssertEqual(intake.failureMessage, "本地首片暂不支持数据域：tax")
+        XCTAssertEqual(try context.imageStore.data(at: intake.imagePath), imageData)
+        let records = try await context.useCase.records(monthKey: "2026-09")
+        let staging = try await context.useCase.stagingRecords()
+        XCTAssertTrue(records.isEmpty)
+        XCTAssertTrue(staging.isEmpty)
+    }
+
+    func testLF03721LocalWalletScreenshotRecognitionRetainsImageInReviewQueue() async throws {
+        let context = try makeContext()
+        defer { cleanup(context) }
+        let imageData = Data("synthetic-wallet-repayment-image".utf8)
+        let provider = StubLocalImageRecognitionProvider(candidate: makeCandidate(
+            domainKey: "wallet",
+            confidence: 0.93,
+            payload: [
+                "record_kind": AnyCodable("liability_snapshot"),
+                "status": AnyCodable("paid"),
+                "amount": AnyCodable(40.0)
+            ],
+            missingFields: []
+        ))
+        let useCase = LocalImageRecognitionUseCase(
+            localRecordUseCase: context.useCase,
+            imageStore: context.imageStore,
+            intakeRepository: context.intakeRepository,
+            provider: provider
+        )
+
+        let outcome = try await useCase.ingest(
+            imageData: imageData,
+            captureKind: "screenshot",
+            filename: "synthetic-repayment.jpg"
+        )
+
+        guard case .staged(let staged) = outcome.result else {
+            return XCTFail("wallet 还款截图必须先进入人工复核，不能自动入账")
+        }
+        XCTAssertEqual(staged.record.domainKey, "wallet")
+        XCTAssertEqual(staged.record.status, .pendingReview)
+        XCTAssertEqual(try context.imageStore.data(at: try XCTUnwrap(staged.record.imagePath)), imageData)
+        let records = try await context.useCase.records(monthKey: "2026-09")
+        XCTAssertTrue(records.isEmpty)
+        XCTAssertEqual(provider.callCount, 1)
     }
 
     func testLOCALP1SPORT001JRetryingTheSameImageDoesNotCreateDuplicateFormalFacts() async throws {
@@ -200,6 +766,7 @@ final class LocalImageRecognitionTests: XCTestCase {
         let useCase = LocalImageRecognitionUseCase(
             localRecordUseCase: context.useCase,
             imageStore: context.imageStore,
+            intakeRepository: context.intakeRepository,
             provider: provider
         )
 
@@ -219,24 +786,193 @@ final class LocalImageRecognitionTests: XCTestCase {
             return XCTFail("同一图片重试应保持高置信度自动归档结果")
         }
         XCTAssertEqual(firstArchived.record.id, secondArchived.record.id)
+        XCTAssertEqual(provider.callCount, 1, "已完成的相同图片应复用本地目标，不再次请求识别")
         let formalRecords = try await context.useCase.records(monthKey: "2026-09")
         let stagingRecords = try await context.useCase.stagingRecords()
         XCTAssertEqual(formalRecords.count, 1)
         XCTAssertTrue(stagingRecords.isEmpty)
     }
 
+    @MainActor
+    func testLF00803ConcurrentAppAndShortcutIngestShareOneActiveImageClaim() async throws {
+        let context = try makeContext()
+        defer { cleanup(context) }
+
+        let imageData = Data("lf008-app-shortcut-race".utf8)
+        let provider = DelayedLocalImageRecognitionProvider(candidate: makeCandidate())
+        let appUseCase = LocalImageRecognitionUseCase(
+            localRecordUseCase: context.useCase,
+            imageStore: context.imageStore,
+            intakeRepository: context.intakeRepository,
+            provider: provider
+        )
+        let shortcutDatabase = try LocalDatabase(databaseURL: context.databaseURL)
+        let shortcutImageStore = try LocalImageStore(rootDirectory: context.imageDirectory)
+        let shortcutUseCaseRecords = LocalRecordUseCase(
+            profileStore: LocalProfileStore(database: shortcutDatabase),
+            repository: try LocalRecordRepository(database: shortcutDatabase),
+            imageStore: shortcutImageStore
+        )
+        let shortcutUseCase = LocalImageRecognitionUseCase(
+            localRecordUseCase: shortcutUseCaseRecords,
+            imageStore: shortcutImageStore,
+            intakeRepository: LocalImageIntakeRepository(database: shortcutDatabase),
+            provider: StubLocalImageRecognitionProvider(candidate: makeCandidate())
+        )
+        let appTask = Task {
+            try await appUseCase.ingest(imageData: imageData, captureKind: "camera", filename: "app.jpg")
+        }
+
+        for _ in 0..<100 where provider.callCount == 0 {
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
+        XCTAssertEqual(provider.callCount, 1, "第一条入口应已取得持久化认领并进入Provider")
+
+        do {
+            _ = try await shortcutUseCase.ingest(
+                imageData: imageData, captureKind: "screenshot", filename: "shortcut.jpg"
+            )
+            XCTFail("并发的快捷指令入口不得启动第二次识别")
+        } catch {
+            XCTAssertEqual(error as? LocalImageRecognitionError, .alreadyInProgress)
+        }
+
+        let outcome = try await appTask.value
+        guard case .archived = outcome.result else {
+            return XCTFail("唯一一次识别应保存一个正式本地事实")
+        }
+        let profile = try context.intakeRepository.activeProfile()
+        let intakeID = "\(profile.id.uuidString)-\(LocalImageStore.sha256(imageData))"
+        let intake = try XCTUnwrap(context.intakeRepository.intake(id: intakeID, profileID: profile.id))
+        XCTAssertEqual(intake.status, .completed)
+        XCTAssertEqual(provider.callCount, 1)
+        XCTAssertFalse(context.imageStore.contains(path: intake.imagePath))
+        let records = try await context.useCase.records(monthKey: "2026-09")
+        let stagingRecords = try await context.useCase.stagingRecords()
+        XCTAssertEqual(records.count, 1)
+        XCTAssertTrue(stagingRecords.isEmpty)
+    }
+
+    @MainActor
+    func testLF00803ImageIntakeClaimIsExclusiveAndInterruptedClaimCanBeRecovered() async throws {
+        let context = try makeContext()
+        defer { cleanup(context) }
+        let profile = try context.intakeRepository.activeProfile()
+        let imageData = Data("lf008-exclusive-image".utf8)
+        let hash = LocalImageStore.sha256(imageData)
+        let intakeID = "\(profile.id.uuidString)-\(hash)"
+        let image = try context.imageStore.save(data: imageData, owner: intakeID, bucket: "intake")
+        let startedAt = Date()
+        let firstOperation = try context.intakeRepository.beginAttempt(
+            id: intakeID,
+            profileID: profile.id,
+            captureKind: "camera",
+            filename: "claim.jpg",
+            imagePath: image.path,
+            imageHash: hash,
+            at: startedAt
+        )
+        let appState = AppState(
+            localRecordUseCase: context.useCase,
+            localImageStore: context.imageStore,
+            localImageIntakeRepository: context.intakeRepository
+        )
+        await appState.refreshFailedLocalImageIntakes()
+        XCTAssertEqual(appState.failedLocalImageIntakes.first?.status, .receiving)
+
+        XCTAssertThrowsError(try context.intakeRepository.beginAttempt(
+            id: intakeID,
+            profileID: profile.id,
+            captureKind: "camera",
+            filename: "claim.jpg",
+            imagePath: image.path,
+            imageHash: hash,
+            at: Date()
+        )) { XCTAssertEqual($0 as? LocalImageRecognitionError, .alreadyInProgress) }
+        XCTAssertEqual(try context.intakeRepository.intake(id: intakeID, profileID: profile.id)?.attemptCount, 1)
+        XCTAssertTrue(try context.intakeRepository.isReceiving(
+            id: intakeID, profileID: profile.id, operationID: firstOperation
+        ))
+
+        try await context.database.writer.write { db in
+            try db.execute(
+                sql: "UPDATE local_image_intakes SET updated_at = ? WHERE id = ?",
+                arguments: [Date().addingTimeInterval(-600), intakeID]
+            )
+        }
+        try context.intakeRepository.recoverInterrupted(profileID: profile.id, before: Date().addingTimeInterval(-120))
+        XCTAssertEqual(try context.intakeRepository.intake(id: intakeID, profileID: profile.id)?.status, .failed)
+        let recoveredOperation = try context.intakeRepository.beginAttempt(
+            id: intakeID,
+            profileID: profile.id,
+            captureKind: "camera",
+            filename: "claim.jpg",
+            imagePath: image.path,
+            imageHash: hash,
+            at: Date()
+        )
+        XCTAssertNotEqual(recoveredOperation, firstOperation)
+        XCTAssertFalse(try context.intakeRepository.isReceiving(
+            id: intakeID, profileID: profile.id, operationID: firstOperation
+        ))
+        XCTAssertTrue(try context.intakeRepository.isReceiving(
+            id: intakeID, profileID: profile.id, operationID: recoveredOperation
+        ))
+        XCTAssertEqual(try context.intakeRepository.intake(id: intakeID, profileID: profile.id)?.attemptCount, 2)
+    }
+
+    func testLF00804DiscardQueuesAndCleansImageWithoutDroppingFailureStateFirst() throws {
+        let context = try makeContext()
+        defer { cleanup(context) }
+        let profile = try context.intakeRepository.activeProfile()
+        let imageData = Data("lf008-discard-image".utf8)
+        let hash = LocalImageStore.sha256(imageData)
+        let intakeID = "\(profile.id.uuidString)-\(hash)"
+        let image = try context.imageStore.save(data: imageData, owner: intakeID, bucket: "intake")
+        let operationID = try context.intakeRepository.beginAttempt(
+            id: intakeID,
+            profileID: profile.id,
+            captureKind: "camera",
+            filename: "discard.jpg",
+            imagePath: image.path,
+            imageHash: hash,
+            at: Date()
+        )
+        XCTAssertThrowsError(try context.intakeRepository.discard(id: intakeID, profileID: profile.id))
+        XCTAssertTrue(context.imageStore.contains(path: image.path))
+        try context.intakeRepository.markFailed(
+            id: intakeID,
+            profileID: profile.id,
+            operationID: operationID,
+            message: "synthetic failure",
+            at: Date()
+        )
+
+        try context.intakeRepository.discard(id: intakeID, profileID: profile.id)
+        XCTAssertNil(try context.intakeRepository.intake(id: intakeID, profileID: profile.id))
+        XCTAssertTrue(context.imageStore.contains(path: image.path))
+        XCTAssertEqual(try LocalRecordRepository(database: context.database).pendingImageCleanups(profileID: profile.id).map(\.imagePath), [image.path])
+
+        let pending = try context.useCase.retryPendingImageCleanups()
+        XCTAssertTrue(pending.isEmpty)
+        XCTAssertFalse(context.imageStore.contains(path: image.path))
+    }
+
     private func makeCandidate(
         id: String = "hosted-candidate",
+        domainKey: String = "sport",
         confidence: Double = 0.9,
         payload: [String: AnyCodable] = [
             "sport_type": AnyCodable("跑步"),
             "duration_minutes": AnyCodable(30)
         ],
-        missingFields: [String] = []
+        missingFields: [String] = [],
+        companionMessage: String? = nil,
+        aiFeedback: [String: AnyCodable]? = nil
     ) -> LocalRecognitionCandidate {
         LocalRecognitionCandidate(
             id: id,
-            domainKey: "sport",
+            domainKey: domainKey,
             title: "运动记录",
             summary: "AI 图片识别",
             payload: payload,
@@ -246,7 +982,9 @@ final class LocalImageRecognitionTests: XCTestCase {
             occurredAt: "2026-09-20T08:30:00+08:00",
             evidenceFields: Array(payload.keys).sorted(),
             missingFields: missingFields,
-            imageHash: nil
+            imageHash: nil,
+            companionMessage: companionMessage,
+            aiFeedback: aiFeedback
         )
     }
 
@@ -255,6 +993,7 @@ final class LocalImageRecognitionTests: XCTestCase {
         let imageDirectory = temporaryDirectoryURL()
         let database = try LocalDatabase(databaseURL: databaseURL)
         let store = try LocalImageStore(rootDirectory: imageDirectory)
+        let intakeRepository = LocalImageIntakeRepository(database: database)
         let useCase = LocalRecordUseCase(
             profileStore: LocalProfileStore(database: database),
             repository: try LocalRecordRepository(database: database),
@@ -265,6 +1004,7 @@ final class LocalImageRecognitionTests: XCTestCase {
             databaseURL: databaseURL,
             imageDirectory: imageDirectory,
             imageStore: store,
+            intakeRepository: intakeRepository,
             useCase: useCase
         )
     }
@@ -290,6 +1030,7 @@ final class LocalImageRecognitionTests: XCTestCase {
         let databaseURL: URL
         let imageDirectory: URL
         let imageStore: LocalImageStore
+        let intakeRepository: LocalImageIntakeRepository
         let useCase: LocalRecordUseCase
     }
 }
@@ -297,6 +1038,7 @@ final class LocalImageRecognitionTests: XCTestCase {
 private final class StubLocalImageRecognitionProvider: LocalImageRecognitionProvider {
     let candidate: LocalRecognitionCandidate?
     let failure: Error?
+    private(set) var callCount = 0
 
     init(candidate: LocalRecognitionCandidate) {
         self.candidate = candidate
@@ -309,8 +1051,62 @@ private final class StubLocalImageRecognitionProvider: LocalImageRecognitionProv
     }
 
     func recognize(_ request: LocalImageRecognitionRequest) async throws -> LocalRecognitionCandidate {
+        callCount += 1
         if let failure { throw failure }
         guard let candidate else { throw StubProviderError.missingCandidate }
+        return candidate
+    }
+}
+
+private final class DelayedLocalImageRecognitionProvider: LocalImageRecognitionProvider, @unchecked Sendable {
+    private let candidate: LocalRecognitionCandidate
+    private let lock = NSLock()
+    private var requests = 0
+
+    var callCount: Int {
+        lock.lock(); defer { lock.unlock() }
+        return requests
+    }
+
+    init(candidate: LocalRecognitionCandidate) {
+        self.candidate = candidate
+    }
+
+    func recognize(_ request: LocalImageRecognitionRequest) async throws -> LocalRecognitionCandidate {
+        lock.lock()
+        requests += 1
+        lock.unlock()
+        try await Task.sleep(nanoseconds: 1_000_000_000)
+        return candidate
+    }
+}
+
+private final class RecognitionCredentialValidity {
+    private let lock = NSLock()
+    private var current = true
+
+    var isCurrent: Bool {
+        lock.lock(); defer { lock.unlock() }
+        return current
+    }
+
+    func invalidate() {
+        lock.lock(); defer { lock.unlock() }
+        current = false
+    }
+}
+
+private final class CredentialInvalidatingLocalImageRecognitionProvider: LocalImageRecognitionProvider {
+    let candidate: LocalRecognitionCandidate
+    let credentialValidity: RecognitionCredentialValidity
+
+    init(candidate: LocalRecognitionCandidate, credentialValidity: RecognitionCredentialValidity) {
+        self.candidate = candidate
+        self.credentialValidity = credentialValidity
+    }
+
+    func recognize(_ request: LocalImageRecognitionRequest) async throws -> LocalRecognitionCandidate {
+        credentialValidity.invalidate()
         return candidate
     }
 }

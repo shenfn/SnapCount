@@ -1,12 +1,13 @@
 import Foundation
 import GRDB
 
-enum LocalFactKind: String, Equatable, Hashable {
+enum LocalFactKind: String, Equatable, Hashable, Sendable {
     case expense
+    case income
     case record
 }
 
-struct LocalFact: Equatable, Identifiable {
+struct LocalFact: Equatable, Identifiable, Sendable {
     let id: UUID
     let profileID: UUID
     let reference: String
@@ -23,12 +24,13 @@ struct LocalFact: Equatable, Identifiable {
     let note: String?
     let imagePath: String?
     let imageHash: String?
+    var companionMessage: String? = nil
     let localVersion: Int64
     let createdAt: Date
     let updatedAt: Date
 }
 
-struct LocalFactMonth: Equatable {
+struct LocalFactMonth: Equatable, Sendable {
     let profileID: UUID
     let facts: [LocalFact]
 }
@@ -62,7 +64,30 @@ final class LocalFactReader {
 
     func range(profileID: UUID, from startDate: String, to endDate: String) throws -> LocalFactMonth {
         try database.writer.read { db in
-            let expenses = try Row.fetchAll(
+            try Self.readMonth(db, profileID: profileID, from: startDate, to: endDate)
+        }
+    }
+
+    /// 用 GRDB 自己的队列读取，避免首页在主执行器同步等待 SQLite 和逐条投影。
+    /// 当前固定 GRDB 6.29.3 的异步 read 不随页面取消；AppState 仍核对身份和读取版本。
+    func activeMonth(monthKey: String) async throws -> LocalFactMonth? {
+        try await database.writer.read { db in
+            guard let value = try String.fetchOne(db, sql: "SELECT id FROM local_profiles ORDER BY created_at ASC, id ASC LIMIT 1"),
+                  let profileID = UUID(uuidString: value) else { return nil }
+            return try Self.readMonth(db, profileID: profileID, from: "\(monthKey)-01", to: "\(monthKey)-31")
+        }
+    }
+
+    func activeRange(from startDate: String, to endDate: String) async throws -> LocalFactMonth? {
+        try await database.writer.read { db in
+            guard let value = try String.fetchOne(db, sql: "SELECT id FROM local_profiles ORDER BY created_at ASC, id ASC LIMIT 1"),
+                  let profileID = UUID(uuidString: value) else { return nil }
+            return try Self.readMonth(db, profileID: profileID, from: startDate, to: endDate)
+        }
+    }
+
+    private static func readMonth(_ db: Database, profileID: UUID, from startDate: String, to endDate: String) throws -> LocalFactMonth {
+            let expenseRows = try Row.fetchAll(
                 db,
                 sql: """
                     SELECT * FROM local_expenses
@@ -71,50 +96,71 @@ final class LocalFactReader {
                       AND deleted_at IS NULL
                     """,
                 arguments: [profileID.uuidString, startDate, endDate]
-            ).map { try Self.fact(expenseRow: $0) }
-            let records = try Row.fetchAll(
+            )
+            let expenses = expenseRows.compactMap { row in
+                do { return try Self.fact(expenseRow: row) }
+                catch { Self.reportProjectionSkip(table: "local_expenses", row: row, error: error); return nil }
+            }
+            let incomeRows = try Row.fetchAll(
+                db,
+                sql: """
+                    SELECT * FROM local_income_records
+                    WHERE profile_id = ? AND income_date BETWEEN ? AND ? AND deleted_at IS NULL
+                    """,
+                arguments: [profileID.uuidString, startDate, endDate]
+            )
+            let incomes = incomeRows.compactMap { row in
+                do { return try Self.fact(incomeRow: row) }
+                catch { Self.reportProjectionSkip(table: "local_income_records", row: row, error: error); return nil }
+            }
+            let recordRows = try Row.fetchAll(
                 db,
                 sql: """
                     SELECT * FROM local_records
                     WHERE profile_id = ?
                       AND domain_key IN ('food', 'sleep', 'sport', 'reading')
-                      AND record_date BETWEEN ? AND ?
+                      AND (domain_key = 'sleep' OR record_date BETWEEN ? AND ?)
                       AND deleted_at IS NULL
                     """,
                 arguments: [profileID.uuidString, startDate, endDate]
-            ).map { try Self.fact(recordRow: $0) }
-            let incomes = try Row.fetchAll(
-                db,
-                sql: """
-                    SELECT * FROM local_incomes
-                    WHERE profile_id = ?
-                      AND income_date BETWEEN ? AND ?
-                      AND deleted_at IS NULL
-                    """,
-                arguments: [profileID.uuidString, startDate, endDate]
-            ).map { try Self.fact(incomeRow: $0) }
-            let walletSnapshots = try Row.fetchAll(
+            )
+            let records = recordRows.compactMap { row in
+                do {
+                    let fact = try Self.fact(recordRow: row)
+                    return fact.businessDate >= startDate && fact.businessDate <= endDate ? fact : nil
+                } catch {
+                    Self.reportProjectionSkip(table: "local_records", row: row, error: LocalDataError.invalidRecord)
+                    return nil
+                }
+            }
+
+            let walletRows = try Row.fetchAll(
                 db,
                 sql: """
                     SELECT * FROM local_wallet_snapshots
                     WHERE profile_id = ?
-                      AND snapshot_date BETWEEN ? AND ?
+                      AND record_date BETWEEN ? AND ?
                       AND deleted_at IS NULL
                     """,
                 arguments: [profileID.uuidString, startDate, endDate]
-            ).map { try Self.fact(walletRow: $0) }
+            )
+            let wallets = walletRows.compactMap { row in
+                do { return try Self.walletFact(row: row) }
+                catch {
+                    Self.reportProjectionSkip(table: "local_wallet_snapshots", row: row, error: error)
+                    return nil
+                }
+            }
 
             return LocalFactMonth(
                 profileID: profileID,
-                facts: (expenses + records + incomes + walletSnapshots).sorted(by: Self.isNewer)
+                facts: (expenses + incomes + records + wallets).sorted(by: Self.isNewer)
             )
-        }
     }
 
     private static func fact(expenseRow row: Row) throws -> LocalFact {
         guard let id = UUID(uuidString: row["id"]),
               let profileID = UUID(uuidString: row["profile_id"]),
-              let accountID = UUID(uuidString: row["account_id"]),
               let transactionDate: String = row["transaction_date"],
               let createdAt: Date = row["created_at"],
               let updatedAt: Date = row["updated_at"] else {
@@ -123,7 +169,7 @@ final class LocalFactReader {
         return fact(from: LocalExpense(
             id: id,
             profileID: profileID,
-            accountID: accountID,
+            accountID: (row["account_id"] as String?).flatMap(UUID.init(uuidString:)),
             amountMinor: row["amount_minor"],
             currency: row["currency"],
             merchantName: row["merchant_name"],
@@ -135,8 +181,28 @@ final class LocalFactReader {
             note: row["note"],
             localVersion: row["local_version"],
             createdAt: createdAt,
-            updatedAt: updatedAt
+            updatedAt: updatedAt, imagePath: row["image_path"], imageHash: row["image_hash"],
+            companionMessage: row["companion_message"]
         ))
+    }
+
+    private static func fact(incomeRow row: Row) throws -> LocalFact {
+        guard let id = UUID(uuidString: row["id"]),
+              let profileID = UUID(uuidString: row["profile_id"]),
+              let incomeDate: String = row["income_date"],
+              let createdAt: Date = row["created_at"],
+              let updatedAt: Date = row["updated_at"] else { throw LocalDataError.invalidRecord }
+        let accountText: String? = row["account_id"]
+        let income = LocalIncome(
+            id: id, profileID: profileID,
+            accountID: accountText.flatMap(UUID.init(uuidString:)),
+            amountMinor: row["amount_minor"], currency: row["currency"],
+            sourceName: row["source_name"], category: row["category"],
+            incomeDate: incomeDate, occurredAt: row["occurred_at"], note: row["note"],
+            localVersion: row["local_version"], createdAt: createdAt, updatedAt: updatedAt, imagePath: row["image_path"], imageHash: row["image_hash"],
+            companionMessage: row["companion_message"]
+        )
+        return fact(from: income)
     }
 
     private static func fact(recordRow row: Row) throws -> LocalFact {
@@ -171,88 +237,39 @@ final class LocalFactReader {
         ))
     }
 
-    private static func fact(incomeRow row: Row) throws -> LocalFact {
+    private static func walletFact(row: Row) throws -> LocalFact {
         guard let id = UUID(uuidString: row["id"]),
               let profileID = UUID(uuidString: row["profile_id"]),
-              let currency: String = row["currency"],
-              let incomeCategory: String = row["income_category"],
-              let incomeDate: String = row["income_date"],
-              let createdAt: Date = row["created_at"],
-              let updatedAt: Date = row["updated_at"] else {
-            throw LocalDataError.invalidRecord
-        }
-        let accountID: String? = row["account_id"]
-        let sourceName: String? = row["source_name"]
-        let note: String? = row["note"]
-        let incomeTime: String? = row["income_time"]
-        let payload = IncomeFactPayload(
-            amountMinor: row["amount_minor"],
-            currency: currency,
-            incomeCategory: incomeCategory,
-            sourceName: sourceName,
-            incomeDate: incomeDate,
-            incomeTime: incomeTime,
-            note: note,
-            accountID: accountID
-        )
-        return LocalFact(
-            id: id,
-            profileID: profileID,
-            reference: "income/\(id.uuidString)",
-            kind: .record,
-            domainKey: "income",
-            sourceKind: "manual",
-            domainVersion: "local-v1",
-            title: sourceName ?? "收入记录",
-            summary: incomeCategory,
-            payloadJSON: (try? encode(payload)) ?? "{}",
-            businessDate: incomeDate,
-            recordTime: incomeTime,
-            occurredAt: NativeLocalDate.financeOccurredAt(
-                dateKey: incomeDate,
-                timeKey: incomeTime
-            ),
-            note: note,
-            imagePath: nil,
-            imageHash: nil,
-            localVersion: row["local_version"],
-            createdAt: createdAt,
-            updatedAt: updatedAt
-        )
-    }
-
-    private static func fact(walletRow row: Row) throws -> LocalFact {
-        guard let id = UUID(uuidString: row["id"]),
-              let profileID = UUID(uuidString: row["profile_id"]),
-              let snapshotKind: String = row["snapshot_kind"],
-              let accountName: String = row["account_name"],
+              let title: String = row["title"],
+              let summary: String = row["summary"],
               let payloadJSON: String = row["payload_json"],
-              let snapshotDate: String = row["snapshot_date"],
-              let sourceKind: String = row["source_kind"],
+              let recordDate: String = row["record_date"],
+              let balanceMinor: Int64 = row["snapshot_balance_minor"],
               let createdAt: Date = row["created_at"],
               let updatedAt: Date = row["updated_at"] else {
             throw LocalDataError.invalidRecord
         }
+        var normalizedPayload = (try? LocalRecordCodec.decode(payloadJSON)) ?? [:]
+        normalizedPayload["snapshot_balance_minor"] = AnyCodable(Double(balanceMinor))
+        let normalizedPayloadJSON = (try? LocalRecordCodec.encode(normalizedPayload)) ?? payloadJSON
         return LocalFact(
             id: id,
             profileID: profileID,
             reference: "wallet/\(id.uuidString)",
             kind: .record,
             domainKey: "wallet",
-            sourceKind: sourceKind,
-            domainVersion: "wallet-v1",
-            title: accountName,
-            summary: snapshotKind == "liability" ? "负债快照" : "资产快照",
-            payloadJSON: payloadJSON,
-            businessDate: snapshotDate,
-            recordTime: row["snapshot_time"],
-            occurredAt: NativeLocalDate.financeOccurredAt(
-                dateKey: snapshotDate,
-                timeKey: row["snapshot_time"]
-            ),
-            note: row["note"],
+            sourceKind: "manual",
+            domainVersion: "local-v1",
+            title: title,
+            summary: summary,
+            payloadJSON: normalizedPayloadJSON,
+            businessDate: recordDate,
+            recordTime: row["record_time"],
+            occurredAt: row["occurred_at"],
+            note: nil,
             imagePath: row["image_path"],
             imageHash: row["image_hash"],
+            companionMessage: (try? LocalRecordCodec.decode(payloadJSON))?.string("companion_message"),
             localVersion: row["local_version"],
             createdAt: createdAt,
             updatedAt: updatedAt
@@ -270,7 +287,7 @@ final class LocalFactReader {
             transactionDate: expense.transactionDate,
             transactionTime: expense.transactionTime,
             note: expense.note,
-            accountID: expense.accountID.uuidString
+            accountID: expense.accountID?.uuidString
         )
         let payloadJSON = (try? encode(payload)) ?? "{}"
         return LocalFact(
@@ -291,16 +308,47 @@ final class LocalFactReader {
                 timeKey: expense.transactionTime
             ),
             note: expense.note,
-            imagePath: nil,
-            imageHash: nil,
+            imagePath: expense.imagePath,
+            imageHash: expense.imageHash,
+            companionMessage: expense.companionMessage,
             localVersion: expense.localVersion,
             createdAt: expense.createdAt,
             updatedAt: expense.updatedAt
         )
     }
 
+    private static func fact(from income: LocalIncome) -> LocalFact {
+        let payload = IncomeFactPayload(
+            amountMinor: income.amountMinor, currency: income.currency,
+            sourceName: income.sourceName, category: income.category,
+            accountID: income.accountID?.uuidString
+        )
+        return LocalFact(
+            id: income.id, profileID: income.profileID,
+            reference: "income/\(income.id.uuidString)", kind: .income,
+            domainKey: "income", sourceKind: "manual", domainVersion: "local-v1",
+            title: income.sourceName.isEmpty ? "收入记录" : income.sourceName, summary: income.category,
+            payloadJSON: (try? encode(payload)) ?? "{}", businessDate: income.incomeDate,
+            recordTime: income.occurredAt.map { NativeLocalDate.timeKey($0) },
+            occurredAt: income.occurredAt.map { ISO8601DateFormatter().string(from: $0) },
+            note: income.note, imagePath: income.imagePath, imageHash: income.imageHash,
+            companionMessage: income.companionMessage,
+            localVersion: income.localVersion, createdAt: income.createdAt, updatedAt: income.updatedAt
+        )
+    }
+
+    private static func reportProjectionSkip(table: String, row: Row, error: Error) {
+        let id: String = row["id"] ?? "<unknown>"
+        NSLog("LocalFactReader skipped invalid %@ row %@: %@", table, id, error.localizedDescription)
+    }
+
     private static func fact(from record: LocalRecord) -> LocalFact {
-        LocalFact(
+        let payload = (try? LocalRecordCodec.decode(record.payloadJSON)) ?? [:]
+        let businessDate = NativeSleepFacts.businessDate(
+            domainKey: record.domainKey, payload: payload, fallback: record.recordDate
+        )
+        // ponytail: 旧睡眠无需改写历史行，暂在读层按醒来日过滤；数据量增大后迁移并索引规范业务日。
+        return LocalFact(
             id: record.id,
             profileID: record.profileID,
             reference: "data/\(record.id.uuidString)",
@@ -311,15 +359,16 @@ final class LocalFactReader {
             title: record.title,
             summary: record.summary,
             payloadJSON: record.payloadJSON,
-            businessDate: record.recordDate,
+            businessDate: businessDate,
             recordTime: record.recordTime,
             occurredAt: NativeLocalDate.financeOccurredAt(
-                dateKey: record.recordDate,
+                dateKey: businessDate,
                 timeKey: record.recordTime
             ),
             note: record.note,
             imagePath: record.imagePath,
             imageHash: record.imageHash,
+            companionMessage: payload.string("companion_message"),
             localVersion: record.localVersion,
             createdAt: record.createdAt,
             updatedAt: record.updatedAt
@@ -358,7 +407,7 @@ private struct ExpenseFactPayload: Encodable {
     let transactionDate: String
     let transactionTime: String?
     let note: String?
-    let accountID: String
+    let accountID: String?
 
     enum CodingKeys: String, CodingKey {
         case amountMinor = "amount_minor"
@@ -377,21 +426,14 @@ private struct ExpenseFactPayload: Encodable {
 private struct IncomeFactPayload: Encodable {
     let amountMinor: Int64
     let currency: String
-    let incomeCategory: String
-    let sourceName: String?
-    let incomeDate: String
-    let incomeTime: String?
-    let note: String?
+    let sourceName: String
+    let category: String
     let accountID: String?
-
     enum CodingKeys: String, CodingKey {
         case amountMinor = "amount_minor"
         case currency
-        case incomeCategory = "income_category"
         case sourceName = "source_name"
-        case incomeDate = "income_date"
-        case incomeTime = "income_time"
-        case note
+        case category
         case accountID = "account_id"
     }
 }

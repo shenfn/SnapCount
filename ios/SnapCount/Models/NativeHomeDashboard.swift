@@ -416,7 +416,9 @@ enum NativeHomeInsightAnalytics {
         combined.dayRecordGroups = recordsByDate.map { dateKey, records in
             NativeDayRecordGroup(
                 dateKey: dateKey,
-                records: records.values.sorted { ($0.timeLabel ?? "") > ($1.timeLabel ?? "") }
+                records: records.values.sorted {
+                    NativeLocalDate.listTimeSortKey($0.timeLabel) > NativeLocalDate.listTimeSortKey($1.timeLabel)
+                }
             )
         }.sorted { $0.dateKey > $1.dateKey }
         combined.recordDetails = details

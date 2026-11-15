@@ -53,6 +53,10 @@ struct LocalBindingPreviewView: View {
                 Text("登录不会自动上传本地数据。只有确认绑定后，后续同步流程才会获得授权；本片尚未执行首次传输。")
             }
         }
+        .scrollContentBackground(.hidden)
+        .background(JieziTheme.pageBackground)
+        .listStyle(.insetGrouped)
+        .tint(JieziTheme.brand)
         .navigationTitle("同步预览")
         .navigationBarTitleDisplayMode(.inline)
     }

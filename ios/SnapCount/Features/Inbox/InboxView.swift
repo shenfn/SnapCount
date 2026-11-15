@@ -1,11 +1,16 @@
 import SwiftUI
+import UIKit
 
 struct InboxView: View {
     @EnvironmentObject private var appState: AppState
-    @State private var scope: NativeInboxScope = .today
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @State private var scope: NativeInboxScope = .all
     @State private var filter: NativeInboxFilter = .all
-    @State private var columnCount = 2
+    @State private var intakeExpanded = false
     @State private var stageItemId: String?
+    @State private var manualIntakeData: Data?
+    @State private var manualIntake: LocalImageIntake?
+    @State private var intakeToDiscard: LocalImageIntake?
 
     private var allItems: [NativeInboxItem] {
         NativeInboxPresentation.items(
@@ -31,9 +36,26 @@ struct InboxView: View {
         )
     }
 
+    /// PWA 的六个 chip 始终都在（哪怕计数是 0），这样用户能看见「还有哪几种状态」，
+    /// 而不是被悄悄收成两个，误以为筛选只有两种。
     private var visibleFilters: [NativeInboxFilter] {
-        NativeInboxFilter.allCases.filter { option in
-            option == .all || option == filter || (filterCounts[option] ?? 0) > 0
+        NativeInboxFilter.pendingPageOrder
+    }
+
+    /// 与 PWA 同口径：范围只认「发生日期」，所以今天为空时要说清是日期口径，不是筛选口径。
+    private var todayItems: [NativeInboxItem] {
+        NativeInboxPresentation.filtered(allItems, scope: .today, filter: .all, today: Self.dateKey(daysFromToday: 0))
+    }
+
+    private var scopeSubtitle: String {
+        switch scope {
+        case .today:
+            // 短句：这一行要和「全部 / 今天」分段挤在同一行，太长会折成两行把分段顶歪。
+            return todayItems.isEmpty
+                ? "今天发生的记录为 0 条"
+                : "今天还有 \(todayItems.count) 条需要你决定"
+        case .all:
+            return allItems.isEmpty ? "当前没有待处理记录" : "全部 \(allItems.count) 条按发生时间排列"
         }
     }
 
@@ -64,7 +86,11 @@ struct InboxView: View {
             JieziPageBackground()
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
-                    pendingSummary
+                    InboxScopeHeader(
+                        subtitle: scopeSubtitle,
+                        scope: $scope,
+                        todayCount: todayItems.count
+                    )
 
                     if let message = appState.inboxFinanceMessage {
                         messageBanner(message, isError: false, isWorking: false)
@@ -78,16 +104,26 @@ struct InboxView: View {
                         )
                     }
 
-                    if allItems.isEmpty {
-                        InboxSettledEmptyView()
+                    failedImageIntakesSection
+                    failedImageCleanupSection
+
+                    if allItems.isEmpty && appState.failedLocalImageIntakes.isEmpty && appState.pendingLocalImageCleanups.isEmpty {
+                        InboxScopeEmptyState(
+                            title: "微尘皆已落定",
+                            message: "新的截图会在这里稍作停留"
+                        )
                     } else {
-                        scopeControl
-                        workspaceHeading
-                        filterBar
+                        if !allItems.isEmpty {
+                            InboxFilterChipRow(filters: visibleFilters, counts: filterCounts, filter: $filter)
+                        }
                         if visibleItems.isEmpty {
-                            filteredEmptyState
+                            emptyState
                         } else {
-                            workspaceSections
+                            InboxFilmSections(
+                                sections: sections,
+                                columns: dynamicTypeSize.isAccessibilitySize ? 1 : 2,
+                                onSelect: { item in stageItemId = item.id }
+                            )
                         }
                     }
                 }
@@ -100,9 +136,9 @@ struct InboxView: View {
                 await appState.refreshInboxProjection()
             }
         }
-        .navigationTitle("收件箱")
-        .toolbarBackground(.ultraThinMaterial, for: .navigationBar)
-        .toolbarBackground(.visible, for: .navigationBar)
+        .navigationTitle("待处理")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbarBackground(JieziScene.expense.surface, for: .navigationBar)
         .navigationDestination(for: NativeInboxRoute.self) { route in
             switch route {
             case .category(let filter):
@@ -121,20 +157,6 @@ struct InboxView: View {
                 PendingExpenseResolutionView(reference: reference)
             }
         }
-        .toolbar {
-            if !visibleItems.isEmpty {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button {
-                        withAnimation(JieziEasing.standard) {
-                            columnCount = columnCount == 2 ? 1 : 2
-                        }
-                    } label: {
-                        Image(systemName: columnCount == 2 ? "rectangle.grid.2x2" : "rectangle")
-                    }
-                    .accessibilityLabel(columnCount == 2 ? "切换为单列" : "切换为双列")
-                }
-            }
-        }
         .fullScreenCover(isPresented: stagePresented) {
             InboxVerdictStageView(
                 items: visibleItems,
@@ -143,135 +165,121 @@ struct InboxView: View {
             )
             .environmentObject(appState)
         }
+        .sheet(isPresented: Binding(
+            get: { manualIntakeData != nil },
+            set: { if !$0 { manualIntakeData = nil; manualIntake = nil } }
+        )) {
+            ManualRecordSheet(initialImageData: manualIntakeData) {
+                if let intake = manualIntake {
+                    _ = appState.discardLocalImageIntake(intake)
+                    Task { await appState.refreshFailedLocalImageIntakes() }
+                }
+            }
+                .environmentObject(appState)
+        }
+        .confirmationDialog(
+            "丢弃这张原图？",
+            isPresented: Binding(
+                get: { intakeToDiscard != nil },
+                set: { if !$0 { intakeToDiscard = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button("丢弃原图", role: .destructive) {
+                guard let intake = intakeToDiscard else { return }
+                _ = appState.discardLocalImageIntake(intake)
+                intakeToDiscard = nil
+            }
+            Button("取消", role: .cancel) { intakeToDiscard = nil }
+        } message: {
+            Text("丢弃后会删除本机保存的输入图片，此操作不可撤销。")
+        }
         .onChange(of: scope) { _, _ in
             if (filterCounts[filter] ?? 0) == 0 { filter = .all }
         }
         .task { await appState.refreshInboxProjection() }
     }
 
-    private var pendingSummary: some View {
-        HStack(alignment: .firstTextBaseline) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(allItems.isEmpty ? "微尘皆已落定" : "先整理，再连续翻阅")
+    @ViewBuilder
+    private var failedImageIntakesSection: some View {
+        if !appState.failedLocalImageIntakes.isEmpty {
+            InboxIntakeBanner(
+                intakes: appState.failedLocalImageIntakes,
+                expanded: $intakeExpanded,
+                dataFor: { intake in try? appState.localImageData(for: intake) },
+                hasImage: { appState.hasLocalImage(for: $0) },
+                onRetry: { intake in
+                    Task { _ = await appState.retryLocalImageIntake(intake) }
+                },
+                onManual: { intake in
+                    if let data = try? appState.localImageData(for: intake) {
+                        manualIntake = intake
+                        manualIntakeData = data
+                    }
+                },
+                onDiscard: { intake in intakeToDiscard = intake }
+            )
+        }
+    }
+
+    @ViewBuilder
+    private var failedImageCleanupSection: some View {
+        if !appState.pendingLocalImageCleanups.isEmpty {
+            VStack(alignment: .leading, spacing: JieziSpacing.md) {
+                Text("尚未清理的本机图片")
                     .font(.headline)
                     .foregroundStyle(JieziTheme.ink)
-                if !allItems.isEmpty {
-                    Text("\(allItems.count) 条待处理记录")
-                        .font(.subheadline)
-                        .foregroundStyle(JieziTheme.muted)
-                }
-            }
-            Spacer()
-        }
-        .padding(.horizontal, JieziSpacing.xl2)
-        .padding(.top, JieziSpacing.sm)
-        .padding(.bottom, JieziSpacing.md)
-    }
-
-    private var scopeControl: some View {
-        Picker("记录范围", selection: $scope) {
-            ForEach(NativeInboxScope.allCases) { option in
-                Text(option.title).tag(option)
-            }
-        }
-        .pickerStyle(.segmented)
-        .padding(.horizontal, JieziSpacing.xl2)
-        .padding(.bottom, JieziSpacing.lg)
-    }
-
-    private var workspaceHeading: some View {
-        HStack(alignment: .bottom, spacing: JieziSpacing.md) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(scope == .today ? "今天发生的记录" : "全部待处理记录")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(JieziTheme.brand)
-                Text("待处理底片")
-                    .font(.title3.weight(.semibold))
-                    .foregroundStyle(JieziTheme.ink)
-            }
-            Spacer()
-            Text("\(filterCounts[.all] ?? 0) 条")
-                .font(.subheadline.monospacedDigit())
-                .foregroundStyle(JieziTheme.muted)
-        }
-        .padding(.horizontal, JieziSpacing.xl2)
-        .padding(.bottom, JieziSpacing.sm)
-    }
-
-    private var filterBar: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: JieziSpacing.sm) {
-                ForEach(visibleFilters) { option in
-                    Button {
-                        withAnimation(JieziEasing.standard) { filter = option }
-                    } label: {
-                        HStack(spacing: 5) {
-                            Text(option.title)
-                            Text("\(filterCounts[option] ?? 0)")
-                                .monospacedDigit()
-                                .opacity(0.72)
+                ForEach(appState.pendingLocalImageCleanups) { cleanup in
+                    HStack(alignment: .top, spacing: JieziSpacing.md) {
+                        Image(systemName: "trash.slash")
+                            .foregroundStyle(JieziTheme.coral)
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(URL(fileURLWithPath: cleanup.imagePath).lastPathComponent)
+                                .font(.subheadline.weight(.semibold))
+                            Text(cleanup.lastError ?? "图片尚未清理；重试不会影响记录内容。")
+                                .font(.caption)
+                                .foregroundStyle(JieziTheme.muted)
+                            Text("已尝试 \(cleanup.attemptCount) 次")
+                                .font(.caption2)
+                                .foregroundStyle(JieziTheme.muted)
                         }
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(filter == option ? .white : JieziTheme.ink)
-                        .padding(.horizontal, 12)
-                        .frame(height: 34)
-                        .background(
-                            filter == option ? InboxVisualStyle.color(for: option) : Color.white.opacity(0.56),
-                            in: Capsule()
-                        )
-                        .overlay {
-                            Capsule().stroke(InboxVisualStyle.color(for: option).opacity(filter == option ? 0 : 0.16))
-                        }
+                        Spacer(minLength: 0)
                     }
-                    .buttonStyle(.plain)
+                    .padding(JieziSpacing.lg)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(.white.opacity(0.78), in: RoundedRectangle(cornerRadius: JieziRadius.md, style: .continuous))
                 }
+                Button("重试清理") { Task { await appState.retryLocalImageCleanups() } }
+                    .buttonStyle(.borderedProminent)
             }
             .padding(.horizontal, JieziSpacing.xl2)
             .padding(.bottom, JieziSpacing.lg)
         }
     }
 
-    private var workspaceSections: some View {
-        ForEach(sections) { section in
-            VStack(alignment: .leading, spacing: JieziSpacing.sm) {
-                Text(section.title)
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(JieziTheme.muted)
-                LazyVGrid(
-                    columns: Array(
-                        repeating: GridItem(.flexible(minimum: 0), spacing: JieziSpacing.lg, alignment: .top),
-                        count: columnCount
-                    ),
-                    spacing: JieziSpacing.xl2
-                ) {
-                    ForEach(section.items) { item in
-                        Button {
-                            stageItemId = item.id
-                        } label: {
-                            NativeInboxFilmCard(
-                                item: item,
-                                repaymentCandidate: item.stagingRecord.flatMap { appState.repaymentCandidates[$0.id] },
-                                isSingleColumn: columnCount == 1
-                            )
-                        }
-                        .buttonStyle(JieziPressableButtonStyle(pressedScale: 0.985))
-                        .frame(maxWidth: .infinity)
-                    }
-                }
-            }
-            .padding(.horizontal, JieziSpacing.Semantic.card_padding)
-            .padding(.bottom, JieziSpacing.xl2)
+    /// 空态分三种，别再用一句「今天没有这类记录」把范围问题和筛选问题混在一起。
+    @ViewBuilder
+    private var emptyState: some View {
+        if scope == .today && allItems.isEmpty == false && (filterCounts[.all] ?? 0) == 0 {
+            InboxScopeEmptyState(
+                title: "今天没有待处理记录",
+                message: "全部 \(allItems.count) 条的发生日期都早于今天",
+                actionTitle: "查看全部 \(allItems.count) 条",
+                action: { withAnimation(JieziEasing.standard) { scope = .all } }
+            )
+        } else if (filterCounts[filter] ?? 0) == 0 {
+            InboxScopeEmptyState(
+                title: "这个状态已经没有记录",
+                message: "同一范围下还有其他状态可以看",
+                actionTitle: "看全部状态",
+                action: { withAnimation(JieziEasing.standard) { filter = .all } }
+            )
+        } else {
+            InboxScopeEmptyState(
+                title: "当前范围已经处理完",
+                message: "切换范围或状态可以查看其他记录"
+            )
         }
-    }
-
-    private var filteredEmptyState: some View {
-        ContentUnavailableView(
-            scope == .today ? "今天没有这类记录" : "这类记录已经处理完了",
-            systemImage: "checkmark.circle",
-            description: Text(scope == .today ? "切换到“全部”可以查看更早的待处理记录。" : "换一个状态看看。")
-        )
-        .frame(maxWidth: .infinity)
-        .padding(.top, 56)
     }
 
     private static func dateKey(daysFromToday: Int) -> String {
@@ -341,9 +349,9 @@ private struct NativeInboxCategoryCard: View {
             .padding(12)
         }
         .frame(width: 232, alignment: .leading)
-        .background(Color.white.opacity(0.76), in: RoundedRectangle(cornerRadius: JieziRadius.lg, style: .continuous))
+        .background(JieziScene.expense.surface, in: RoundedRectangle(cornerRadius: JieziPrototypeLayout.card_radius, style: .continuous))
         .overlay {
-            RoundedRectangle(cornerRadius: JieziRadius.lg, style: .continuous)
+            RoundedRectangle(cornerRadius: JieziPrototypeLayout.card_radius, style: .continuous)
                 .stroke(tint.opacity(0.16), lineWidth: 1)
         }
         .shadow(color: JieziTheme.space.opacity(0.08), radius: 12, x: 0, y: 6)
@@ -451,10 +459,11 @@ private struct InboxThumbnailFallback: View {
 
 private struct InboxCategoryView: View {
     @EnvironmentObject private var appState: AppState
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     let filter: NativeInboxFilter
 
-    @State private var columnCount = 2
+    @State private var columnCount = 1
     @State private var stageRecordId: String?
     @State private var pendingInlineContext: PendingEditorContext?
 
@@ -613,7 +622,7 @@ private struct InboxCategoryView: View {
         LazyVGrid(
             columns: Array(
                 repeating: GridItem(.flexible(minimum: 0), spacing: JieziSpacing.lg, alignment: .top),
-                count: columnCount
+                count: dynamicTypeSize.isAccessibilitySize ? 1 : columnCount
             ),
             spacing: JieziSpacing.xl2
         ) {
@@ -629,10 +638,10 @@ private struct InboxCategoryView: View {
             Button {
                 pendingInlineContext = PendingEditorContext(itemId: item.id, reference: pending.reference)
             } label: {
-                NativeInboxFilmCard(
+                NativeInboxItemRow(
                     item: item,
                     repaymentCandidate: nil,
-                    isSingleColumn: columnCount == 1
+                    showThumbnail: dynamicTypeSize.isAccessibilitySize || columnCount == 1
                 )
             }
             .buttonStyle(.plain)
@@ -641,10 +650,10 @@ private struct InboxCategoryView: View {
             Button {
                 stageRecordId = record.id
             } label: {
-                NativeInboxFilmCard(
+                NativeInboxItemRow(
                     item: item,
                     repaymentCandidate: appState.repaymentCandidates[record.id],
-                    isSingleColumn: columnCount == 1
+                    showThumbnail: dynamicTypeSize.isAccessibilitySize || columnCount == 1
                 )
             }
             .buttonStyle(JieziPressableButtonStyle(pressedScale: 0.985))
@@ -670,273 +679,6 @@ private enum InboxVisualStyle {
         case .repair: return Color(hex: "8B5A2B")
         case .all: return JieziTheme.ink
         }
-    }
-}
-
-private struct NativeInboxFilmCard: View {
-    let item: NativeInboxItem
-    let repaymentCandidate: NativeRepaymentCandidate?
-    var isSingleColumn = false
-
-    private var imageURL: URL? {
-        item.stagingRecord?.imageURL ?? item.pendingExpense?.imageURL
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: JieziSpacing.sm) {
-            mediaSurface
-            caption
-        }
-        .frame(maxWidth: .infinity, alignment: .topLeading)
-        .contentShape(Rectangle())
-        .accessibilityElement(children: .combine)
-    }
-
-    @ViewBuilder
-    private var mediaSurface: some View {
-        if isSingleColumn, imageURL != nil {
-            singleColumnMediaSurface
-        } else {
-            fixedAspectMediaSurface
-        }
-    }
-
-    private var singleColumnMediaSurface: some View {
-        ZStack(alignment: .topLeading) {
-            filmContent
-                .frame(maxWidth: .infinity)
-                .clipped()
-            InboxFilmStateBadge(label: item.statusLabel, color: statusColor)
-                .padding(JieziSpacing.sm)
-        }
-        .frame(maxWidth: .infinity)
-        .background(JieziTheme.paper.opacity(0.74))
-        .clipShape(mediaShape)
-        .overlay {
-            mediaShape.stroke(statusColor.opacity(0.14), lineWidth: 1)
-        }
-        .shadow(color: JieziTheme.space.opacity(0.07), radius: 10, x: 0, y: 6)
-    }
-
-    private var fixedAspectMediaSurface: some View {
-        // The shape owns the grid-cell size; overlay content cannot widen the column.
-        mediaShape
-            .fill(JieziTheme.paper.opacity(0.74))
-            .aspectRatio(isSingleColumn ? 4.0 / 3.0 : 3.0 / 4.0, contentMode: .fit)
-            .frame(maxWidth: .infinity)
-            .overlay {
-                filmContent
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .clipped()
-            }
-            .overlay(alignment: .topLeading) {
-                InboxFilmStateBadge(label: item.statusLabel, color: statusColor)
-                    .padding(JieziSpacing.sm)
-            }
-            .clipShape(mediaShape)
-            .overlay {
-                mediaShape.stroke(statusColor.opacity(0.14), lineWidth: 1)
-            }
-            .shadow(color: JieziTheme.space.opacity(0.07), radius: 10, x: 0, y: 6)
-    }
-
-    private var mediaShape: RoundedRectangle {
-        RoundedRectangle(cornerRadius: JieziRadius.md, style: .continuous)
-    }
-
-    @ViewBuilder
-    private var filmContent: some View {
-        if let imageURL {
-            CachedRemoteImage(url: imageURL) { image in
-                if isSingleColumn || item.pendingExpense != nil {
-                    image
-                        .resizable()
-                        .scaledToFit()
-                        .frame(maxWidth: .infinity)
-                } else {
-                    image
-                        .resizable()
-                        .scaledToFill()
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                }
-            } placeholder: {
-                ProgressView()
-                    .tint(JieziTheme.brand)
-                    .frame(maxWidth: .infinity)
-                    .aspectRatio(isSingleColumn ? 4.0 / 3.0 : 3.0 / 4.0, contentMode: .fit)
-            } failure: {
-                noteContent
-                    .aspectRatio(isSingleColumn ? 4.0 / 3.0 : 3.0 / 4.0, contentMode: .fit)
-            }
-        } else {
-            noteContent
-        }
-    }
-
-    private var caption: some View {
-        VStack(alignment: .leading, spacing: 5) {
-            HStack(alignment: .firstTextBaseline, spacing: JieziSpacing.sm) {
-                Text(item.title)
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(JieziTheme.ink)
-                    .lineLimit(2)
-                    .fixedSize(horizontal: false, vertical: true)
-                Spacer(minLength: 0)
-                captionAccessory
-            }
-
-            if item.stagingRecord != nil, !item.subtitle.isEmpty {
-                Text(item.subtitle)
-                    .font(.caption)
-                    .foregroundStyle(JieziTheme.muted)
-                    .lineLimit(isSingleColumn ? 3 : 2)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-
-            timeStack
-        }
-        .padding(.horizontal, 2)
-        .frame(maxWidth: .infinity, alignment: .topLeading)
-    }
-
-    @ViewBuilder
-    private var captionAccessory: some View {
-        if repaymentCandidate != nil {
-            Image(systemName: "creditcard.and.123")
-                .font(.caption)
-                .foregroundStyle(JieziTheme.brand)
-                .accessibilityLabel("可能是还款记录")
-        } else if let pending = item.pendingExpense {
-            Text(String(format: "-¥%.2f", pending.amount))
-                .font(.caption.weight(.semibold).monospacedDigit())
-                .foregroundStyle(JieziTheme.coral)
-                .lineLimit(1)
-        } else if let confidence = item.stagingRecord?.confidencePercent {
-            Text("\(confidence)%")
-                .font(.caption2.monospacedDigit())
-                .foregroundStyle(JieziTheme.muted)
-        }
-    }
-
-    @ViewBuilder
-    private var timeStack: some View {
-        if let record = item.stagingRecord {
-            inboxTimes(
-                occurredAt: record.occurredAtLabel ?? "未识别",
-                createdAt: record.createdAtLabel
-            )
-        } else if let pending = item.pendingExpense {
-            inboxTimes(
-                occurredAt: pending.occurredAtLabel ?? pending.dateKey,
-                createdAt: pending.createdAtLabel
-            )
-        }
-    }
-
-    private func inboxTimes(occurredAt: String, createdAt: String) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            inboxTimeRow(label: "记录", value: occurredAt)
-            inboxTimeRow(label: "上传", value: createdAt)
-        }
-        .font(.caption2)
-        .foregroundStyle(JieziTheme.muted)
-    }
-
-    private func inboxTimeRow(label: String, value: String) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 5) {
-            Text(label)
-                .foregroundStyle(JieziTheme.muted.opacity(0.72))
-            Text(value)
-                .lineLimit(1)
-                .minimumScaleFactor(0.82)
-        }
-    }
-
-    private var noteContent: some View {
-        ZStack {
-            LinearGradient(
-                colors: [Color(hex: "F8F4E9"), Color(hex: "F0EAD8")],
-                startPoint: .top,
-                endPoint: .bottom
-            )
-            VStack(alignment: .leading, spacing: 9) {
-                Text(item.stagingRecord == nil ? "账单事实" : "文字事实")
-                    .font(.caption2.weight(.semibold))
-                    .foregroundStyle(JieziTheme.gold)
-
-                HStack(spacing: 8) {
-                    Image(systemName: item.systemImage)
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(statusColor)
-                        .frame(width: 30, height: 30)
-                        .overlay(Circle().stroke(statusColor.opacity(0.22)))
-                    Text(item.title)
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(JieziTheme.ink)
-                        .lineLimit(2)
-                }
-
-                Text(item.subtitle)
-                    .font(.caption)
-                    .foregroundStyle(JieziTheme.muted)
-                    .lineLimit(4)
-
-                if let record = item.stagingRecord {
-                    let fields = Array(NativeStagingDetailPresentation.fields(for: record).prefix(3))
-                    if !fields.isEmpty {
-                        VStack(alignment: .leading, spacing: 4) {
-                            ForEach(fields) { field in
-                                HStack(alignment: .firstTextBaseline, spacing: 6) {
-                                    Text(field.label)
-                                        .foregroundStyle(JieziTheme.muted)
-                                    Spacer(minLength: 4)
-                                    Text(field.value)
-                                        .foregroundStyle(JieziTheme.ink)
-                                        .lineLimit(1)
-                                }
-                                .font(.caption2)
-                            }
-                        }
-                        .padding(.top, 5)
-                        .overlay(alignment: .top) {
-                            Rectangle()
-                                .fill(JieziTheme.brand.opacity(0.12))
-                                .frame(height: 1)
-                        }
-                    }
-                }
-            }
-            .padding(16)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-    }
-
-    private var statusColor: Color {
-        guard let record = item.stagingRecord else { return JieziTheme.gold }
-        switch record.status {
-        case "ai_error", "failed", "extraction_failed": return JieziTheme.coral
-        case "routing_failed", "unrouted", "unassigned": return JieziTheme.brand
-        case "schema_failed": return JieziTheme.ink
-        default: return Color(hex: "8A6D2F")
-        }
-    }
-}
-
-private struct InboxFilmStateBadge: View {
-    let label: String
-    let color: Color
-
-    var body: some View {
-        HStack(spacing: 5) {
-            Circle().fill(color).frame(width: 5, height: 5)
-            Text(label).lineLimit(1)
-        }
-        .font(.system(size: 10, weight: .semibold))
-        .foregroundStyle(color)
-        .padding(.horizontal, 8)
-        .frame(height: 24)
-        .background(JieziTheme.paper.opacity(0.88), in: Capsule())
-        .background(.ultraThinMaterial, in: Capsule())
     }
 }
 
@@ -977,7 +719,7 @@ private struct InboxSettledEmptyView: View {
     }
 }
 
-private struct InboxVerdictStageView: View {
+struct InboxVerdictStageView: View {
     @EnvironmentObject private var appState: AppState
     @Environment(\.dismiss) private var dismiss
 
@@ -1000,11 +742,7 @@ private struct InboxVerdictStageView: View {
 
     var body: some View {
         ZStack {
-            LinearGradient(
-                colors: [Color(hex: "EFEADA"), Color(hex: "EAE4D2")],
-                startPoint: .top,
-                endPoint: .bottom
-            )
+            JieziTheme.pageBackground
             .ignoresSafeArea()
 
             if items.isEmpty {
@@ -1016,6 +754,8 @@ private struct InboxVerdictStageView: View {
                         .tint(JieziTheme.brand)
                 }
             } else if let current {
+                GeometryReader { viewport in
+                ScrollView {
                 VStack(spacing: 0) {
                     stageTopBar(current)
                     InboxStageRecordPager(
@@ -1026,7 +766,7 @@ private struct InboxVerdictStageView: View {
                         stageVisual(current)
                             .id(current.id)
                     }
-                    .frame(maxHeight: .infinity)
+                    .frame(height: max(180, min(viewport.size.height * 0.45, 360)))
 
                     stageInfo(current)
                     stageActions(current)
@@ -1035,6 +775,8 @@ private struct InboxVerdictStageView: View {
                     } else {
                         Spacer().frame(height: 24)
                     }
+                }
+                }
                 }
             }
         }
@@ -1115,16 +857,17 @@ private struct InboxVerdictStageView: View {
             Button { closeStage() } label: {
                 Image(systemName: "chevron.down")
                     .font(.system(size: 13, weight: .semibold))
-                    .frame(width: 34, height: 34)
+                    .frame(width: 44, height: 44)
                     .foregroundStyle(JieziTheme.brand)
                     .background(JieziTheme.brand.opacity(0.08), in: Circle())
             }
+            .accessibilityLabel("关闭待确认")
             HStack(spacing: 6) {
                 Circle().fill(statusColor(for: item)).frame(width: 6, height: 6)
                 Text("\(item.statusLabel) · \(contextLabel(for: item))")
                     .font(.subheadline.weight(.medium))
                     .foregroundStyle(statusColor(for: item))
-                    .lineLimit(1)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             Spacer()
             Text("\(currentIndex + 1) / \(items.count)")
@@ -1141,7 +884,7 @@ private struct InboxVerdictStageView: View {
             Text(item.stagingRecord?.summary ?? item.title)
                 .font(.headline)
                 .foregroundStyle(JieziTheme.ink)
-                .lineLimit(3)
+                .fixedSize(horizontal: false, vertical: true)
             if let record = item.stagingRecord {
                 HStack(spacing: JieziSpacing.md) {
                     if let confidence = record.confidencePercent {
@@ -1441,11 +1184,7 @@ private struct StagingVerdictStageView: View {
 
     var body: some View {
         ZStack {
-            LinearGradient(
-                colors: [Color(hex: "EFEADA"), Color(hex: "EAE4D2")],
-                startPoint: .top,
-                endPoint: .bottom
-            )
+            JieziTheme.pageBackground
             .ignoresSafeArea()
 
             if records.isEmpty {
@@ -1457,6 +1196,8 @@ private struct StagingVerdictStageView: View {
                         .tint(JieziTheme.brand)
                 }
             } else if let current {
+                GeometryReader { viewport in
+                ScrollView {
                 VStack(spacing: 0) {
                     stageTopBar(current)
                     InboxStageRecordPager(
@@ -1467,11 +1208,13 @@ private struct StagingVerdictStageView: View {
                         StagingStageImage(record: current)
                             .id(current.id)
                     }
-                    .frame(maxHeight: .infinity)
+                    .frame(height: max(180, min(viewport.size.height * 0.45, 360)))
 
                     stageInfo(current)
                     stageActions(current)
                     domainStrip(current)
+                }
+                }
                 }
             }
         }
@@ -1522,16 +1265,17 @@ private struct StagingVerdictStageView: View {
             Button { closeStage() } label: {
                 Image(systemName: "chevron.down")
                     .font(.system(size: 13, weight: .semibold))
-                    .frame(width: 34, height: 34)
+                    .frame(width: 44, height: 44)
                     .foregroundStyle(JieziTheme.brand)
                     .background(JieziTheme.brand.opacity(0.08), in: Circle())
             }
+            .accessibilityLabel("关闭待确认")
             HStack(spacing: 6) {
                 Circle().fill(statusColor(for: record)).frame(width: 6, height: 6)
                 Text("\(record.statusLabel) · \(record.domainName ?? record.recordTypeLabel)")
                     .font(.subheadline.weight(.medium))
                     .foregroundStyle(statusColor(for: record))
-                    .lineLimit(1)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             Spacer()
             Text("\(currentIndex + 1) / \(records.count)")
@@ -1548,7 +1292,7 @@ private struct StagingVerdictStageView: View {
             Text(record.summary)
                 .font(.headline)
                 .foregroundStyle(JieziTheme.ink)
-                .lineLimit(3)
+                .fixedSize(horizontal: false, vertical: true)
             HStack(spacing: JieziSpacing.md) {
                 if let confidence = record.confidencePercent {
                     HStack(spacing: 5) {
@@ -1862,7 +1606,7 @@ private struct InboxStageRecordPager<Content: View>: View {
         Button(action: action) {
             Image(systemName: systemImage)
                 .font(.system(size: 17, weight: .semibold))
-                .frame(width: 28, height: 44)
+                .frame(width: 44, height: 44)
                 .foregroundStyle(JieziTheme.brand)
                 .background(
                     JieziTheme.brand.opacity(0.08),
@@ -1936,12 +1680,8 @@ private struct StagingFactSheet: View {
             .padding(20)
         }
         .background(
-            LinearGradient(
-                colors: [Color(hex: "F8F4E9"), Color(hex: "F0EAD8")],
-                startPoint: .top,
-                endPoint: .bottom
-            ),
-            in: RoundedRectangle(cornerRadius: JieziRadius.sm, style: .continuous)
+            JieziScene.expense.surface,
+            in: RoundedRectangle(cornerRadius: JieziPrototypeLayout.card_radius, style: .continuous)
         )
         .overlay {
             RoundedRectangle(cornerRadius: JieziRadius.sm, style: .continuous)
@@ -2045,7 +1785,7 @@ private struct PendingExpenseResolutionView: View {
 
     var body: some View {
         ZStack {
-            JieziGradient.pageBackground(palette: palette).ignoresSafeArea()
+            JieziTheme.pageBackground.ignoresSafeArea()
             if let detail, let draftBinding = Binding($draft) {
                 GeometryReader { scrollViewport in
                     ScrollView {
@@ -2139,7 +1879,10 @@ private struct PendingExpenseResolutionView: View {
                                 if appState.isConfirmingPendingRecord {
                                     ProgressView().tint(.white).frame(maxWidth: .infinity)
                                 } else {
-                                    Label("确认保存", systemImage: "checkmark.circle.fill").frame(maxWidth: .infinity)
+                                    Label(
+                                        isPossibleDuplicate(detail) ? "确认为新记录" : "确认保存",
+                                        systemImage: "checkmark.circle.fill"
+                                    ).frame(maxWidth: .infinity)
                                 }
                             }
                             .buttonStyle(.borderedProminent)
@@ -2187,19 +1930,29 @@ private struct PendingExpenseResolutionView: View {
         }
     }
 
+    /// 与 PWA `PagePending.vue:489` 同语义：pending 行的 review_reason 为 possible_duplicate。
+    private func isPossibleDuplicate(_ detail: NativeRecordDetail) -> Bool {
+        detail.payload?["review_reason"]?.stringValue == "possible_duplicate"
+    }
+
     private func header(_ detail: NativeRecordDetail) -> some View {
-        HStack(spacing: 12) {
-            Image(systemName: "clock.badge.exclamationmark")
+        let duplicate = isPossibleDuplicate(detail)
+        let accent = duplicate ? JieziTheme.coral : palette.light
+        return HStack(spacing: 12) {
+            Image(systemName: duplicate ? "exclamationmark.triangle.fill" : "clock.badge.exclamationmark")
                 .font(.title3.weight(.semibold))
-                .foregroundStyle(palette.light)
+                .foregroundStyle(accent)
                 .frame(width: 40, height: 40)
-                .background(palette.light.opacity(0.12), in: RoundedRectangle(cornerRadius: JieziRadius.md, style: .continuous))
+                .background(accent.opacity(0.12), in: RoundedRectangle(cornerRadius: JieziRadius.md, style: .continuous))
             VStack(alignment: .leading, spacing: 3) {
                 Text(detail.title).font(.headline)
-                Text(detail.subtitle).font(.caption).foregroundStyle(.secondary)
+                Text(duplicate ? "图片和账单信息都很相似，确认是新记录再收下" : detail.subtitle)
+                    .font(.caption).foregroundStyle(.secondary)
             }
             Spacer()
-            Text("待补全").font(.caption.weight(.bold)).foregroundStyle(palette.light)
+            Text(duplicate ? "可能已记过" : "待补全")
+                .font(.caption.weight(.bold))
+                .foregroundStyle(accent)
         }
         .jieziCard(palette: palette, solid: true)
     }
@@ -2446,15 +2199,23 @@ private struct PendingExpenseResolutionView: View {
 }
 
 private struct NativeInboxItemRow: View {
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     let item: NativeInboxItem
     let repaymentCandidate: NativeRepaymentCandidate?
+    var showThumbnail = true
 
     var body: some View {
-        HStack(alignment: .top, spacing: 12) {
-            thumbnail
+        let rowLayout = dynamicTypeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
+            : AnyLayout(HStackLayout(alignment: .top, spacing: 12))
+        let headingLayout = dynamicTypeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
+            : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: 8))
+        return rowLayout {
+            if showThumbnail { thumbnail }
             VStack(alignment: .leading, spacing: 6) {
-                HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    Text(item.title).font(.subheadline.weight(.semibold)).lineLimit(1)
+                headingLayout {
+                    Text(item.title).font(JieziType.cardTitle).lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 2)
                     Spacer(minLength: 6)
                     Text(item.statusLabel)
                         .font(.caption2.weight(.semibold))
@@ -2463,9 +2224,9 @@ private struct NativeInboxItemRow: View {
                         .padding(.vertical, 3)
                         .background(statusColor.opacity(0.12), in: Capsule())
                 }
-                Text(item.subtitle).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                Text(item.subtitle).font(.caption).foregroundStyle(.secondary).lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 2)
                 if let record = item.stagingRecord {
-                    HStack(spacing: 8) {
+                    headingLayout {
                         Text(record.recordTypeLabel)
                         Text(record.occurredAtLabel ?? record.createdAtLabel)
                         if let confidence = record.confidencePercent {
@@ -2520,7 +2281,7 @@ private struct NativeInboxItemRow: View {
             .font(.body.weight(.semibold))
             .foregroundStyle(statusColor)
             .frame(width: 48, height: 48)
-            .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .background(JieziScene.expense.surface, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
     }
 
     private var statusColor: Color {
@@ -2654,7 +2415,7 @@ private struct StagingRecordDetailView: View {
             }
         }
         .navigationTitle("待处理详情")
-        .toolbarBackground(.ultraThinMaterial, for: .navigationBar)
+        .toolbarBackground(JieziScene.expense.surface, for: .navigationBar)
         .confirmationDialog("确认销毁这条待处理截图？", isPresented: $showDiscardConfirm, titleVisibility: .visible) {
             Button("销毁", role: .destructive) {
                 Task {
@@ -2743,7 +2504,7 @@ private struct StagingRecordDetailView: View {
             Text(record.summary).font(.subheadline).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
         }
         .padding(16)
-        .background(.white.opacity(0.9), in: RoundedRectangle(cornerRadius: 8))
+        .jieziPrototypePanel()
     }
 
     @ViewBuilder
@@ -2752,7 +2513,7 @@ private struct StagingRecordDetailView: View {
             Button { imagePreview = StagingImagePreviewRoute(url: imageURL) } label: {
                 StagingImagePreview(url: imageURL) { Task { await resolveImage() } }
                     .padding(8)
-                    .background(.white.opacity(0.9), in: RoundedRectangle(cornerRadius: 8))
+                    .jieziPrototypePanel()
             }
             .buttonStyle(.plain)
         } else if record.imagePath != nil {
@@ -2766,7 +2527,7 @@ private struct StagingRecordDetailView: View {
                 }
                 .frame(maxWidth: .infinity, minHeight: 120)
                 .padding(8)
-                .background(.white.opacity(0.9), in: RoundedRectangle(cornerRadius: 8))
+                .jieziPrototypePanel()
             }
             .buttonStyle(.plain)
         }
@@ -2839,7 +2600,7 @@ private struct StagingRecordDetailView: View {
             .disabled(appState.stagingRepaymentId != nil)
         }
         .padding(16)
-        .background(.white.opacity(0.9), in: RoundedRectangle(cornerRadius: 8))
+        .jieziPrototypePanel()
     }
 
     private func statusMessage(_ message: String, isError: Bool) -> some View {
@@ -2883,7 +2644,7 @@ private struct StagingRecordDetailView: View {
             }
         }
         .padding(16)
-        .background(.white.opacity(0.9), in: RoundedRectangle(cornerRadius: 8))
+        .jieziPrototypePanel()
         .disabled(appState.inboxActionRecordId != nil)
     }
 
@@ -2896,7 +2657,7 @@ private struct StagingRecordDetailView: View {
             }
         }
         .padding(16)
-        .background(.white.opacity(0.9), in: RoundedRectangle(cornerRadius: 8))
+        .jieziPrototypePanel()
     }
 
     private func detailRow(_ label: String, _ value: String) -> some View {

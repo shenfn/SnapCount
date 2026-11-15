@@ -2,7 +2,6 @@
 //  JieziTheme+Generated.swift
 //  SnapCount
 //
-//  自动生成于 2026-07-27T03:17:17.338Z
 //  数据源：trae-design-system/tokens/design-tokens.json v0.2.0
 //  禁止手工修改本文件。任何调整请改 SSOT 后运行 scripts/generate-ios.mjs
 //
@@ -182,18 +181,250 @@ final class JieziThemeManager: ObservableObject {
 
     @Published var palette: JieziGeneratedPalette
     @Published var hourOffset: Int = 0
-    private let storageKey = "jiezi.theme.id"
 
     init() {
-        let savedId = UserDefaults.standard.string(forKey: storageKey) ?? JieziGeneratedPalette.defaultPalette.id
-        self.palette = JieziGeneratedPalette.all.first(where: { $0.id == savedId }) ?? .defaultPalette
+        self.palette = .defaultPalette
     }
 
-    func switchTo(_ id: String) {
-        if let next = JieziGeneratedPalette.all.first(where: { $0.id == id }) {
-            palette = next
-            UserDefaults.standard.set(id, forKey: storageKey)
+    /// 历史 jiezi.theme.id 保留，但不再控制应用外观。
+    func switchTo(_ id: String) {}
+}
+
+// MARK: - iOS 原型五域场景 Token
+
+struct JieziSceneTokens {
+    let background: [Color]
+    let accent: Color
+    let dataAccent: Color
+    let pagerAccent: Color
+    let foreground: Color
+    let muted: Color
+    let surface: Color
+    let glow: Color
+    let glowOpacity: Double
+    let usesDiagonalTexture: Bool
+    let stripeWidth: CGFloat
+    let textureWash: [Gradient.Stop]
+}
+
+enum JieziScene {
+    static let expense = JieziSceneTokens(background: [Color(jieziHex: "#EADCC4"), Color(jieziHex: "#F1E8D8"), Color(jieziHex: "#F5F1E7")], accent: Color(jieziHex: "#426E63"), dataAccent: Color(jieziHex: "#C2410C"), pagerAccent: Color(jieziHex: "#C2410C"), foreground: Color(jieziHex: "#202A27"), muted: Color(jieziHex: "#6E7773"), surface: Color(jieziHex: "#FBF9F4"), glow: Color(jieziHex: "#DCBF74"), glowOpacity: 0.45, usesDiagonalTexture: false, stripeWidth: 0, textureWash: [])
+    static let sleep = JieziSceneTokens(background: [Color(jieziHex: "#1C2140"), Color(jieziHex: "#17312D"), Color(jieziHex: "#0F1E1C")], accent: Color(jieziHex: "#DCBF74"), dataAccent: Color(jieziHex: "#9A96F0"), pagerAccent: Color(jieziHex: "#9A96F0"), foreground: Color(jieziHex: "#F5F1E7"), muted: Color(jieziHex: "#C7C9D0"), surface: Color(jieziHex: "#10211F"), glow: Color(jieziHex: "#6E78C8"), glowOpacity: 0.35, usesDiagonalTexture: false, stripeWidth: 0, textureWash: [])
+    static let food = JieziSceneTokens(background: [Color(jieziHex: "#F2DCC4"), Color(jieziHex: "#F4EADB"), Color(jieziHex: "#F5F1E7")], accent: Color(jieziHex: "#C2410C"), dataAccent: Color(jieziHex: "#EA580C"), pagerAccent: Color(jieziHex: "#EA580C"), foreground: Color(jieziHex: "#202A27"), muted: Color(jieziHex: "#6E7773"), surface: Color(jieziHex: "#FBF9F4"), glow: Color(jieziHex: "#EA580C"), glowOpacity: 0.22, usesDiagonalTexture: false, stripeWidth: 0, textureWash: [])
+    static let sport = JieziSceneTokens(background: [Color(jieziHex: "#D5E2D6"), Color(jieziHex: "#E6EBE0"), Color(jieziHex: "#F5F1E7")], accent: Color(jieziHex: "#426E63"), dataAccent: Color(jieziHex: "#B45309"), pagerAccent: Color(jieziHex: "#B45309"), foreground: Color(jieziHex: "#202A27"), muted: Color(jieziHex: "#6E7773"), surface: Color(jieziHex: "#FBF9F4"), glow: Color(jieziHex: "#DCBF74"), glowOpacity: 0.4, usesDiagonalTexture: false, stripeWidth: 0, textureWash: [])
+    static let reading = JieziSceneTokens(background: [Color(jieziHex: "#4A5E6E"), Color(jieziHex: "#43566A"), Color(jieziHex: "#10211F")], accent: Color(jieziHex: "#DCBF74"), dataAccent: Color(jieziHex: "#DCBF74"), pagerAccent: Color(jieziHex: "#DCBF74"), foreground: Color(jieziHex: "#F5F1E7"), muted: Color(jieziHex: "#C7C9D0"), surface: Color(jieziHex: "#17312D"), glow: Color(jieziHex: "#10211F"), glowOpacity: 0, usesDiagonalTexture: true, stripeWidth: 10, textureWash: [.init(color: Color(jieziHex: "#10211F").opacity(0.35), location: 0), .init(color: Color(jieziHex: "#10211F").opacity(0.82), location: 0.6), .init(color: Color(jieziHex: "#10211F").opacity(1), location: 1)])
+
+    static func tokens(for domain: String) -> JieziSceneTokens {
+        switch domain {
+        case "expense": return JieziScene.expense
+        case "sleep": return JieziScene.sleep
+        case "food": return JieziScene.food
+        case "sport": return JieziScene.sport
+        case "reading": return JieziScene.reading
+        default: return JieziScene.expense
         }
+    }
+}
+
+enum JieziPrototypeLayout {
+    static let page_inset: CGFloat = 14
+    static let metric_inset: CGFloat = 20
+    static let hero_min_height: CGFloat = 170
+    static let cat_width: CGFloat = 140
+    static let cat_height: CGFloat = 150
+    static let cat_viewbox_size: CGFloat = 200
+    static let cat_stroke_width: CGFloat = 2.4
+    static let cat_face_stroke_width: CGFloat = 3.4
+    static let column_gap: CGFloat = 12
+    static let card_inset: CGFloat = 16
+    static let card_radius: CGFloat = 24
+    static let sheet_radius: CGFloat = 32
+    static let selected_page_width: CGFloat = 22
+    static let page_dot_size: CGFloat = 8
+    static let page_dot_gap: CGFloat = 6
+    static let page_dot_hit_width: CGFloat = 44
+    static let page_dot_drag_distance: CGFloat = 8
+    static let add_button_size: CGFloat = 48
+    static let week_day_height: CGFloat = 52
+    static let date_strip_month_threshold: CGFloat = 40
+    static let calendar_day_height: CGFloat = 44
+    static let calendar_arrow_hit_size: CGFloat = 44
+    static let food_energy_reference_height: CGFloat = 90
+    static let food_energy_point_size: CGFloat = 64
+    static let food_photo_size: CGFloat = 64
+    static let food_photo_radius: CGFloat = 12
+}
+
+enum JieziPrototypeMotion {
+    static let page_transition_ms: TimeInterval = 0.45
+    static let background_ms: TimeInterval = 0.7
+    static let cat_retract_ms: TimeInterval = 0.36
+    static let cat_draw_ms: TimeInterval = 1.15
+    static let cat_face_delay_ms: TimeInterval = 0.85
+    static let cat_face_hide_ms: TimeInterval = 0.12
+    static let cat_reset_frame_ms: TimeInterval = 0.016
+    static let cat_face_fade_ms: TimeInterval = 0.35
+    static let cat_decoration_fade_ms: TimeInterval = 0.5
+    static let calendar_feedback_ms: TimeInterval = 0.26
+}
+
+enum JieziCatPose: String {
+    case expense
+    case sleep
+    case food
+    case sport
+    case reading
+
+    static func forDomain(_ domain: String) -> JieziCatPose {
+        JieziCatPose(rawValue: domain) ?? .expense
+    }
+
+    var decoration: (cx: CGFloat, cy: CGFloat, rx: CGFloat, ry: CGFloat, color: Color, opacity: Double) {
+        switch self {
+        case .expense: return (cx: 134, cy: 124, rx: 12, ry: 12, color: Color(jieziHex: "#DCBF74"), opacity: 0.6)
+        case .sleep: return (cx: 162, cy: 46, rx: 14, ry: 14, color: Color(jieziHex: "#F3E3A6"), opacity: 0.9)
+        case .food: return (cx: 120, cy: 124, rx: 30, ry: 7, color: Color(jieziHex: "#FFFFFF"), opacity: 0.95)
+        case .sport: return (cx: 92, cy: 171, rx: 78, ry: 4, color: Color(jieziHex: "#426E63"), opacity: 0.28)
+        case .reading: return (cx: 156, cy: 56, rx: 10, ry: 10, color: Color(jieziHex: "#F3D99A"), opacity: 0.85)
+        }
+    }
+}
+
+struct JieziCatShape: Shape {
+    let pose: JieziCatPose
+    var drawsFace = false
+
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        if drawsFace {
+            switch pose {
+            case .expense:
+                path.move(to: CGPoint(x: 90, y: 88))
+                path.addCurve(to: CGPoint(x: 90, y: 89.5), control1: CGPoint(x: 90, y: 88), control2: CGPoint(x: 90, y: 89.5))
+                path.move(to: CGPoint(x: 110, y: 88))
+                path.addCurve(to: CGPoint(x: 110, y: 89.5), control1: CGPoint(x: 110, y: 88), control2: CGPoint(x: 110, y: 89.5))
+            case .sleep:
+                path.move(to: CGPoint(x: 50, y: 140))
+                path.addCurve(to: CGPoint(x: 56, y: 140), control1: CGPoint(x: 52, y: 142), control2: CGPoint(x: 54, y: 142))
+                path.move(to: CGPoint(x: 64, y: 140))
+                path.addCurve(to: CGPoint(x: 70, y: 140), control1: CGPoint(x: 66, y: 142), control2: CGPoint(x: 68, y: 142))
+                path.move(to: CGPoint(x: 100, y: 92))
+                path.addCurve(to: CGPoint(x: 108, y: 92), control1: CGPoint(x: 100, y: 92), control2: CGPoint(x: 108, y: 92))
+                path.addCurve(to: CGPoint(x: 100, y: 100), control1: CGPoint(x: 108, y: 92), control2: CGPoint(x: 100, y: 100))
+                path.addCurve(to: CGPoint(x: 108, y: 100), control1: CGPoint(x: 100, y: 100), control2: CGPoint(x: 108, y: 100))
+                path.move(to: CGPoint(x: 114, y: 78))
+                path.addCurve(to: CGPoint(x: 120, y: 78), control1: CGPoint(x: 114, y: 78), control2: CGPoint(x: 120, y: 78))
+                path.addCurve(to: CGPoint(x: 114, y: 84), control1: CGPoint(x: 120, y: 78), control2: CGPoint(x: 114, y: 84))
+                path.addCurve(to: CGPoint(x: 120, y: 84), control1: CGPoint(x: 114, y: 84), control2: CGPoint(x: 120, y: 84))
+            case .food:
+                path.move(to: CGPoint(x: 83, y: 88))
+                path.addCurve(to: CGPoint(x: 91, y: 88), control1: CGPoint(x: 85.666667, y: 85.333333), control2: CGPoint(x: 88.333333, y: 85.333333))
+                path.move(to: CGPoint(x: 105, y: 88))
+                path.addCurve(to: CGPoint(x: 113, y: 88), control1: CGPoint(x: 107.666667, y: 85.333333), control2: CGPoint(x: 110.333333, y: 85.333333))
+            case .sport:
+                path.move(to: CGPoint(x: 54, y: 133))
+                path.addCurve(to: CGPoint(x: 54, y: 134.5), control1: CGPoint(x: 54, y: 133), control2: CGPoint(x: 54, y: 134.5))
+                path.move(to: CGPoint(x: 68, y: 131))
+                path.addCurve(to: CGPoint(x: 68, y: 132.5), control1: CGPoint(x: 68, y: 131), control2: CGPoint(x: 68, y: 132.5))
+            case .reading:
+                path.move(to: CGPoint(x: 88, y: 90))
+                path.addCurve(to: CGPoint(x: 88, y: 91.2), control1: CGPoint(x: 88, y: 90), control2: CGPoint(x: 88, y: 91.2))
+                path.move(to: CGPoint(x: 108, y: 90))
+                path.addCurve(to: CGPoint(x: 108, y: 91.2), control1: CGPoint(x: 108, y: 90), control2: CGPoint(x: 108, y: 91.2))
+            }
+        } else {
+            switch pose {
+            case .expense:
+                path.move(to: CGPoint(x: 34, y: 138))
+                path.addCurve(to: CGPoint(x: 46, y: 168), control1: CGPoint(x: 18, y: 140), control2: CGPoint(x: 16, y: 168))
+                path.addCurve(to: CGPoint(x: 64, y: 118), control1: CGPoint(x: 60, y: 168), control2: CGPoint(x: 58, y: 140))
+                path.addCurve(to: CGPoint(x: 66, y: 80), control1: CGPoint(x: 68, y: 104), control2: CGPoint(x: 62, y: 92))
+                path.addCurve(to: CGPoint(x: 70, y: 52), control1: CGPoint(x: 66, y: 70), control2: CGPoint(x: 66, y: 60))
+                path.addCurve(to: CGPoint(x: 88, y: 66), control1: CGPoint(x: 76, y: 58), control2: CGPoint(x: 82, y: 64))
+                path.addCurve(to: CGPoint(x: 112, y: 66), control1: CGPoint(x: 96, y: 64), control2: CGPoint(x: 104, y: 64))
+                path.addCurve(to: CGPoint(x: 130, y: 50), control1: CGPoint(x: 118, y: 60), control2: CGPoint(x: 124, y: 54))
+                path.addCurve(to: CGPoint(x: 130, y: 78), control1: CGPoint(x: 132, y: 60), control2: CGPoint(x: 132, y: 70))
+                path.addCurve(to: CGPoint(x: 108, y: 106), control1: CGPoint(x: 134, y: 92), control2: CGPoint(x: 124, y: 104))
+                path.addCurve(to: CGPoint(x: 122, y: 124), control1: CGPoint(x: 112, y: 114), control2: CGPoint(x: 116, y: 120))
+                path.addCurve(to: CGPoint(x: 134, y: 136), control1: CGPoint(x: 122, y: 130.627417), control2: CGPoint(x: 127.372583, y: 136))
+                path.addCurve(to: CGPoint(x: 146, y: 124), control1: CGPoint(x: 140.627417, y: 136), control2: CGPoint(x: 146, y: 130.627417))
+                path.addCurve(to: CGPoint(x: 134, y: 112), control1: CGPoint(x: 146, y: 117.372583), control2: CGPoint(x: 140.627417, y: 112))
+                path.addCurve(to: CGPoint(x: 122, y: 124), control1: CGPoint(x: 127.372583, y: 112), control2: CGPoint(x: 122, y: 117.372583))
+                path.addCurve(to: CGPoint(x: 126, y: 166), control1: CGPoint(x: 122, y: 140), control2: CGPoint(x: 118, y: 154))
+                path.addCurve(to: CGPoint(x: 164, y: 168), control1: CGPoint(x: 130, y: 168), control2: CGPoint(x: 136, y: 168))
+            case .sleep:
+                path.move(to: CGPoint(x: 20, y: 168))
+                path.addCurve(to: CGPoint(x: 40, y: 168), control1: CGPoint(x: 20, y: 168), control2: CGPoint(x: 40, y: 168))
+                path.addCurve(to: CGPoint(x: 48, y: 134), control1: CGPoint(x: 34, y: 156), control2: CGPoint(x: 36, y: 140))
+                path.addCurve(to: CGPoint(x: 54, y: 110), control1: CGPoint(x: 48, y: 124), control2: CGPoint(x: 50, y: 116))
+                path.addCurve(to: CGPoint(x: 70, y: 122), control1: CGPoint(x: 60, y: 116), control2: CGPoint(x: 64, y: 120))
+                path.addCurve(to: CGPoint(x: 86, y: 106), control1: CGPoint(x: 74, y: 116), control2: CGPoint(x: 80, y: 110))
+                path.addCurve(to: CGPoint(x: 86, y: 130), control1: CGPoint(x: 88, y: 116), control2: CGPoint(x: 88, y: 124))
+                path.addCurve(to: CGPoint(x: 166, y: 140), control1: CGPoint(x: 110, y: 112), control2: CGPoint(x: 154, y: 116))
+                path.addCurve(to: CGPoint(x: 144, y: 168), control1: CGPoint(x: 174, y: 156), control2: CGPoint(x: 164, y: 168))
+                path.addCurve(to: CGPoint(x: 72, y: 162), control1: CGPoint(x: 120, y: 168), control2: CGPoint(x: 92, y: 168))
+                path.addCurve(to: CGPoint(x: 74, y: 150), control1: CGPoint(x: 62, y: 158), control2: CGPoint(x: 64, y: 148))
+            case .food:
+                path.move(to: CGPoint(x: 34, y: 138))
+                path.addCurve(to: CGPoint(x: 46, y: 168), control1: CGPoint(x: 18, y: 140), control2: CGPoint(x: 16, y: 168))
+                path.addCurve(to: CGPoint(x: 64, y: 118), control1: CGPoint(x: 60, y: 168), control2: CGPoint(x: 58, y: 140))
+                path.addCurve(to: CGPoint(x: 66, y: 80), control1: CGPoint(x: 68, y: 104), control2: CGPoint(x: 62, y: 92))
+                path.addCurve(to: CGPoint(x: 70, y: 52), control1: CGPoint(x: 66, y: 70), control2: CGPoint(x: 66, y: 60))
+                path.addCurve(to: CGPoint(x: 88, y: 66), control1: CGPoint(x: 76, y: 58), control2: CGPoint(x: 82, y: 64))
+                path.addCurve(to: CGPoint(x: 112, y: 66), control1: CGPoint(x: 96, y: 64), control2: CGPoint(x: 104, y: 64))
+                path.addCurve(to: CGPoint(x: 130, y: 50), control1: CGPoint(x: 118, y: 60), control2: CGPoint(x: 124, y: 54))
+                path.addCurve(to: CGPoint(x: 130, y: 78), control1: CGPoint(x: 132, y: 60), control2: CGPoint(x: 132, y: 70))
+                path.addCurve(to: CGPoint(x: 108, y: 106), control1: CGPoint(x: 134, y: 92), control2: CGPoint(x: 124, y: 104))
+                path.addCurve(to: CGPoint(x: 88, y: 126), control1: CGPoint(x: 104, y: 116), control2: CGPoint(x: 96, y: 122))
+                path.addCurve(to: CGPoint(x: 120, y: 156), control1: CGPoint(x: 88, y: 146), control2: CGPoint(x: 102, y: 156))
+                path.addCurve(to: CGPoint(x: 152, y: 126), control1: CGPoint(x: 138, y: 156), control2: CGPoint(x: 152, y: 146))
+                path.addCurve(to: CGPoint(x: 158, y: 168), control1: CGPoint(x: 152, y: 142), control2: CGPoint(x: 148, y: 160))
+                path.addCurve(to: CGPoint(x: 172, y: 168), control1: CGPoint(x: 158, y: 168), control2: CGPoint(x: 172, y: 168))
+            case .sport:
+                path.move(to: CGPoint(x: 174, y: 62))
+                path.addCurve(to: CGPoint(x: 164, y: 58), control1: CGPoint(x: 178, y: 56), control2: CGPoint(x: 170, y: 50))
+                path.addCurve(to: CGPoint(x: 150, y: 98), control1: CGPoint(x: 156, y: 68), control2: CGPoint(x: 160, y: 84))
+                path.addCurve(to: CGPoint(x: 160, y: 168), control1: CGPoint(x: 158, y: 116), control2: CGPoint(x: 158, y: 146))
+                path.addCurve(to: CGPoint(x: 146, y: 168), control1: CGPoint(x: 160, y: 168), control2: CGPoint(x: 146, y: 168))
+                path.addCurve(to: CGPoint(x: 128, y: 146), control1: CGPoint(x: 146, y: 156), control2: CGPoint(x: 140, y: 148))
+                path.addCurve(to: CGPoint(x: 72, y: 160), control1: CGPoint(x: 108, y: 144), control2: CGPoint(x: 86, y: 150))
+                path.addCurve(to: CGPoint(x: 22, y: 168), control1: CGPoint(x: 72, y: 160), control2: CGPoint(x: 22, y: 168))
+                path.addCurve(to: CGPoint(x: 46, y: 148), control1: CGPoint(x: 30, y: 162), control2: CGPoint(x: 40, y: 156))
+                path.addCurve(to: CGPoint(x: 44, y: 116), control1: CGPoint(x: 42, y: 136), control2: CGPoint(x: 42, y: 124))
+                path.addCurve(to: CGPoint(x: 62, y: 124), control1: CGPoint(x: 50, y: 120), control2: CGPoint(x: 56, y: 124))
+                path.addCurve(to: CGPoint(x: 78, y: 108), control1: CGPoint(x: 66, y: 118), control2: CGPoint(x: 72, y: 112))
+                path.addCurve(to: CGPoint(x: 78, y: 136), control1: CGPoint(x: 80, y: 118), control2: CGPoint(x: 80, y: 128))
+                path.addCurve(to: CGPoint(x: 112, y: 134), control1: CGPoint(x: 88, y: 140), control2: CGPoint(x: 100, y: 142))
+                path.addCurve(to: CGPoint(x: 150, y: 98), control1: CGPoint(x: 126, y: 122), control2: CGPoint(x: 138, y: 100))
+            case .reading:
+                path.move(to: CGPoint(x: 34, y: 138))
+                path.addCurve(to: CGPoint(x: 46, y: 168), control1: CGPoint(x: 18, y: 140), control2: CGPoint(x: 16, y: 168))
+                path.addCurve(to: CGPoint(x: 64, y: 118), control1: CGPoint(x: 60, y: 168), control2: CGPoint(x: 58, y: 140))
+                path.addCurve(to: CGPoint(x: 66, y: 80), control1: CGPoint(x: 68, y: 104), control2: CGPoint(x: 62, y: 92))
+                path.addCurve(to: CGPoint(x: 70, y: 52), control1: CGPoint(x: 66, y: 70), control2: CGPoint(x: 66, y: 60))
+                path.addCurve(to: CGPoint(x: 88, y: 66), control1: CGPoint(x: 76, y: 58), control2: CGPoint(x: 82, y: 64))
+                path.addCurve(to: CGPoint(x: 112, y: 66), control1: CGPoint(x: 96, y: 64), control2: CGPoint(x: 104, y: 64))
+                path.addCurve(to: CGPoint(x: 130, y: 50), control1: CGPoint(x: 118, y: 60), control2: CGPoint(x: 124, y: 54))
+                path.addCurve(to: CGPoint(x: 130, y: 78), control1: CGPoint(x: 132, y: 60), control2: CGPoint(x: 132, y: 70))
+                path.addCurve(to: CGPoint(x: 108, y: 106), control1: CGPoint(x: 134, y: 92), control2: CGPoint(x: 124, y: 104))
+                path.addCurve(to: CGPoint(x: 96, y: 118), control1: CGPoint(x: 110, y: 114), control2: CGPoint(x: 104, y: 118))
+                path.addCurve(to: CGPoint(x: 84, y: 116), control1: CGPoint(x: 96, y: 118), control2: CGPoint(x: 84, y: 116))
+                path.addCurve(to: CGPoint(x: 88, y: 144), control1: CGPoint(x: 84, y: 126), control2: CGPoint(x: 86, y: 136))
+                path.addCurve(to: CGPoint(x: 118, y: 152), control1: CGPoint(x: 98, y: 146), control2: CGPoint(x: 110, y: 148))
+                path.addCurve(to: CGPoint(x: 118, y: 124), control1: CGPoint(x: 118, y: 142), control2: CGPoint(x: 118, y: 132))
+                path.addCurve(to: CGPoint(x: 152, y: 116), control1: CGPoint(x: 128, y: 118), control2: CGPoint(x: 140, y: 116))
+                path.addCurve(to: CGPoint(x: 148, y: 144), control1: CGPoint(x: 150, y: 126), control2: CGPoint(x: 150, y: 136))
+                path.addCurve(to: CGPoint(x: 118, y: 152), control1: CGPoint(x: 138, y: 146), control2: CGPoint(x: 126, y: 148))
+                path.addCurve(to: CGPoint(x: 134, y: 168), control1: CGPoint(x: 120, y: 160), control2: CGPoint(x: 124, y: 166))
+                path.addCurve(to: CGPoint(x: 164, y: 168), control1: CGPoint(x: 134, y: 168), control2: CGPoint(x: 164, y: 168))
+            }
+        }
+        let extent = JieziPrototypeLayout.cat_viewbox_size
+        let scale = min(rect.width / extent, rect.height / extent)
+        let x = rect.midX - extent / 2 * scale
+        let y = rect.midY - extent / 2 * scale
+        return path.applying(CGAffineTransform(scaleX: scale, y: scale))
+            .applying(CGAffineTransform(translationX: x, y: y))
     }
 }
 
@@ -371,42 +602,53 @@ extension View {
 // MARK: - 字体 Token（HIG 层级）
 
 enum JieziFont {
-    static let caption2 = Font.system(size: 11, weight: .regular)
-    static let caption = Font.system(size: 12, weight: .regular)
-    static let footnote = Font.system(size: 13, weight: .regular)
-    static let subheadline = Font.system(size: 15, weight: .regular)
-    static let body = Font.system(size: 17, weight: .regular)
-    static let callout = Font.system(size: 16, weight: .medium)
-    static let headline = Font.system(size: 17, weight: .semibold)
-    static let title3 = Font.system(size: 20, weight: .semibold)
-    static let title2 = Font.system(size: 22, weight: .semibold)
-    static let title1 = Font.system(size: 28, weight: .bold)
-    static let largeTitle = Font.system(size: 34, weight: .bold)
+    static let caption2 = Font.system(.caption2).weight(.regular)
+    static let caption = Font.system(.caption).weight(.regular)
+    static let footnote = Font.system(.footnote).weight(.regular)
+    static let subheadline = Font.system(.subheadline).weight(.regular)
+    static let body = Font.system(.body).weight(.regular)
+    static let callout = Font.system(.callout).weight(.medium)
+    static let headline = Font.system(.headline).weight(.semibold)
+    static let title3 = Font.system(.title3).weight(.semibold)
+    static let title2 = Font.system(.title2).weight(.semibold)
+    static let title1 = Font.system(.title).weight(.bold)
+    static let largeTitle = Font.system(.largeTitle).weight(.bold)
+}
+
+enum JieziFontFamily {
+    static let sans = "system"
+    static let serif = "NotoSerifSC-ExtraLight"
+    static let numeric = "Nunito-ExtraLight"
 }
 
 // MARK: - 语义字体角色（「芥子味」：serif 标题 + rounded 金额）
 /// 注意：money 系列角色在使用处追加 .monospacedDigit()（SSOT numeric 规则）。
 enum JieziType {
     /// 页面主标题、品牌门面（如「个人数据平台」）
-    static let display = Font.system(size: 28, weight: .bold, design: .serif)
+    static let display = Font.custom(JieziFontFamily.serif, size: 28, relativeTo: .title).weight(.bold)
     /// 空态大标题、启动页书法字位
-    static let displayLarge = Font.system(size: 34, weight: .bold, design: .serif)
+    static let displayLarge = Font.custom(JieziFontFamily.serif, size: 34, relativeTo: .largeTitle).weight(.bold)
     /// 财务主数字（净额估算、大金额输入）
-    static let moneyHero = Font.system(size: 34, weight: .bold, design: .rounded)
+    static let moneyHero = Font.custom(JieziFontFamily.numeric, size: 34, relativeTo: .largeTitle).weight(.bold)
     /// 卡片级金额、日汇总数字
-    static let moneyCard = Font.system(size: 22, weight: .semibold, design: .rounded)
+    static let moneyCard = Font.custom(JieziFontFamily.numeric, size: 22, relativeTo: .title2).weight(.semibold)
     /// 列表行内金额
-    static let moneyInline = Font.system(size: 17, weight: .semibold, design: .rounded)
+    static let moneyInline = Font.custom(JieziFontFamily.numeric, size: 17, relativeTo: .headline).weight(.semibold)
     /// 区块标题（如「财务状态」「每日明细」）
-    static let sectionTitle = Font.system(size: 20, weight: .semibold)
+    static let sectionTitle = Font.system(.title3).weight(.semibold)
     /// 卡片内标题、列表行主文字
-    static let cardTitle = Font.system(size: 17, weight: .semibold)
+    static let cardTitle = Font.system(.headline).weight(.semibold)
     /// 按钮文字
-    static let button = Font.system(size: 16, weight: .semibold)
+    static let button = Font.system(.callout).weight(.semibold)
     /// 分类 Chip、胶囊标签
-    static let chip = Font.system(size: 13, weight: .medium)
+    static let chip = Font.system(.footnote).weight(.medium)
     /// 指标说明文字（如「可用现金」）
-    static let metricLabel = Font.system(size: 12, weight: .regular)
+    static let metricLabel = Font.system(.caption).weight(.regular)
+    static let prototypeBrand = Font.custom(JieziFontFamily.serif, size: 20, relativeTo: .title2).weight(.bold)
+    static let prototypeHero = Font.custom(JieziFontFamily.numeric, size: 44, relativeTo: .largeTitle).weight(.bold)
+    static let prototypeSleepHero = Font.custom(JieziFontFamily.numeric, size: 40, relativeTo: .largeTitle).weight(.bold)
+    static let prototypeBook = Font.custom(JieziFontFamily.serif, size: 32, relativeTo: .title).weight(.bold)
+    static let prototypeOnboarding = Font.custom(JieziFontFamily.serif, size: 32, relativeTo: .largeTitle).weight(.bold)
 }
 
 // MARK: - 描边 Token（金线 0.5mm 为骨）
@@ -539,11 +781,7 @@ enum JieziHaptics {
 enum JieziGradient {
     static func pageBackground(palette: JieziGeneratedPalette = JieziThemeManager.shared.palette) -> LinearGradient {
         LinearGradient(
-            colors: [
-                palette.paper,
-                palette.paper.jieziBlended(with: palette.brand, amount: 0.035),
-                palette.paper.jieziBlended(with: palette.light, amount: 0.045)
-            ],
+            colors: JieziScene.expense.background,
             startPoint: .top,
             endPoint: .bottomTrailing
         )
@@ -582,22 +820,13 @@ struct JieziCardStyle: ViewModifier {
 
     func body(content: Content) -> some View {
         content
-            .padding(18)
-            .background {
-                if solid {
-                    RoundedRectangle(cornerRadius: 24, style: .continuous)
-                        .fill(palette.paper.opacity(0.92))
-                } else {
-                    RoundedRectangle(cornerRadius: 24, style: .continuous)
-                        .fill(palette.paper.opacity(0.72))
-                        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
-                }
-            }
+            .padding(16)
+            .background(JieziScene.expense.surface.opacity(solid ? 0.92 : 0.66), in: RoundedRectangle(cornerRadius: 24, style: .continuous))
             .overlay {
                 RoundedRectangle(cornerRadius: 24, style: .continuous)
-                    .stroke(palette.brand.opacity(solid ? 0.08 : 0.11), lineWidth: 1)
+                    .stroke(palette.brand.opacity(0.11), lineWidth: 1)
             }
-            .jieziShadow(solid ? JieziShadows.sm(palette) : JieziShadows.Semantic.card(palette))
+            .shadow(color: palette.space.opacity(solid ? 0 : 0.07), radius: 22, x: 0, y: 12)
     }
 }
 

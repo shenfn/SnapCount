@@ -58,13 +58,38 @@ struct NativeRecordQuery {
     func groups(from source: [NativeDayRecordGroup]) -> [NativeDayRecordGroup] {
         source.compactMap { group in
             guard group.dateKey.hasPrefix(monthKey) else { return nil }
-            let records = group.records(for: kind).filter { $0.kind != .staging }
-            return records.isEmpty ? nil : NativeDayRecordGroup(dateKey: group.dateKey, records: records)
+            return Self.filtered(group, for: kind)
+        }
+    }
+
+    static func groups(
+        from source: [NativeDayRecordGroup],
+        startingOn startDateKey: String,
+        through endDateKey: String,
+        kind: NativeDayRecordKind = .all
+    ) -> [NativeDayRecordGroup] {
+        guard startDateKey <= endDateKey else { return [] }
+        return source.compactMap { group in
+            guard group.dateKey >= startDateKey,
+                  group.dateKey <= endDateKey else { return nil }
+            return filtered(group, for: kind)
         }
     }
 
     func availableKinds(from source: [NativeDayRecordGroup]) -> [NativeDayRecordKind] {
         let present = Set(source.flatMap(\.records).filter { $0.kind != .staging }.map(\.kind))
         return [.all] + NativeDayRecordKind.allCases.filter { $0 != .all && $0 != .staging && present.contains($0) }
+    }
+
+    static func isFormal(_ record: NativeDayRecord) -> Bool {
+        record.kind != .staging && record.status != "pending"
+    }
+
+    private static func filtered(
+        _ group: NativeDayRecordGroup,
+        for kind: NativeDayRecordKind
+    ) -> NativeDayRecordGroup? {
+        let records = group.records(for: kind).filter { $0.kind != .staging }
+        return records.isEmpty ? nil : NativeDayRecordGroup(dateKey: group.dateKey, records: records)
     }
 }

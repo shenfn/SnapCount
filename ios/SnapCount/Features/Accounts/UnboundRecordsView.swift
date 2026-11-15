@@ -49,11 +49,14 @@ struct UnboundRecordsView: View {
                     ProgressView("正在加载未绑定记录…")
                         .frame(maxWidth: .infinity)
                 } else if visibleRecords.isEmpty {
-                    ContentUnavailableView(
-                        "这个月份没有待补绑记录",
-                        systemImage: "checkmark.circle",
-                        description: Text("只有已完成且尚未绑定账户的消费、收入会显示在这里。")
-                    )
+                    ContentUnavailableView {
+                        Label {
+                            Text("这个月份没有待补绑记录")
+                                .lineLimit(nil).fixedSize(horizontal: false, vertical: true)
+                        } icon: { Image(systemName: "checkmark.circle") }
+                    } description: {
+                        Text("只有已完成且尚未绑定账户的消费、收入会显示在这里。")
+                    }
                 } else {
                     Section("待补绑") {
                         ForEach(visibleRecords) { record in
@@ -74,6 +77,8 @@ struct UnboundRecordsView: View {
                 }
             }
             .scrollContentBackground(.hidden)
+            .listStyle(.insetGrouped)
+            .tint(JieziTheme.brand)
             .refreshable { await reload() }
         }
         .navigationTitle("未绑定记录")
@@ -131,7 +136,7 @@ struct UnboundRecordsView: View {
                     Image(systemName: record.kind.systemImage)
                         .foregroundStyle(record.kind == .income ? JieziTheme.mint : JieziTheme.coral)
                         .frame(width: 34, height: 34)
-                        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 10))
+                        .background(JieziTheme.brand.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
                     VStack(alignment: .leading, spacing: 4) {
                         Text(record.title).font(.subheadline.weight(.semibold)).lineLimit(1)
                         Text("\(record.date) · \(record.kind.title)")
@@ -235,6 +240,10 @@ private struct UnboundAccountPicker: View {
                 }
                 .disabled(appState.isBindingUnboundRecords)
             }
+            .scrollContentBackground(.hidden)
+            .background(JieziTheme.pageBackground)
+            .listStyle(.insetGrouped)
+            .tint(JieziTheme.brand)
             .navigationTitle("选择账户")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -298,6 +307,10 @@ private struct UnboundBatchBindingSheet: View {
                     }
                 }
             }
+            .scrollContentBackground(.hidden)
+            .background(JieziTheme.pageBackground)
+            .listStyle(.insetGrouped)
+            .tint(JieziTheme.brand)
             .navigationTitle("批量补绑预览")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {

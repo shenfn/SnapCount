@@ -1,5 +1,14 @@
 import Foundation
 
+/// Capabilities intentionally exposed in the 1.0 release. Keeping this list
+/// centralized lets us hide unfinished entry points without deleting the
+/// underlying local, Hosted, or sync implementations.
+enum JieziReleaseCapabilities {
+    static let monthlyAIQuestions = false
+    static let cloudSync = false
+    static let byok = false
+}
+
 struct NativeUserSettings: Equatable {
     var plan = "free"
     var screenshotVisionPrimary = "auto"
@@ -10,7 +19,7 @@ struct NativeUserSettings: Equatable {
     var qwenPhotoThinking = false
     var aiInsightProvider = "auto"
     var companionEnabled = true
-    var companionMemoryEnabled = true
+    var companionMemoryEnabled = false
     var companionPersona = "observer"
     var companionMemoryStrength = "balanced"
     var companionExpressionStyle = "plain"
@@ -100,8 +109,8 @@ enum NativeExportContent: String, CaseIterable, Identifiable, Hashable {
         switch self {
         case .expense: return "支出记录"
         case .income: return "收入记录"
-        case .allFinance: return "全部财务"
-        case .universal: return "通用记录"
+        case .allFinance: return "全部收支"
+        case .universal: return "本机全部正式记录"
         }
     }
 }

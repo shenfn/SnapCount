@@ -50,8 +50,8 @@ final class LocalExpenseAccountPreparationTests: XCTestCase {
         await XCTAssertThrowsErrorAsync {
             try await fixture.useCase.createAccount(LocalAccountSetupCommand(
                 id: UUID(),
-                name: "信用卡",
-                kind: "credit_card",
+                name: "未支持账户",
+                kind: "unsupported_kind",
                 openingBalanceText: "0",
                 createdAt: Date()
             ))

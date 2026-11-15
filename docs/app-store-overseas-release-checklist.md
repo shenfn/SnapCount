@@ -1,6 +1,6 @@
 # 芥子 App 海外上架隐私与链接清单
 
-更新日期：2026-07-19
+更新日期：2026-11-11
 
 ## 发布区域
 
@@ -39,6 +39,8 @@ GitHub Pages 默认地址：
 
 声明“Data Used to Track You”为否，不声明广告用途。诊断数据同时用于 App Functionality；用户主动开启 AI 日志或 Prompt 优化时可包含 Analytics 用途。
 
+开启“长期记忆”后，本机生成的有限同类记录摘要会与当前记录一起发送给 AI 服务商生成陪伴文案。提交 App Privacy 标签前，按 Apple 当前选项核对这类本机派生内容是否应计入 User Content 与 Financial Info；新账户默认关闭，用户关闭后不读取、不发送。
+
 ## 第三方与数据区域
 
 - Supabase Auth、Postgres、Edge Functions、Storage：新加坡 `ap-southeast-1`。
@@ -50,13 +52,15 @@ GitHub Pages 默认地址：
 - 芥子是个人生活记录与数据整理工具，不提供支付、信贷、投资或医疗服务。
 - 注册必须分别同意服务协议/隐私政策与敏感数据/跨区域处理。
 - App 内提供数据导出、原图留存设置和删除账户。
+- 复核隐私政策和注册同意文案已说明：长期记忆默认关闭；开启时同类本机摘要经 Hosted 或 BYOK 发送给相应 AI 服务商；关闭后停止读取与发送。
+- 真机确认长期记忆开/关都符合设置说明；开时摘要来自当前设备的正式记录，关时不访问记忆表、不含请求字段。
 - AI 结果可能出错，重要金额、账户、还款和睡眠字段要求用户确认。
 - 准备一个不包含真实个人信息的审核账号，并在 Review Notes 写明测试入口和删除账户路径。
 
 ## 发布前人工核对
 
 - Pages 三个 URL 无需登录即可访问，移动端排版正常。
-- App 内协议版本与网页版本均为 `2026-07-19`。
+- App 内与网页的服务协议版本均为 `2026-07-19`；隐私政策版本均为 `2026-11-11`。
 - App Store Connect 的 App Privacy 与 `PrivacyInfo.xcprivacy` 一致。
 - Supabase 已应用迁移 `078`、`079`，并部署最新 `ingest-receipt`、`generate-insights`。
 - Qwen API Key 可用，旧服务商密钥即使仍存在也不会被运行时代码读取。

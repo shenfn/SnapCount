@@ -15,6 +15,13 @@ struct InsightsView: View {
     @State private var mode: Mode = .report
     @State private var range: NativeInsightRange = .fourteen
     @State private var question = "这个月钱够不够花？每天最好控制在多少钱，还能不能存下钱？"
+    let initialMonthKey: String
+    let initialDomainKey: String
+
+    init(initialMonthKey: String = NativeMonthKey.current(), initialDomainKey: String = "expense") {
+        self.initialMonthKey = initialMonthKey
+        self.initialDomainKey = initialDomainKey
+    }
 
     private let quickQuestions = [
         "这个月钱够不够花？",
@@ -31,14 +38,14 @@ struct InsightsView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
                     Picker("报告视图", selection: $mode) {
-                        ForEach(Mode.allCases) { item in
+                        ForEach(availableModes) { item in
                             Text(item.title).tag(item)
                         }
                     }
                     .pickerStyle(.segmented)
 
-                    if mode == .report {
-                        MonthlyReportContent()
+                    if mode == .report || !JieziReleaseCapabilities.monthlyAIQuestions {
+                        MonthlyReportContent(initialMonthKey: initialMonthKey, initialDomainKey: initialDomainKey)
                     } else {
                         Picker("分析范围", selection: $range) {
                             ForEach(NativeInsightRange.allCases) { item in
@@ -78,7 +85,7 @@ struct InsightsView: View {
                 .padding(16)
             }
             .refreshable {
-                if mode == .report {
+                if mode == .report || !JieziReleaseCapabilities.monthlyAIQuestions {
                     await appState.refreshDashboard()
                 } else {
                     await appState.loadInsights(range: range, force: true)
@@ -86,10 +93,16 @@ struct InsightsView: View {
             }
         }
         .navigationTitle("报告")
-        .toolbarBackground(.ultraThinMaterial, for: .navigationBar)
+        .toolbarBackground(JieziScene.expense.surface, for: .navigationBar)
         .task(id: "\(mode.rawValue)-\(range.rawValue)") {
-            if mode == .linkage { await appState.loadInsights(range: range) }
+            if mode == .linkage, JieziReleaseCapabilities.monthlyAIQuestions {
+                await appState.loadInsights(range: range)
+            }
         }
+    }
+
+    private var availableModes: [Mode] {
+        Mode.allCases.filter { $0 != .linkage || JieziReleaseCapabilities.monthlyAIQuestions }
     }
 
     @ViewBuilder
@@ -113,8 +126,7 @@ struct InsightsView: View {
             TextEditor(text: $question)
                 .frame(minHeight: 84)
                 .padding(8)
-                .background(.white.opacity(0.9), in: RoundedRectangle(cornerRadius: 8))
-                .overlay(RoundedRectangle(cornerRadius: 8).stroke(JieziTheme.brand.opacity(0.15)))
+                .jieziPrototypePanel()
 
             HStack {
                 Menu {
@@ -176,7 +188,7 @@ struct InsightsView: View {
             }
         }
         .padding(16)
-        .background(.white.opacity(0.88), in: RoundedRectangle(cornerRadius: 8))
+        .jieziPrototypePanel()
     }
 
     @ViewBuilder
@@ -292,7 +304,7 @@ struct InsightsView: View {
             }
         }
         .padding(16)
-        .background(.white.opacity(0.88), in: RoundedRectangle(cornerRadius: 8))
+        .jieziPrototypePanel()
     }
 
     @ViewBuilder
@@ -342,7 +354,7 @@ struct InsightsView: View {
             }
         }
         .padding(16)
-        .background(.white.opacity(0.88), in: RoundedRectangle(cornerRadius: 8))
+        .jieziPrototypePanel()
     }
 
     private func financeCompressionSummary(
@@ -421,7 +433,7 @@ struct InsightsView: View {
             }
         }
         .padding(16)
-        .background(.white.opacity(0.88), in: RoundedRectangle(cornerRadius: 8))
+        .jieziPrototypePanel()
     }
 
     @ViewBuilder
@@ -465,7 +477,7 @@ struct InsightsView: View {
             }
         }
         .padding(16)
-        .background(.white.opacity(0.88), in: RoundedRectangle(cornerRadius: 8))
+        .jieziPrototypePanel()
     }
 
     @ViewBuilder
@@ -550,6 +562,6 @@ struct InsightMetric: View {
         }
         .frame(maxWidth: .infinity, minHeight: 62, alignment: .leading)
         .padding(12)
-        .background(.white.opacity(0.88), in: RoundedRectangle(cornerRadius: 8))
+        .jieziPrototypePanel()
     }
 }
