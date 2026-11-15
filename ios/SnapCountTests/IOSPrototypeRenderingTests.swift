@@ -252,10 +252,25 @@ final class IOSPrototypeRenderingTests: XCTestCase {
         func universal(
             _ id: String, domain: String, title: String, subtitle: String,
             time: String, image: String, payload: [String: AnyCodable],
+            foodImage: String? = nil,
             dateKey: String = date
         ) {
             let reference = "data/promo-\(id)"
             let kind = NativeDayRecordKind(rawValue: domain)!
+            let foodImageURL: URL? = foodImage.flatMap { name in
+                let projectRoot = URL(fileURLWithPath: #filePath)
+                    .deletingLastPathComponent()
+                    .deletingLastPathComponent()
+                    .deletingLastPathComponent()
+                let url = projectRoot
+                    .appendingPathComponent("docs/app-store-assets/food-photos", isDirectory: true)
+                    .appendingPathComponent(name)
+                guard FileManager.default.fileExists(atPath: url.path) else {
+                    XCTFail("缺少宣传用餐食图片：\(url.path)")
+                    return nil
+                }
+                return url
+            }
             let record = NativeDayRecord(
                 id: "promo-\(id)", reference: reference, dateKey: dateKey,
                 kind: kind, domainKey: domain, title: title, subtitle: subtitle,
@@ -263,8 +278,8 @@ final class IOSPrototypeRenderingTests: XCTestCase {
             )
             let detail = NativeRecordDetail(
                 id: reference, rawId: record.id, kind: "data", title: title,
-                subtitle: subtitle, value: "", detailRows: [], imageURL: nil,
-                imageLoadError: false, imagePath: nil, imageHash: nil, amount: nil,
+                subtitle: subtitle, value: "", detailRows: [], imageURL: foodImageURL,
+                imageLoadError: false, imagePath: foodImage.map { "records/promo-\($0)" }, imageHash: nil, amount: nil,
                 merchantName: nil, platform: nil, category: nil, paymentMethod: nil,
                 recordDate: dateKey, note: payload.string("note"),
                 companionMessage: nil, accountId: nil, systemImage: image,
@@ -278,17 +293,17 @@ final class IOSPrototypeRenderingTests: XCTestCase {
             "meal_type": AnyCodable("breakfast"), "total_calorie_kcal": AnyCodable(420),
             "dishes": AnyCodable([["name": "鸡蛋", "calorie_kcal": 90], ["name": "全麦面包", "calorie_kcal": 180], ["name": "无糖豆浆", "calorie_kcal": 150]]),
             "note": AnyCodable("吃得简单，上午精神比较稳")
-        ])
+        ], foodImage: "breakfast.jpg")
         universal("lunch-meal", domain: "food", title: "番茄牛腩饭", subtitle: "午餐 · 估算", time: "12:25", image: "fork.knife", payload: [
             "meal_type": AnyCodable("lunch"), "total_calorie_kcal": AnyCodable(680),
             "dishes": AnyCodable([["name": "番茄牛腩", "calorie_kcal": 360], ["name": "米饭", "calorie_kcal": 260], ["name": "青菜", "calorie_kcal": 60]]),
             "note": AnyCodable("午餐按时完成")
-        ])
+        ], foodImage: "tomato-beef-rice.jpg")
         universal("dinner-meal", domain: "food", title: "蔬菜鸡肉沙拉", subtitle: "晚餐 · 估算", time: "19:40", image: "fork.knife", payload: [
             "meal_type": AnyCodable("dinner"), "total_calorie_kcal": AnyCodable(560),
             "dishes": AnyCodable([["name": "鸡胸肉", "calorie_kcal": 260], ["name": "生菜", "calorie_kcal": 80], ["name": "玉米", "calorie_kcal": 120], ["name": "酸奶", "calorie_kcal": 100]]),
             "note": AnyCodable("晚上没有继续加餐")
-        ])
+        ], foodImage: "chicken-salad.jpg")
         universal("night-sleep", domain: "sleep", title: "主要睡眠", subtitle: "睡眠 · 7 小时 45 分钟", time: "07:25", image: "moon.zzz", payload: [
             "sleep_minutes": AnyCodable(465),
             "sleep_start_at": AnyCodable("2026-10-16T23:40:00+08:00"),

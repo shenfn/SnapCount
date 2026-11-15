@@ -47,7 +47,11 @@ struct FoodRecordThumbnail: View {
         .task(id: loadKey) {
             resolvedURL = nil
             loadFailed = false
+            // A hydrated detail may already carry a local or remote URL. Keep
+            // that URL usable even when the surrounding list projection has
+            // not caught up yet (for example during a freshly refreshed day).
             let url = await appState.thumbnailImageURL(for: record, force: retryCount > 0)
+                ?? detail?.imageURL
             guard !Task.isCancelled else { return }
             resolvedURL = url
         }
