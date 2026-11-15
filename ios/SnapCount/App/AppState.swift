@@ -1,110 +1,4060 @@
-YªçŠx-®éÜj×¢ëiºÚ+Š§j[h‘éÜ¢éí×^ºãÄèµ©hºÚn¶X§zÍZ[\ÜİÚYRBš[\ÜÜÂ‚\X[X\È˜]]™TÙ\ÜÚ[Û”›İšY\ˆH
-È›Ü˜ÙT™Yœ™\Úˆ›ÛÛ
-H\Ş[˜È›İÜÈOˆİ\X˜\ÙP]]Ù\ÜÚ[Û‚\X[X\È˜]]™TÛY\›İšY\ˆH
-È˜[›ÜÙXÛÛ™ÎˆR[
-H\Ş[˜È›İÜÈOˆ›ÚY‚œš]˜]HİXİØ[]Û˜\Úİ™XY[Ù[™Yœ™\Ú\œ›ÜˆØØ[^™Y\œ›ÜˆÂˆ]Y\ÜØYÙNˆİš[™Â‚ˆ˜\ˆ\œ›Ü‘\ØÜš\[Ûˆİš[™ÏÈÈY\ÜØYÙHBŸB‚œš]˜]HİXİ[™[™Ô™XÛÜ™^™\ÜÚ[Û”[‘[]™\HÂˆ]YˆURQˆ]™XÛÜ™Yˆİš[™Âˆ][ˆ˜]]™T™XÛÜ™^™\ÜÚ[Û”[‚ˆ]™]š[İ\Ñ™YY˜XÚÎˆ˜]]™PRQ™YY˜XÚÏÂˆ]\Ù\’Yˆİš[™Âˆ]Ù[™\˜][Ûˆ[ŸB‚œš]˜]HİXİ\Y˜][ØØ[İÜ˜YÙHÂˆ]^[œÙU\ÙPØ\ÙNˆØØ[^[œÙU\ÙPØ\ÙT›İØÛÛˆ]™XÛÜ™\ÙPØ\ÙNˆØØ[™XÛÜ™\ÙPØ\ÙT›İØÛÛˆ]Ø[]Û˜\Úİ\ÙPØ\ÙNˆØØ[Ø[]Û˜\Úİ\ÙPØ\ÙT›İØÛÛˆ]˜Xİ™XY\ˆØØ[˜Xİ™XY\‚ˆ]ÛÛ\[š[Û“Y[[ÜT™\ÜÚ]ÜNˆØØ[ÛÛ\[š[Û“Y[[ÜT™\ÜÚ]ÜBˆ]^™\ÜÚ[Û”\œÚ\İ[˜ÙNˆØØ[^™\ÜÚ[Û”\œÚ\İ[˜ÙBˆ][XYÙTİÜ™NˆØØ[[XYÙTİÜ™Bˆ][™[™Ñš[˜[˜ÚX[™\ÜÚ]ÜNˆØØ[[™[™Ñš[˜[˜ÚX[™\ÜÚ]ÜBˆ]š[˜[˜ÚX[š[™[™Ô™\ÜÚ]ÜNˆØØ[š[˜[˜ÚX[š[™[™Ô™\ÜÚ]ÜBˆ]\İÜSZYÜ˜][ÛØXÚNˆØØ[\İÜSZYÜ˜][ÛØXÚBˆ]\İÜSZYÜ˜][Û‘XYÛ›ÜİXÔİÜ™NˆØØ[\İÜSZYÜ˜][Û‘XYÛ›ÜİXÔİÜ™OÂˆ]\İÜR[™[ÜT™XY\ˆØØ[\İÜR[™[ÜT™XY\‚ˆ]\İÜU[œ™\ÛÛ™Y™\ÜÚ]ÜNˆØØ[\İÜU[œ™\ÛÛ™Y™\ÜÚ]ÜBŸB‚XZ[XİÜ‚™š[˜[Û\ÜÈ\İ]NˆØœÙ\˜X›SØš™XİÂˆš]˜]Hİ]XÈ]Ø[[™\”ÚYÛœÜİ\ˆHÔÔÚYÛœÜİ\ŠİXœŞ\İ[Nˆ˜ÛÛKššY^šK˜\‹Ø]YÛÜNˆ‘ÛXZ[Ø[[™\ˆŠBˆš]˜]Hİ]XÈ]™XÛÜ™™XYÚYÛœÜİ\ˆHÔÔÚYÛœÜİ\ŠİXœŞ\İ[Nˆ˜ÛÛKššY^šK˜\‹Ø]YÛÜNˆ”™XÛÜ™™XYŠBˆX›\ÚY˜\ˆÙ[XİYÛXZ[ˆ\ÛXZ[ˆH™^[œÙBˆX›\ÚY˜\ˆÙ[XİY]RÙ^HH˜]]™SØØ[]K™]RÙ^J]J
-JBˆX›\ÚY˜\ˆ™\Ù[Yİ™\›^Nˆ\İ™\›^HH››Û™BˆX›\ÚY˜\ˆ\ÔÚYÛ™Y[ˆH˜[ÙBˆX›\ÚY˜\ˆİ\œ™[\Ù\’YHˆ‚ˆX›\ÚY˜\ˆİ\œ™[\Ù\‘[XZ[Hˆ‚ˆX›\ÚY˜\ˆ\İÚÜİ]Y\ÜØYÙNˆİš[™ÏÂˆX›\ÚY˜\ˆ\Ğ›Ûİİ˜\[™ÈHYBˆX›\ÚY˜\ˆ\ÔÚYÛš[™Ò[ˆH˜[ÙBˆX›\ÚY˜\ˆ\ÔÚYÛš[™Óİ]H˜[ÙBˆX›\ÚY˜\ˆ]]Y\ÜØYÙNˆİš[™ÏÂˆX›\ÚY˜\ˆ]]Y\ÜØYÙR\Ñ\œ›ÜˆH˜[ÙBˆX›\ÚY˜\ˆ\Õ\ØYÚÙ[ˆH˜[ÙBˆX›\ÚY˜\ˆ\Ú›Ø\™H\Ú›Ø\™Û˜\Úİ
+Warning: truncated output (original token count: 87486)
+Total output lines: 7381
 
-BˆX›\ÚY˜\ˆ˜Z[YØØ[[XYÙR[ZÙ\ÎˆÓØØ[[XYÙR[ZÙWHH×BˆX›\ÚY˜\ˆ[™[™ÓØØ[[XYÙPÛX[\ÎˆÓØØ[[XYÙPÛX[\HH×BˆX›\ÚY˜\ˆ\Ú›Ø\™Y\ÜØYÙNˆİš[™ÏÂˆX›\ÚY˜\ˆ\ÓØY[™Ñ\Ú›Ø\™H˜[ÙBˆX›\ÚY˜\ˆ\ÔÚİÚ[™ĞØXÚY\Ú›Ø\™H˜[ÙBˆX›\ÚY˜\ˆÚÜİ]Ü™Y[X[Y\ÜØYÙNˆİš[™ÏÂˆX›\ÚY˜\ˆ›İYšXØ][Û”\›Z\ÜÚ[Û“Y\ÜØYÙNˆİš[™ÏÂˆX›\ÚY˜\ˆ›İYšXØ][Û”\›Z\ÜÚ[Û”İ]\Õ^H¹¨à9§éy.+H‚ˆX›\ÚY˜\ˆÚÜİ]›İYšXØ][ÛœÑ[˜X›YHÚÜİ]™YY˜XÚÔ™Y™\™[˜Ù\Ë››İYšXØ][ÛœÑ[˜X›YˆX›\ÚY˜\ˆÚÜİ]™\İ[Ø\™[˜X›YHÚÜİ]™YY˜XÚÔ™Y™\™[˜Ù\Ëœ™\İ[Ø\™[˜X›YˆX›\ÚY˜\ˆ\ÓÛ˜›Ø\™[™Ô™\Ù[YH˜[ÙBˆX›\ÚY˜\ˆÙ^T]H˜]šYØ][Û”]
+import SwiftUI
+import os
 
-BˆX›\ÚY˜\ˆ[˜›Ş]H˜]šYØ][Û”]
+typealias NativeSessionProvider = (_ forceRefresh: Bool) async throws -> SupabaseAuthSession
+typealias NativeSleepProvider = (_ nanoseconds: UInt64) async throws -> Void
 
-BˆX›\ÚY˜\ˆ™XÛÜ™Ô]H˜]šYØ][Û”]
+private struct WalletSnapshotReadModelRefreshError: LocalizedError {
+    let message: String
 
-BˆX›\ÚY˜\ˆÛYT]H˜]šYØ][Û”]
+    var errorDescription: String? { message }
+}
 
-BˆX›\ÚY˜\ˆÙ[XİY™XÛÜ™]Z[ˆ˜]]™T™XÛÜ™]Z[ÂˆX›\ÚY˜\ˆ™XÛÜ™]Z[Y\ÜØYÙNˆİš[™ÏÂˆX›\ÚY˜\ˆ\ÔØ]š[™Ô™XÛÜ™]Z[H˜[ÙBˆX›\ÚY˜\ˆ\Ñ[][™Ô™XÛÜ™]Z[H˜[ÙBˆX›\ÚY˜\ˆ™XÛÜ™™YY˜XÚÔİ]Nˆ˜]]™PRQ™YY˜XÚÔ™]šY]Ôİ]HHšYBˆX›\ÚY˜\ˆ™XÛÜ™^™\ÜÚ[Û”[‘^Üİ\™Tİ]Nˆ˜]]™T™XÛÜ™^™\ÜÚ[Û”[‘^Üİ\™Tİ]HHšYBˆX›\ÚY˜\ˆ\ĞÜ™X][™ÓX[X[™XÛÜ™H˜[ÙBˆX›\ÚY˜\ˆX[X[™XÛÜ™Y\ÜØYÙNˆİš[™ÏÂˆX›\ÚY˜\ˆØØ[›Ú™Xİ[Û”™Yœ™\ÚY\ÜØYÙNˆİš[™ÏÂˆX›\ÚY˜\ˆØØ[›Ú™Xİ[Û”™Yœ™\ÚXYÛ›ÜİXÎˆØØ[\İÜSZYÜ˜][Û‘XYÛ›ÜİXÏÂˆš]˜]H˜\ˆ[™[™ÓØØ[™Yœ™\Ú[ÛÎˆÙ]İš[™ÏˆH×BˆX›\ÚY˜\ˆØØ[İÜ˜YÙR[š]X[^˜][Û“Y\ÜØYÙNˆİš[™ÏÂˆX›\ÚY˜\ˆØØ[İÜ˜YÙR[š]X[^˜][Û‘XYÛ›ÜİXÎˆØØ[\İÜSZYÜ˜][Û‘XYÛ›ÜİXÏÂˆX›\ÚY˜\ˆ™XÛÜ™[ÛÜ›İ\ÎˆÔİš[™ÎˆÓ˜]]™Q^T™XÛÜ™Ü›İ\WHHÎ—BˆX›\ÚY˜\ˆ™XÛÜ™[ÛY\ÜØYÙ\ÎˆÔİš[™Îˆİš[™×HHÎ—BˆX›\ÚY˜\ˆØY[™Ô™XÛÜ™[ÛÙ^Nˆİš[™ÏÂˆX›\ÚYš]˜]H˜\ˆØY[™Ô™[[İT™XÛÜ™[ÛÙ^\ÎˆÙ]İš[™ÏˆH×BˆX›\ÚY˜\ˆXØÛİ[ÎˆÓ˜]]™PXØÛİ[HH×BˆX›\ÚY˜\ˆØØ[XØÛİ[ÎˆÓØØ[XØÛİ[HH×BˆX›\ÚY˜\ˆØØ[XØÛİ[˜[[˜Ù\ÎˆÕURQˆ[HHÎ—BˆX›\ÚY˜\ˆØØ[XØÛİ[Y\ÜØYÙNˆİš[™ÏÂˆX›\ÚY˜\ˆØØ[Ş[˜Ôİ]NˆØØ[Ş[˜Ôİ]OÂˆX›\ÚY˜\ˆØØ[š[™[™Ô™]šY]ÎˆØØ[š[™[™Ô™]šY]ÏÂˆX›\ÚY˜\ˆ\ÓØY[™ÓØØ[š[™[™Ô™]šY]ÈH˜[ÙBˆX›\ÚY˜\ˆ\ÔŞ[˜Ú›Ûš^š[™ÓØØ[]HH˜[ÙBˆX›\ÚY˜\ˆØØ[Ş[˜ÓY\ÜØYÙNˆİš[™ÏÂˆX›\ÚY˜\ˆØØ[Ş[˜ÑXYÛ›ÜİXÎˆØØ[Ş[˜ÑXYÛ›ÜİXÏÂˆX›\ÚY˜\ˆØØ[Ş[˜Ñ˜Z[\™QXYÛ›ÜİXÎˆØØ[\İÜSZYÜ˜][Û‘XYÛ›ÜİXÏÂˆX›\ÚY˜\ˆš[˜[˜ÙU›ØØX[\NˆÓ˜]]™Qš[˜[˜ÙU›ØØX[\Q[WHH×BˆX›\ÚY˜\ˆÙ[XİYXØÛİ[]Z[ˆ˜]]™PXØÛİ[]Z[ÂˆX›\ÚY˜\ˆÙ[XİYXØÛİ[Ûİ\˜ÙTÛ˜\Úİˆ˜]]™UØ[]Û˜\ÚİÂˆX›\ÚY˜\ˆXØÛİ[Y\ÜØYÙNˆİš[™ÏÂˆX›\ÚY˜\ˆ\ÓØY[™ĞXØÛİ[ÈH˜[ÙBˆX›\ÚY˜\ˆ\ÔØ]š[™ĞXØÛİ[H˜[ÙBˆX›\ÚY˜\ˆ\ÔİX›Z][™Ô™\^[Y[H˜[ÙBˆX›\ÚY˜\ˆ™\^[Y[Y\ÜØYÙNˆİš[™ÏÂˆX›\ÚY˜\ˆ™\^[Y[Ø[™Y]\ÎˆÔİš[™Îˆ˜]]™T™\^[Y[Ø[™Y]WHHÎ—BˆX›\ÚY˜\ˆİYÚ[™Ô™\^[Y[Yˆİš[™ÏÂˆX›\ÚY˜\ˆ[˜›Şš[˜[˜ÙSY\ÜØYÙNˆİš[™ÏÂˆX›\ÚY˜\ˆ[˜›ŞXİ[Û”™XÛÜ™Yˆİš[™ÏÂˆX›\ÚY˜\ˆ[˜›ŞXİ[Û“Y\ÜØYÙNˆİš[™ÏÂˆX›\ÚY˜\ˆ[˜›ŞXİ[Û“Y\ÜØYÙR\Ñ\œ›ÜˆH˜[ÙBˆX›\ÚY˜\ˆ\ĞÛÛ™š\›Z[™Ô[™[™Ô™XÛÜ™H˜[ÙBˆX›\ÚY˜\ˆ[™[™Ô™\ÛÛ][Û“Y\ÜØYÙNˆİš[™ÏÂˆX›\ÚY˜\ˆ[˜›İ[™™XÛÜ™ÎˆÓ˜]]™U[˜›İ[™™XÛÜ™HH×BˆX›\ÚY˜\ˆ[˜›İ[™™XÛÜ™ÓY\ÜØYÙNˆİš[™ÏÂˆX›\ÚY˜\ˆ[˜›İ[™š[™[™ÓY\ÜØYÙNˆİš[™ÏÂˆX›\ÚY˜\ˆ\ÓØY[™Õ[˜›İ[™™XÛÜ™ÈH˜[ÙBˆX›\ÚY˜\ˆ\Ğš[™[™Õ[˜›İ[™™XÛÜ™ÈH˜[ÙBˆX›\ÚY˜\ˆØ[]Û˜\ÚİÎˆÓ˜]]™UØ[]Û˜\ÚİHH×BˆX›\ÚY˜\ˆØØ[Ø[]Û˜\ÚİÎˆÓØØ[Ø[]Û˜\ÚİHH×BˆX›\ÚY˜\ˆØØ[Ø[]Û˜\Úİ\İÜNˆÓØØ[Ø[]Û˜\ÚİHH×BˆX›\ÚY˜\ˆ\ÓØY[™ÕØ[]Û˜\ÚİÈH˜[ÙBˆX›\ÚY˜\ˆØ[]Û˜\ÚİXİ[Û’Yˆİš[™ÏÂˆX›\ÚY˜\ˆØ[]Û˜\ÚİY\ÜØYÙNˆİš[™ÏÂˆX›\ÚY˜\ˆ[œÚYÚÔÛ˜\Úİˆ˜]]™R[œÚYÚÛ˜\ÚİÂˆX›\ÚY˜\ˆ\ÓØY[™Ò[œÚYÚÈH˜[ÙBˆX›\ÚY˜\ˆ[œÚYÚÓY\ÜØYÙNˆİš[™ÏÂˆX›\ÚY˜\ˆZR[œÚYÚˆ˜]]™PRR[œÚYÚÂˆX›\ÚY˜\ˆ\ÓØY[™ĞRR[œÚYÚH˜[ÙBˆX›\ÚY˜\ˆZR[œÚYÚY\ÜØYÙNˆİš[™ÏÂˆX›\ÚY˜\ˆZR[œÚYÚ\ĞØXÚYH˜[ÙBˆX›\ÚY˜\ˆ\Ù\”Ù][™ÜÈH˜]]™U\Ù\”Ù][™ÜÊ
-BˆX›\ÚY˜\ˆØØ[š\Ú[Û“[ÙHHØØ[š\Ú[Û“[ÙTİÜ™J
-K›[ÙBˆX›\ÚY˜\ˆ\Ğ–SÒĞTRÙ^HH
-OÈÙ^XÚZ[”İÜ™KœÚ\™Yœİš[™Ê›ÜˆÙ^XÚZ[’Ù^\Ë˜[ÚÔ]Ù[TRÙ^JJOËš\Ñ[\HOH˜[ÙBˆX›\ÚY˜\ˆÙ][™ÜÓY\ÜØYÙNˆİš[™ÏÂˆX›\ÚY˜\ˆ\ÓØY[™ÔÙ][™ÜÈH˜[ÙBˆX›\ÚY˜\ˆ\ÔØ]š[™ÔÙ][™ÜÈH˜[ÙBˆX›\ÚY˜\ˆ\ĞÛX[š[™ÔÛİ\˜ÙR[XYÙ\ÈH˜[ÙBˆX›\ÚY˜\ˆ\Ñ^Ü[™Ñ]HH˜[ÙBˆX›\ÚY˜\ˆ\Ò[\Ü[™ÓØØ[˜XÚİ\H˜[ÙBˆX›\ÚY˜\ˆ\Ò[\Ü[™ÑÙ[™\šXÑ]HH˜[ÙBˆX›\ÚY˜\ˆ\Ñ[][™ĞXØÛİ[H˜[ÙBˆX›\ÚY˜\ˆ\Ô™\\š[™Ò\İÜSZYÜ˜][ÛˆH˜[ÙBˆX›\ÚY˜\ˆØ[”]\ÙR\İÜSZYÜ˜][ÛˆH˜[ÙBˆX›\ÚY˜\ˆ\İÜSZYÜ˜][Û”™]šY]Îˆİš[™ÏÂˆX›\ÚY˜\ˆ\İÜSZYÜ˜][Û“Y\ÜØYÙNˆİš[™ÏÂˆX›\ÚY˜\ˆ\İÜSZYÜ˜][Û”\ÙHHˆ‚ˆX›\ÚY˜\ˆ\İÜSZYÜ˜][Û‘XYÛ›ÜİXÎˆØØ[\İÜSZYÜ˜][Û‘XYÛ›ÜİXÏÂˆX›\ÚY˜\ˆ\İÜSZYÜ˜][Û”›ÙÜ™\ÜÎˆØØ[\İÜSZYÜ˜][Û”›ÙÜ™\ÜÏÂˆX›\ÚY˜\ˆ\İÜSZYÜ˜][Û›ØÚÙ\œÎˆÔİš[™×HH×BˆX›\ÚY˜\ˆ\İÜSZYÜ˜][Û›ØÚÙ\Ûİ[HˆX›\ÚY˜\ˆ\İÜSZYÜ˜][Û•[œ™\ÛÛ™YÛİ[HˆX›\ÚY˜\ˆ\İÜSZYÜ˜][Û”ÚÚ\Y[XYÙPÛİ[HˆX›\ÚY˜\ˆ\İÜSZYÜ˜][Û”™\Ù\˜][Û’\ÜİY\ÎˆÔİš[™×HH×BˆX›\ÚY˜\ˆØØ[\İÜU[œ™\ÛÛ™Y™XÛÜ™ÎˆÓØØ[\İÜU[œ™\ÛÛ™Y™XÛÜ™HH×BˆX›\ÚY˜\ˆ\ÓØY[™Ò\İÜU[œ™\ÛÛ™Y™XÛÜ™ÈH˜[ÙBˆX›\ÚY˜\ˆ\İÜU[œ™\ÛÛ™Y™XÛÜ™Ñ\œ›Üˆİš[™ÏÂˆX›\ÚY˜\ˆØØ[\İÜR[™[ÜNˆØØ[\İÜR[™[ÜTÛ˜\ÚİÂˆX›\ÚY˜\ˆØØ[\İÜR[™[ÜQ\œ›Üˆİš[™ÏÂˆX›\ÚY˜\ˆ\ÓØY[™ÓØØ[\İÜR[™[ÜHH˜[ÙBˆX›\ÚY˜\ˆÛİY\İÜR[™[ÜHHØØ[\İÜPÛİY[™[ÜK››İ™XYˆX›\ÚY˜\ˆ\Ô™XY[™ĞÛİY\İÜR[™[ÜHH˜[ÙBˆš]˜]H˜\ˆ\İÜSZYÜ˜][Û\˜Ú]™Nˆ]OÂˆš]˜]H˜\ˆ\İÜSZYÜ˜][Û“İÛ™\ˆİš[™ÏÂˆš]˜]H˜\ˆ\İÜSZYÜ˜][Û‘Ù[™\˜][Ûˆ[Âˆš]˜]H˜\ˆ\İÜSZYÜ˜][Û”Ûİ\˜ÙQYÙ\İˆ]OÂˆš]˜]H˜\ˆ\İÜSZYÜ˜][Û][\Hˆš]˜]H˜\ˆ\İÜSZYÜ˜][ÛÚXÚÜÚ[ˆØØ[\İÜSZYÜ˜][Û”İ]OÂˆš]˜]H˜\ˆ\İÜSZYÜ˜][Û”›Ùš[RQˆURQÂˆš]˜]H˜\ˆ\İÜSZYÜ˜][Û][\QHURQ
+private struct PendingRecordExpressionPlanDelivery {
+    let id: UUID
+    let recordId: String
+    let plan: NativeRecordExpressionPlan
+    let previousFeedback: NativeAIFeedback?
+    let userId: String
+    let generation: Int
+}
 
-Bˆš]˜]H˜\ˆ\İÜSZYÜ˜][Û’[\Ü\œ›Üˆ\œ›ÜÂˆš]˜]H]\İÜSZYÜ˜][Û‘XYÛ›ÜİXÔİÜ™NˆØØ[\İÜSZYÜ˜][Û‘XYÛ›ÜİXÔİÜ™OÂˆš]˜]H]\İÜR[™[ÜT™XY\ˆØØ[\İÜR[™[ÜT™XY\Âˆš]˜]H]\İÜU[œ™\ÛÛ™Y™\ÜÚ]ÜNˆØØ[\İÜU[œ™\ÛÛ™Y™\ÜÚ]ÜOÂ‚ˆš]˜]H]]]Ù\šXÙHHİ\X˜\ÙP]]Ù\šXÙJ
-Bˆš]˜]H]\Ú›Ø\™™\ÜÚ]ÜNˆ\Ú›Ø\™™\ÜÚ]ÜT›İØÛÛˆš]˜]H]™XÛÜ™™\ÜÚ]ÜNˆ™XÛÜ™™\ÜÚ]ÜT›İØÛÛˆš]˜]H]ØØ[^[œÙU\ÙPØ\ÙNˆØØ[^[œÙU\ÙPØ\ÙT›İØÛÛÂˆš]˜]H]ØØ[™XÛÜ™\ÙPØ\ÙNˆØØ[™XÛÜ™\ÙPØ\ÙT›İØÛÛÂˆš]˜]H]ØØ[Ø[]Û˜\Úİ\ÙPØ\ÙNˆØØ[Ø[]Û˜\Úİ\ÙPØ\ÙT›İØÛÛÂˆš]˜]H]ØØ[˜Xİ™XY\ˆØØ[˜Xİ™XY\Âˆš]˜]H]ØØ[ÛÛ\[š[Û“Y[[ÜT™\ÜÚ]ÜNˆØØ[ÛÛ\[š[Û“Y[[ÜT™\ÜÚ]ÜOÂˆš]˜]H]ØØ[^™\ÜÚ[Û”\œÚ\İ[˜ÙNˆØØ[^™\ÜÚ[Û”\œÚ\İ[˜ÙOÂˆš]˜]H]ØØ[[XYÙTİÜ™NˆØØ[[XYÙTİÜ™OÂˆš]˜]H]ØØ[[XYÙR[ZÙT™\ÜÚ]ÜNˆØØ[[XYÙR[ZÙT™\ÜÚ]ÜOÂˆš]˜]H]ØØ[™XÛÜ™ÜXš[]NˆØØ[™XÛÜ™ÜXš[]OÂˆš]˜]H]ØØ[˜XİÜXš[]NˆØØ[˜XİÜXš[]OÂˆš]˜]H]ØØ[ÛÛ\]P˜XÚİ\ÜXš[]NˆØØ[ÛÛ\]P˜XÚİ\ÜXš[]OÂˆš]˜]H]Ù[™\šXÒ[\ÜÙ\šXÙNˆÙ[™\šXÒ[\ÜÙ\šXÙOÂˆš]˜]H]ØØ[[™[™Ñš[˜[˜ÚX[™\ÜÚ]ÜNˆØØ[[™[™Ñš[˜[˜ÚX[™\ÜÚ]ÜOÂˆš]˜]H]ØØ[š[˜[˜ÚX[š[™[™Ô™\ÜÚ]ÜNˆØØ[š[˜[˜ÚX[š[™[™Ô™\ÜÚ]ÜOÂˆš]˜]H]ØØ[\İÜSZYÜ˜][ÛØXÚNˆØØ[\İÜSZYÜ˜][ÛØXÚOÂˆš]˜]H][˜›Ş™\ÜÚ]ÜNˆ[˜›Ş™\ÜÚ]ÜT›İØÛÛˆš]˜]H]ÛXZ[”™\ÜÚ]ÜNˆÛXZ[”™\ÜÚ]ÜT›İØÛÛˆš]˜]H]Û˜\ÚİİÜ™Nˆ\Ú›Ø\™Û˜\ÚİİÜ™T›İØÛÛˆš]˜]H]XØÛİ[™\ÜÚ]ÜNˆXØÛİ[™\ÜÚ]ÜT›İØÛÛˆš]˜]H]XØÛİ[X[˜YÙ[Y[™\ÜÚ]ÜNˆXØÛİ[X[˜YÙ[Y[™\ÜÚ]ÜT›İØÛÛˆš]˜]H]XØÛİ[™XY™\\˜][Û”™\ÜÚ]ÜNˆXØÛİ[™XY™\\˜][Û”™\ÜÚ]ÜT›İØÛÛˆš]˜]H˜\ˆ™\^[Y[Xİ[Û•\ÙPØ\ÙNˆ™\^[Y[Xİ[Û•\ÙPØ\ÙOÂˆš]˜]H˜\ˆØÜ™Y[œÚİ™\^[Y[\ÙPØ\ÙNˆØÜ™Y[œÚİ™\^[Y[\ÙPØ\ÙOÂˆš]˜]H˜\ˆXØÛİ[X[˜YÙ[Y[Xİ[Û•\ÙPØ\ÙNˆXØÛİ[X[˜YÙ[Y[Xİ[Û•\ÙPØ\ÙOÂˆš]˜]H˜\ˆXØÛİ[™XY™\\˜][Û•\ÙPØ\ÙNˆXØÛİ[™XY™\\˜][Û•\ÙPØ\ÙOÂˆš]˜]H˜\ˆXØÛİ[š[™[™Õ\ÙPØ\ÙNˆXØÛİ[š[™[™Õ\ÙPØ\ÙOÂˆš]˜]H˜\ˆXØÛİ[š[™[™Õ\ÙPØ\ÙS[ÛÙ^Nˆİš[™ÏÂˆš]˜]H˜\ˆİYÚ[™ÓY™XŞXÛU\ÙPØ\ÙNˆİYÚ[™ÓY™XŞXÛU\ÙPØ\ÙOÂˆš]˜]H˜\ˆ[™[™ĞÛÛ™š\›X][Û•\ÙPØ\ÙNˆ[™[™ĞÛÛ™š\›X][Û•\ÙPØ\ÙOÂˆš]˜]H˜\ˆ™YY˜XÚÔİX›Z\ÜÚ[Û•\ÙPØ\ÙNˆ™YY˜XÚÔİX›Z\ÜÚ[Û•\ÙPØ\ÙOÂˆš]˜]H˜\ˆ™XÛÜ™]Z[[XYÙU\ÙPØ\ÙNˆ™XÛÜ™]Z[[XYÙU\ÙPØ\ÙOÂˆš]˜]H˜\ˆ[X›˜Z[[XYÙU\ÙPØ\ÙNˆ™XÛÜ™]Z[[XYÙU\ÙPØ\ÙOÂˆš]˜]H˜\ˆ\Ú›Ø\™ÛÜ™U\ÚÎˆ\ÚÏ›ÚY™]™\ÂˆX›\ÚYš]˜]H˜\ˆØY[™ÓØØ[™XYÙ^\ÎˆÙ]İš[™ÏˆH×Bˆš]˜]H˜\ˆØØ[[Û™XY™\œÚ[ÛœÎˆÔİš[™Îˆ[HHÎ—Bˆš]˜]H˜\ˆİYÚ[™Ô™XY™\œÚ[ÛˆHˆš]˜]H][˜›İ[™™XÛÜ™™\ÜÚ]ÜNˆ[˜›İ[™™XÛÜ™™\ÜÚ]ÜT›İØÛÛˆš]˜]H]Ø[]Û˜\Úİ™\ÜÚ]ÜNˆØ[]Û˜\Úİ™\ÜÚ]ÜT›İØÛÛˆš]˜]H˜\ˆØ[]Û˜\ÚİXİ[Û•\ÙPØ\ÙNˆØ[]Û˜\ÚİXİ[Û•\ÙPØ\ÙOÂˆš]˜]H][œÚYÚÔ™\ÜÚ]ÜNˆ[œÚYÚÔ™\ÜÚ]ÜT›İØÛÛˆš]˜]H]Ù][™ÜÔ™\ÜÚ]ÜNˆÙ][™ÜÔ™\ÜÚ]ÜT›İØÛÛˆš]˜]H]š[˜[˜ÙU›ØØX[\T™\ÜÚ]ÜNˆš[˜[˜ÙU›ØØX[\T™\ÜÚ]ÜT›İØÛÛˆš]˜]H]ØØ[š[™[™Ô™\ÜÚ]ÜNˆØØ[š[™[™Ô™\ÜÚ]ÜOÂˆš]˜]H]ØØ[Ş[˜Ô[›™\ˆØØ[Ş[˜Ô[›™\Âˆš]˜]H]Û˜›Ø\™[™Ô›ÙÜ™\ÜÔİÜ™NˆÛ˜›Ø\™[™Ô›ÙÜ™\ÜÔİÜ™Bˆš]˜]H]Ù\ÜÚ[Û”›İšY\ˆ˜]]™TÙ\ÜÚ[Û”›İšY\Âˆš]˜]H]^™\ÜÚ[Û”[XÚÛ›İÛYÙ[Y[ÛY\ˆ˜]]™TÛY\›İšY\‚ˆš]˜]H]Ù^XÚZ[ˆHÙ^XÚZ[”İÜ™KœÚ\™Yˆš]˜]H]ØØ[š\Ú[Û“[ÙTİÜ™HHØØ[š\Ú[Û“[ÙTİÜ™J
-Bˆš]˜]H]ØØ[\Ù\”Ù][™ÜÔİÜ™NˆØØ[\Ù\”Ù][™ÜÔİÜ™Bˆš]˜]H˜\ˆ\İ\Ú›Ø\™™Yœ™\Ú]ˆ]OÂˆš]˜]H˜\ˆ™XÛÜ™]Z[ØXÚNˆÔİš[™Îˆ˜]]™T™XÛÜ™]Z[HHÎ—Bˆš]˜]H˜\ˆ™XÛÜ™[Û]Z[ÎˆÔİš[™ÎˆÔİš[™Îˆ˜]]™T™XÛÜ™]Z[WHHÎ—Bˆš]˜]H˜\ˆØØ[^[œÙS[ÛÜ›İ\ÎˆÔİš[™ÎˆÓ˜]]™Q^T™XÛÜ™Ü›İ\WHHÎ—Bˆš]˜]H˜\ˆØØ[[˜ÛÛYS[ÛÜ›İ\ÎˆÔİš[™ÎˆÓ˜]]™Q^T™XÛÜ™Ü›İ\WHHÎ—Bˆš]˜]H˜\ˆØØ[™XÛÜ™[ÛÜ›İ\ÎˆÔİš[™ÎˆÓ˜]]™Q^T™XÛÜ™Ü›İ\WHHÎ—BˆËÈ™[[İH[™ØØ[›Ú™Xİ[ÛœÈ]™HY™™\™[œ™\Ú™\ÜÈ[™[][Û‚ˆËÈÙ[X[XÜËˆÙY\[HÙ\\˜]HÛÈØY[™ÈÛ™HØ[››İ\˜\ÙHHİ\‹‚ˆš]˜]H˜\ˆ™[[İT™XÛÜ™[ÛÜ›İ\ÎˆÔİš[™ÎˆÓ˜]]™Q^T™XÛÜ™Ü›İ\WHHÎ—Bˆš]˜]H˜\ˆØØ[™XÛÜ™[Û]Z[ÎˆÔİš[™ÎˆÔİš[™Îˆ˜]]™T™XÛÜ™]Z[WHHÎ—Bˆš]˜]H˜\ˆØØ[˜Xİ[ÛÎˆÔİš[™ÎˆØØ[˜Xİ[ÛHHÎ—Bˆš]˜]H˜\ˆØY[™ÓØØ[^[œÙS[ÛÙ^Nˆİš[™ÏÂˆš]˜]H˜\ˆØY[™ÓØØ[™XÛÜ™[ÛÙ^Nˆİš[™ÏÂˆš]˜]H˜\ˆ™[[İT™XÛÜ™[Û\ÚÜÎˆÔİš[™Îˆ\ÚÏ›ÚY™]™\—HHÎ—Bˆš]˜]H˜\ˆXİ]™T™XÛÜ™™Y™\™[˜ÙNˆİš[™ÏÂˆš]˜]H˜\ˆ™Y™]Ú[™Ô™XÛÜ™™Y™\™[˜Ù\ÎˆÙ]İš[™ÏˆH×Bˆš]˜]H˜\ˆ^™\ÜÚ[Û”[‘[]™\UÚÙ[œÎˆÔİš[™ÎˆURQHHÎ—Bˆš]˜]H˜\ˆ[™[™Ô™XÛÜ™^™\ÜÚ[Û”[œÎˆÔİš[™Îˆ[™[™Ô™XÛÜ™^™\ÜÚ[Û”[‘[]™\WHHÎ—Bˆš]˜]H˜\ˆ^™\ÜÚ[Û”[XÚÛ›İÛYÙ[Y[ÚÙ[œÎˆÔİš[™ÎˆURQHHÎ—Bˆš]˜]H˜\ˆš\ÚX›T™XÛÜ™^™\ÜÚ[Û”[Ø\™ÎˆÔİš[™Îˆİš[™×HHÎ—Bˆš]˜]H˜\ˆ[œÚYÚÓØYY]ˆ]OÂˆš]˜]H˜\ˆ[œÚYÚÓØYYØØ[HH˜[ÙBˆš]˜]H˜\ˆ\Ú›Ø\™™Yœ™\ÚÙ[™\˜][ÛˆHˆš]˜]H˜\ˆ\Ù\”İ]QÙ[™\˜][ÛˆHˆš]˜]H˜\ˆ\Ú›Ø\™İ\[Y[\ÚÎˆ\ÚÏ›ÚY™]™\Âˆš]˜]H˜\ˆ\ÓØY[™Ñš[˜[˜ÙU›ØØX[\HH˜[ÙBˆš]˜]H˜\ˆÚİ[Y™\“Û˜›Ø\™[™Ñ›Ü‘^\›˜[›İ]HH˜[ÙB‚ˆ[š]
-ˆ\Ú›Ø\™™\ÜÚ]ÜNˆ\Ú›Ø\™™\ÜÚ]ÜT›İØÛÛH\Ú›Ø\™™\ÜÚ]ÜJ
-Kˆ™XÛÜ™™\ÜÚ]ÜNˆ™XÛÜ™™\ÜÚ]ÜT›İØÛÛH™XÛÜ™™\ÜÚ]ÜJ
-KˆØØ[^[œÙU\ÙPØ\ÙNˆØØ[^[œÙU\ÙPØ\ÙT›İØÛÛÈHš[ˆØØ[™XÛÜ™\ÙPØ\ÙNˆØØ[™XÛÜ™\ÙPØ\ÙT›İØÛÛÈHš[ˆØØ[İÜ˜YÙR[š]X[^˜][Û“Y\ÜØYÙNˆİš[™ÏÈHš[ˆØØ[Ø[]Û˜\Úİ\ÙPØ\ÙNˆØØ[Ø[]Û˜\Úİ\ÙPØ\ÙT›İØÛÛÈHš[ˆØØ[˜Xİ™XY\ˆØØ[˜Xİ™XY\ÈHš[ˆØØ[ÛÛ\[š[Û“Y[[ÜT™\ÜÚ]ÜNˆØØ[ÛÛ\[š[Û“Y[[ÜT™\ÜÚ]ÜOÈHš[ˆØØ[^™\ÜÚ[Û”\œÚ\İ[˜ÙNˆØØ[^™\ÜÚ[Û”\œÚ\İ[˜ÙOÈHš[ˆØØ[[XYÙTİÜ™NˆØØ[[XYÙTİÜ™OÈHš[ˆØØ[[XYÙR[ZÙT™\ÜÚ]ÜNˆØØ[[XYÙR[ZÙT™\ÜÚ]ÜOÈHš[ˆØØ[˜XİÜXš[]NˆØØ[˜XİÜXš[]OÈHš[ˆØØ[ÛÛ\]P˜XÚİ\ÜXš[]NˆØØ[ÛÛ\]P˜XÚİ\ÜXš[]OÈHš[ˆÙ[™\šXÒ[\ÜÙ\šXÙNˆÙ[™\šXÒ[\ÜÙ\šXÙOÈHš[ˆØØ[[™[™Ñš[˜[˜ÚX[™\ÜÚ]ÜNˆØØ[[™[™Ñš[˜[˜ÚX[™\ÜÚ]ÜOÈHš[ˆØØ[š[˜[˜ÚX[š[™[™Ô™\ÜÚ]ÜNˆØØ[š[˜[˜ÚX[š[™[™Ô™\ÜÚ]ÜOÈHš[ˆ[˜›Ş™\ÜÚ]ÜNˆ[˜›Ş™\ÜÚ]ÜT›İØÛÛH[˜›Ş™\ÜÚ]ÜJ
-KˆÛXZ[”™\ÜÚ]ÜNˆÛXZ[”™\ÜÚ]ÜT›İØÛÛHÛXZ[”™\ÜÚ]ÜJ
-KˆÛ˜\ÚİİÜ™Nˆ\Ú›Ø\™Û˜\ÚİİÜ™T›İØÛÛH\Ú›Ø\™Û˜\ÚİİÜ™J
-KˆXØÛİ[™\ÜÚ]ÜNˆXØÛİ[™\ÜÚ]ÜT›İØÛÛHXØÛİ[™\ÜÚ]ÜJ
-KˆXØÛİ[X[˜YÙ[Y[™\ÜÚ]ÜNˆXØÛİ[X[˜YÙ[Y[™\ÜÚ]ÜT›İØÛÛÈHš[ˆXØÛİ[™XY™\\˜][Û”™\ÜÚ]ÜNˆXØÛİ[™XY™\\˜][Û”™\ÜÚ]ÜT›İØÛÛÈHš[ˆ™\^[Y[Xİ[Û•\ÙPØ\ÙNˆ™\^[Y[Xİ[Û•\ÙPØ\ÙOÈHš[ˆØÜ™Y[œÚİ™\^[Y[\ÙPØ\ÙNˆØÜ™Y[œÚİ™\^[Y[\ÙPØ\ÙOÈHš[ˆXØÛİ[X[˜YÙ[Y[Xİ[Û•\ÙPØ\ÙNˆXØÛİ[X[˜YÙ[Y[Xİ[Û•\ÙPØ\ÙOÈHš[ˆXØÛİ[™XY™\\˜][Û•\ÙPØ\ÙNˆXØÛİ[™XY™\\˜][Û•\ÙPØ\ÙOÈHš[ˆXØÛİ[š[™[™Õ\ÙPØ\ÙNˆXØÛİ[š[™[™Õ\ÙPØ\ÙOÈHš[ˆİYÚ[™ÓY™XŞXÛU\ÙPØ\ÙNˆİYÚ[™ÓY™XŞXÛU\ÙPØ\ÙOÈHš[ˆ[™[™ĞÛÛ™š\›X][Û•\ÙPØ\ÙNˆ[™[™ĞÛÛ™š\›X][Û•\ÙPØ\ÙOÈHš[ˆ™YY˜XÚÔİX›Z\ÜÚ[Û•\ÙPØ\ÙNˆ™YY˜XÚÔİX›Z\ÜÚ[Û•\ÙPØ\ÙOÈHš[ˆ™XÛÜ™]Z[[XYÙU\ÙPØ\ÙNˆ™XÛÜ™]Z[[XYÙU\ÙPØ\ÙOÈHš[ˆ[˜›İ[™™XÛÜ™™\ÜÚ]ÜNˆ[˜›İ[™™XÛÜ™™\ÜÚ]ÜT›İØÛÛH[˜›İ[™™XÛÜ™™\ÜÚ]ÜJ
-KˆØ[]Û˜\Úİ™\ÜÚ]ÜNˆØ[]Û˜\Úİ™\ÜÚ]ÜT›İØÛÛHØ[]Û˜\Úİ™\ÜÚ]ÜJ
-KˆØ[]Û˜\ÚİXİ[Û•\ÙPØ\ÙNˆØ[]Û˜\ÚİXİ[Û•\ÙPØ\ÙOÈHš[ˆ[œÚYÚÔ™\ÜÚ]ÜNˆ[œÚYÚÔ™\ÜÚ]ÜT›İØÛÛH[œÚYÚÔ™\ÜÚ]ÜJ
-KˆÙ][™ÜÔ™\ÜÚ]ÜNˆÙ][™ÜÔ™\ÜÚ]ÜT›İØÛÛHÙ][™ÜÔ™\ÜÚ]ÜJ
-Kˆš[˜[˜ÙU›ØØX[\T™\ÜÚ]ÜNˆš[˜[˜ÙU›ØØX[\T™\ÜÚ]ÜT›İØÛÛHš[˜[˜ÙU›ØØX[\T™\ÜÚ]ÜJ
-KˆØØ[š[™[™Ô™\ÜÚ]ÜNˆØØ[š[™[™Ô™\ÜÚ]ÜOÈHš[ˆØØ[Ş[˜Ô[›™\ˆØØ[Ş[˜Ô[›™\ÈHš[ˆÛ˜›Ø\™[™Ô›ÙÜ™\ÜÔİÜ™NˆÛ˜›Ø\™[™Ô›ÙÜ™\ÜÔİÜ™HHÛ˜›Ø\™[™Ô›ÙÜ™\ÜÔİÜ™J
-KˆÙ\ÜÚ[Û”›İšY\ˆ˜]]™TÙ\ÜÚ[Û”›İšY\ÈHš[ˆØØ[\Ù\”Ù][™ÜÔİÜ™NˆØØ[\Ù\”Ù][™ÜÔİÜ™HHØØ[\Ù\”Ù][™ÜÔİÜ™J
-Kˆ\İÜSZYÜ˜][Û‘XYÛ›ÜİXÔİÜ™NˆØØ[\İÜSZYÜ˜][Û‘XYÛ›ÜİXÔİÜ™OÈHš[ˆ\İÜU[œ™\ÛÛ™Y™\ÜÚ]ÜNˆØØ[\İÜU[œ™\ÛÛ™Y™\ÜÚ]ÜOÈHš[ˆ^™\ÜÚ[Û”[XÚÛ›İÛYÙ[Y[ÛY\ˆ\ØØ\[™È˜]]™TÛY\›İšY\ˆHÂˆH]ØZ]\ÚÏ™]™\‹™]™\‹œÛY\
-˜[›ÜÙXÛÛ™Îˆ	
-BˆBˆ
-HÂˆÙ[‹™\Ú›Ø\™™\ÜÚ]ÜHH\Ú›Ø\™™\ÜÚ]ÜBˆÙ[‹œ™XÛÜ™™\ÜÚ]ÜHH™XÛÜ™™\ÜÚ]ÜBˆ]Ú[][]\ÓØØ[İÜ˜YÙR[š]X[^˜][Û‘˜Z[\™HHØØ[İÜ˜YÙR[š]X[^˜][Û“Y\ÜØYÙHOHš[ˆ]\Ù\ÑY˜][ØØ[İÜ˜YÙHH\Ú[][]\ÓØØ[İÜ˜YÙR[š]X[^˜][Û‘˜Z[\™Bˆ	‰ˆØØ[^[œÙU\ÙPØ\ÙHOHš[	‰ˆØØ[™XÛÜ™\ÙPØ\ÙHOHš[ˆ]Y˜][ØØ[İÜ˜YÙNˆ\Y˜][ØØ[İÜ˜YÙOÂˆ˜\ˆØØ[İÜ˜YÙR[š]X[^˜][Û‘\œ›Üˆ\œ›ÜÈHš[ˆ˜\ˆİÜ˜YÙR[š]X[^˜][Û“Y\ÜØYÙHHØØ[İÜ˜YÙR[š]X[^˜][Û“Y\ÜØYÙBˆYˆ\Ù\ÑY˜][ØØ[İÜ˜YÙHÂˆÈÂˆY˜][ØØ[İÜ˜YÙHHHÙ[‹›XZÙQY˜][ØØ[İÜ˜YÙJ
-BˆHØ]ÚÂˆY˜][ØØ[İÜ˜YÙHHš[ˆØØ[İÜ˜YÙR[š]X[^˜][Û‘\œ›ÜˆH\œ›Ü‚ˆİÜ˜YÙR[š]X[^˜][Û“Y\ÜØYÙHHš[ˆBˆH[ÙHÂˆY˜][ØØ[İÜ˜YÙHHš[ˆBˆYˆ]ØØ[^[œÙU\ÙPØ\ÙHÂˆÙ[‹›ØØ[^[œÙU\ÙPØ\ÙHHØØ[^[œÙU\ÙPØ\ÙBˆH[ÙHYˆ\Ù\ÑY˜][ØØ[İÜ˜YÙHÂˆÙ[‹›ØØ[^[œÙU\ÙPØ\ÙHHY˜][ØØ[İÜ˜YÙOË™^[œÙU\ÙPØ\ÙBˆH[ÙHÂˆÙ[‹›ØØ[^[œÙU\ÙPØ\ÙHHÚ[][]\ÓØØ[İÜ˜YÙR[š]X[^˜][Û‘˜Z[\™BˆÈš[ˆˆÙ[‹™Y˜][ØØ[^[œÙU\ÙPØ\ÙJ
-BˆBˆYˆ]ØØ[™XÛÜ™\ÙPØ\ÙHÂˆÙ[‹›ØØ[™XÛÜ™\ÙPØ\ÙHHØØ[™XÛÜ™\ÙPØ\ÙBˆH[ÙHYˆ\Ù\ÑY˜][ØØ[İÜ˜YÙHÂˆÙ[‹›ØØ[™XÛÜ™\ÙPØ\ÙHHY˜][ØØ[İÜ˜YÙOËœ™XÛÜ™\ÙPØ\ÙBˆH[ÙHÂˆËÈ\[™[˜ŞKZ[š™XİYØØ[İÜ™\È\™H[[[Û˜[H\ÛÛ]YˆÜ™X][™ÂˆËÈHY˜][™XÛÜ™\ÙHØ\ÙH\™HÛİ[™XYH\Ù\‰ÜÈ™X[ØØ[‚ˆËÈ[Û™ÜÚYHH\İÜİYÚ[™È^[œÙH\ÙHØ\ÙH[™ÛÛ[Z[˜]H›Ú™Xİ[ÛœË‚ˆÙ[‹›ØØ[™XÛÜ™\ÙPØ\ÙHHš[ˆBˆÙ[‹›ØØ[Ø[]Û˜\Úİ\ÙPØ\ÙHHØØ[Ø[]Û˜\Úİ\ÙPØ\ÙBˆÏÈ
-\Ù\ÑY˜][ØØ[İÜ˜YÙHÈY˜][ØØ[İÜ˜YÙOËØ[]Û˜\Úİ\ÙPØ\ÙHˆš[
-BˆÙ[‹›ØØ[˜Xİ™XY\ˆH\Ù\ÑY˜][ØØ[İÜ˜YÙBˆÈ
-ØØ[˜Xİ™XY\ˆÏÈY˜][ØØ[İÜ˜YÙOË™˜Xİ™XY\ŠBˆˆØØ[˜Xİ™XY\‚ˆÙ[‹›ØØ[ÛÛ\[š[Û“Y[[ÜT™\ÜÚ]ÜHHØØ[ÛÛ\[š[Û“Y[[ÜT™\ÜÚ]ÜBˆÏÈ
-\Ù\ÑY˜][ØØ[İÜ˜YÙHÈY˜][ØØ[İÜ˜YÙOË˜ÛÛ\[š[Û“Y[[ÜT™\ÜÚ]ÜHˆš[
-BˆÙ[‹›ØØ[^™\ÜÚ[Û”\œÚ\İ[˜ÙHHØØ[^™\ÜÚ[Û”\œÚ\İ[˜ÙBˆÏÈ
-\Ù\ÑY˜][ØØ[İÜ˜YÙHÈY˜][ØØ[İÜ˜YÙOË™^™\ÜÚ[Û”\œÚ\İ[˜ÙHˆš[
-BˆÙ[‹›ØØ[[XYÙTİÜ™HHØØ[[XYÙTİÜ™HÏÈY˜][ØØ[İÜ˜YÙOËš[XYÙTİÜ™HÏÈÙ[‹™Y˜][ØØ[[XYÙTİÜ™J
-BˆÙ[‹›ØØ[[XYÙR[ZÙT™\ÜÚ]ÜHHØØ[[XYÙR[ZÙT™\ÜÚ]ÜHÏÈÙ[‹™Y˜][ØØ[[XYÙR[ZÙT™\ÜÚ]ÜJ
-BˆÙ[‹›ØØ[™XÛÜ™ÜXš[]HHÙ[‹™Y˜][ØØ[™XÛÜ™ÜXš[]J
-BˆÙ[‹›ØØ[˜XİÜXš[]HH\Ù\ÑY˜][ØØ[İÜ˜YÙBˆÈ
-ØØ[˜XİÜXš[]HÏÈÙ[‹™Y˜][ØØ[˜XİÜXš[]J
-JBˆˆØØ[˜XİÜXš[]BˆÙ[‹›ØØ[ÛÛ\]P˜XÚİ\ÜXš[]HHØØ[ÛÛ\]P˜XÚİ\ÜXš[]HÏÈÙ[‹™Y˜][ØØ[ÛÛ\]P˜XÚİ\ÜXš[]J
-BˆÙ[‹™Ù[™\šXÒ[\ÜÙ\šXÙHHÙ[™\šXÒ[\ÜÙ\šXÙHÏÈÙ[‹™Y˜][Ù[™\šXÒ[\ÜÙ\šXÙJ
-BˆÙ[‹›ØØ[[™[™Ñš[˜[˜ÚX[™\ÜÚ]ÜHHØØ[[™[™Ñš[˜[˜ÚX[™\ÜÚ]ÜHÏÈY˜][ØØ[İÜ˜YÙOËœ[™[™Ñš[˜[˜ÚX[™\ÜÚ]ÜBˆÙ[‹›ØØ[š[˜[˜ÚX[š[™[™Ô™\ÜÚ]ÜHHØØ[š[˜[˜ÚX[š[™[™Ô™\ÜÚ]ÜHÏÈY˜][ØØ[İÜ˜YÙOË™š[˜[˜ÚX[š[™[™Ô™\ÜÚ]ÜBˆÙ[‹›ØØ[\İÜSZYÜ˜][ÛØXÚHHY˜][ØØ[İÜ˜YÙOËš\İÜSZYÜ˜][ÛØXÚBˆÙ[‹š\İÜSZYÜ˜][Û‘XYÛ›ÜİXÔİÜ™HH\İÜSZYÜ˜][Û‘XYÛ›ÜİXÔİÜ™BˆÏÈY˜][ØØ[İÜ˜YÙOËš\İÜSZYÜ˜][Û‘XYÛ›ÜİXÔİÜ™BˆÏÈ
-OÈØØ[\İÜSZYÜ˜][Û‘XYÛ›ÜİXÔİÜ™J
-JBˆÙ[‹š\İÜR[™[ÜT™XY\ˆHY˜][ØØ[İÜ˜YÙOËš\İÜR[™[ÜT™XY\‚ˆÙ[‹š\İÜU[œ™\ÛÛ™Y™\ÜÚ]ÜHH\İÜU[œ™\ÛÛ™Y™\ÜÚ]ÜHÏÈY˜][ØØ[İÜ˜YÙOËš\İÜU[œ™\ÛÛ™Y™\ÜÚ]ÜBˆÙ[‹š[˜›Ş™\ÜÚ]ÜHH[˜›Ş™\ÜÚ]ÜBˆÙ[‹™ÛXZ[”™\ÜÚ]ÜHHÛXZ[”™\ÜÚ]ÜBˆÙ[‹œÛ˜\ÚİİÜ™HHÛ˜\ÚİİÜ™BˆÙ[‹˜XØÛİ[™\ÜÚ]ÜHHXØÛİ[™\ÜÚ]ÜBˆÙ[‹˜XØÛİ[X[˜YÙ[Y[™\ÜÚ]ÜHHXØÛİ[X[˜YÙ[Y[™\ÜÚ]ÜBˆÏÈ
-XØÛİ[™\ÜÚ]ÜH\ÏÈXØÛİ[X[˜YÙ[Y[™\ÜÚ]ÜT›İØÛÛ
-BˆÏÈXØÛİ[™\ÜÚ]ÜJ
-BˆÙ[‹˜XØÛİ[™XY™\\˜][Û”™\ÜÚ]ÜHHXØÛİ[™XY™\\˜][Û”™\ÜÚ]ÜBˆÏÈ
-XØÛİ[™\ÜÚ]ÜH\ÏÈXØÛİ[™XY™\\˜][Û”™\ÜÚ]ÜT›İØÛÛ
-BˆÏÈXØÛİ[™\ÜÚ]ÜJ
-BˆÙ[‹˜XØÛİ[X[˜YÙ[Y[Xİ[Û•\ÙPØ\ÙHHXØÛİ[X[˜YÙ[Y[Xİ[Û•\ÙPØ\ÙBˆÙ[‹œ™\^[Y[Xİ[Û•\ÙPØ\ÙHH™\^[Y[Xİ[Û•\ÙPØ\ÙBˆÙ[‹œØÜ™Y[œÚİ™\^[Y[\ÙPØ\ÙHHØÜ™Y[œÚİ™\^[Y[\ÙPØ\ÙBˆÙ[‹˜XØÛİ[™XY™\\˜][Û•\ÙPØ\ÙHHXØÛİ[™XY™\\˜][Û•\ÙPØ\ÙBˆÙ[‹˜XØÛİ[š[™[™Õ\ÙPØ\ÙHHXØÛİ[š[™[™Õ\ÙPØ\ÙBˆÙ[‹œİYÚ[™ÓY™XŞXÛU\ÙPØ\ÙHHİYÚ[™ÓY™XŞXÛU\ÙPØ\ÙBˆÙ[‹œ[™[™ĞÛÛ™š\›X][Û•\ÙPØ\ÙHH[™[™ĞÛÛ™š\›X][Û•\ÙPØ\ÙBˆÙ[‹™™YY˜XÚÔİX›Z\ÜÚ[Û•\ÙPØ\ÙHH™YY˜XÚÔİX›Z\ÜÚ[Û•\ÙPØ\ÙBˆÙ[‹œ™XÛÜ™]Z[[XYÙU\ÙPØ\ÙHH™XÛÜ™]Z[[XYÙU\ÙPØ\ÙBˆÙ[‹[˜›İ[™™XÛÜ™™\ÜÚ]ÜHH[˜›İ[™™XÛÜ™™\ÜÚ]ÜBˆÙ[‹Ø[]Û˜\Úİ™\ÜÚ]ÜHHØ[]Û˜\Úİ™\ÜÚ]ÜBˆÙ[‹Ø[]Û˜\ÚİXİ[Û•\ÙPØ\ÙHHØ[]Û˜\ÚİXİ[Û•\ÙPØ\ÙBˆÙ[‹š[œÚYÚÔ™\ÜÚ]ÜHH[œÚYÚÔ™\ÜÚ]ÜBˆÙ[‹œÙ][™ÜÔ™\ÜÚ]ÜHHÙ][™ÜÔ™\ÜÚ]ÜBˆÙ[‹™š[˜[˜ÙU›ØØX[\T™\ÜÚ]ÜHHš[˜[˜ÙU›ØØX[\T™\ÜÚ]ÜBˆÙ[‹›ØØ[š[™[™Ô™\ÜÚ]ÜHHØØ[š[™[™Ô™\ÜÚ]ÜHÏÈÙ[‹™Y˜][ØØ[š[™[™Ô™\ÜÚ]ÜJ
-BˆÙ[‹›ØØ[Ş[˜Ô[›™\ˆHØØ[Ş[˜Ô[›™\ˆÏÈÙ[‹™Y˜][ØØ[Ş[˜Ô[›™\Š
-BˆÙ[‹›Û˜›Ø\™[™Ô›ÙÜ™\ÜÔİÜ™HHÛ˜›Ø\™[™Ô›ÙÜ™\ÜÔİÜ™BˆÙ[‹œÙ\ÜÚ[Û”›İšY\ˆHÙ\ÜÚ[Û”›İšY\‚ˆÙ[‹›ØØ[\Ù\”Ù][™ÜÔİÜ™HHØØ[\Ù\”Ù][™ÜÔİÜ™BˆÙ[‹\Ù\”Ù][™ÜÈHØØ[\Ù\”Ù][™ÜÔİÜ™K›ØY
+private struct AppDefaultLocalStorage {
+    let expenseUseCase: LocalExpenseUseCaseProtocol
+    let recordUseCase: LocalRecordUseCaseProtocol
+    let walletSnapshotUseCase: LocalWalletSnapshotUseCaseProtocol
+    let factReader: LocalFactReader
+    let companionMemoryRepository: LocalCompanionMemoryRepository
+    let expressionPersistence: LocalExpressionPersistence
+    let imageStore: LocalImageStore
+    let pendingFinancialRepository: LocalPendingFinancialRepository
+    let financialBindingRepository: LocalFinancialBindingRepository
+    let historyMigrationCache: LocalHistoryMigrationCache
+    let historyMigrationDiagnosticStore: LocalHistoryMigrationDiagnosticStore?
+    let historyInventoryReader: LocalHistoryInventoryReader
+    let historyUnresolvedRepository: LocalHistoryUnresolvedRepository
+}
 
-BˆÙ[‹™^™\ÜÚ[Û”[XÚÛ›İÛYÙ[Y[ÛY\H^™\ÜÚ[Û”[XÚÛ›İÛYÙ[Y[ÛY\ˆÙ[‹›ØØ[İÜ˜YÙR[š]X[^˜][Û“Y\ÜØYÙHHİÜ˜YÙR[š]X[^˜][Û“Y\ÜØYÙBˆYˆ]ØØ[İÜ˜YÙR[š]X[^˜][Û‘\œ›ÜˆÂˆ][HH™XÛÜ™ØØ[İÜ˜YÙR[š]X[^˜][Û‘˜Z[\™JØØ[İÜ˜YÙR[š]X[^˜][Û‘\œ›ÜŠBˆÙ[‹›ØØ[İÜ˜YÙR[š]X[^˜][Û“Y\ÜØYÙHH[OË\Ù\“Y\ÜØYÙHÏÈ¹§+9g,9¥l9£k¹b'yiâùc%¹i,z-){ï&ùc§ùiâúe&z+ëùmìºf¤:%ãøà ˆ‚ˆBˆB‚ˆ[˜È›Ûİİ˜\
+@MainActor
+final class AppState: ObservableObject {
+    private static let calendarSignposter = OSSignposter(subsystem: "com.jiezi.app", category: "DomainCalendar")
+    private static let recordReadSignposter = OSSignposter(subsystem: "com.jiezi.app", category: "RecordRead")
+    @Published var selectedDomain: AppDomain = .expense
+    @Published var selectedDateKey = NativeLocalDate.dateKey(Date())
+    @Published var presentedOverlay: AppOverlay = .none
+    @Published var isSignedIn = false
+    @Published var currentUserId = ""
+    @Published var currentUserEmail = ""
+    @Published var lastShortcutMessage: String?
+    @Published var isBootstrapping = true
+    @Published var isSigningIn = false
+    @Published var isSigningOut = false
+    @Published var authMessage: String?
+    @Published var authMessageIsError = false
+    @Published var hasUploadToken = false
+    @Published var dashboard = DashboardSnapshot()
+    @Published var failedLocalImageIntakes: [LocalImageIntake] = []
+    @Published var pendingLocalImageCleanups: [LocalImageCleanup] = []
+    @Published var dashboardMessage: String?
+    @Published var isLoadingDashboard = false
+    @Published var isShowingCachedDashboard = false
+    @Published var shortcutCredentialMessage: String?
+    @Published var notificationPermissionMessage: String?
+    @Published var notificationPermissionStatusText = "æ£€æŸ¥ä¸­"
+    @Published var shortcutNotificationsEnabled = ShortcutFeedbackPreferences.notificationsEnabled
+    @Published var shortcutResultCardEnabled = ShortcutFeedbackPreferences.resultCardEnabled
+    @Published var isOnboardingPresented = false
+    @Published var todayPath = NavigationPath()
+    @Published var inboxPath = NavigationPath()
+    @Published var recordsPath = NavigationPath()
+    @Published var homePath = NavigationPath()
+    @Published var selectedRecordDetail: NativeRecordDetail?
+    @Published var recordDetailMessage: String?
+    @Published var isSavingRecordDetail = false
+    @Published var isDeletingRecordDetail = false
+    @Published var recordFeedbackState: NativeAIFeedbackReviewState = .idle
+    @Published var recordExpressionPlanExposureState: NativeRecordExpressionPlanExposureState = .idle
+    @Published var isCreatingManualRecord = false
+    @Published var manualRecordMessage: String?
+    @Published var localProjectionRefreshMessage: String?
+    @Published var localProjectionRefreshDiagnostic: LocalHistoryMigrationDiagnostic?
+    private var pendingLocalRefreshMonths: Set<String> = []
+    @Published var localStorageInitializationMessage: String?
+    @Published var localStorageInitializationDiagnostic: LocalHistoryMigrationDiagnostic?
+    @Published var recordMonthGroups: [String: [NativeDayRecordGroup]] = [:]
+    @Published var recordMonthMessages: [String: String] = [:]
+    @Published var loadingRecordMonthKey: String?
+    @Published private var loadingRemoteRecordMonthKeys: Set<String> = []
+    @Published var accounts: [NativeAccount] = []
+    @Published var localAccounts: [LocalAccount] = []
+    @Published var localAccountBalances: [UUID: Int64] = [:]
+    @Published var localAccountMessage: String?
+    @Published var localSyncState: LocalSyncState?
+    @Published var localBindingPreview: LocalBindingPreview?
+    @Published var isLoadingLocalBindingPreview = false
+    @Published var isSynchronizingLocalData = false
+    @Published var localSyncMessage: String?
+    @Published var localSyncDiagnostic: LocalSyncDiagnostic?
+    @Published var localSyncFailureDiagnostic: LocalHistoryMigrationDiagnostic?
+    @Published var financeVocabulary: [NativeFinanceVocabularyEntry] = []
+    @Published var selectedAccountDetail: NativeAccountDetail?
+    @Published var selectedAccountSourceSnapshot: NativeWalletSnapshot?
+    @Published var accountMessage: String?
+    @Published var isLoadingAccounts = false
+    @Published var isSavingAccount = false
+    @Published var isSubmittingRepayment = false
+    @Published var repaymentMessage: String?
+    @Published var repaymentCandidates: [String: NativeRepaymentCandidate] = [:]
+    @Published var stagingRepaymentId: String?
+    @Published var inboxFinanceMessage: String?
+    @Published var inboxActionRecordId: String?
+    @Published var inboxActionMessage: String?
+    @Published var inboxActionMessageIsError = false
+    @Published var isConfirmingPendingRecord = false
+    @Published var pendingResolutionMessage: String?
+    @Published var unboundRecords: [NativeUnboundRecord] = []
+    @Published var unboundRecordsMessage: String?
+    @Published var unboundBindingMessage: String?
+    @Published var isLoadingUnboundRecords = false
+    @Published var isBindingUnboundRecords = false
+    @Published var walletSnapshots: [NativeWalletSnapshot] = []
+    @Published var localWalletSnapshots: [LocalWalletSnapshot] = []
+    @Published var localWalletSnapshotHistory: [LocalWalletSnapshot] = []
+    @Published var isLoadingWalletSnapshots = false
+    @Published var walletSnapshotActionId: String?
+    @Published var walletSnapshotMessage: String?
+    @Published var insightsSnapshot: NativeInsightSnapshot?
+    @Published var isLoadingInsights = false
+    @Published var insightsMessage: String?
+    @Published var aiInsight: NativeAIInsight?
+    @Published var isLoadingAIInsight = false
+    @Published var aiInsightMessage: String?
+    @Published var aiInsightIsCached = false
+    @Published var userSettings = NativeUserSettings()
+    @Published var localVisionMode = LocalVisionModeStore().mode
+    @Published var hasBYOKAPIKey = (try? KeychainStore.shared.string(for: KeychainKeys.byokQwenAPIKey))?.isEmpty == false
+    @Published var settingsMessage: String?
+    @Published var isLoadingSettings = false
+    @Published var isSavingSettings = false
+    @Published var isCleaningSourceImages = false
+    @Published var isExportingData = false
+    @Published var isImportingLocalBackup = false
+    @Published var isImportingGenericData = false
+    @Published var isDeletingAccount = false
+    @Published var isPreparingHistoryMigration = false
+    @Published var canPauseHistoryMigration = false
+    @Published var historyMigrationPreview: String?
+    @Published var historyMigrationMessage: String?
+    @Published var historyMigrationPhase = ""
+    @Published var historyMigrationDiagnostic: LocalHistoryMigrationDiagnostic?
+    @Published var historyMigrationProgress: LocalHistoryMigrationProgress?
+    @Published var historyMigrationBlockers: [String] = []
+    @Published var historyMigrationBlockerCount = 0
+    @Published var historyMigrationUnresolvedCount = 0
+    @Published var historyMigrationSkippedImageCount = 0
+    @Published var historyMigrationPreservationIssues: [String] = []
+    @Published var localHistoryUnresolvedRecords: [LocalHistoryUnresolvedRecord] = []
+    @Published var isLoadingHistoryUnresolvedRecords = false
+    @Published var historyUnresolvedRecordsError: String?
+    @Published var localHistoryInventory: LocalHistoryInventorySnapshot?
+    @Published var localHistoryInventoryError: String?
+    @Published var isLoadingLocalHistoryInventory = false
+    @Published var cloudHistoryInventory = LocalHistoryCloudInventory.notRead
+    @Published var isReadingCloudHistoryInventory = false
+    private var historyMigrationArchive: Data?
+    private var historyMigrationOwner: String?
+    private var historyMigrationGeneration: Int?
+    private var historyMigrationSourceDigest: Data?
+    private var historyMigrationAttempt = 0
+    private var historyMigrationCheckpoint: LocalHistoryMigrationState?
+    private var historyMigrationProfileID: UUID?
+    private var historyMigrationAttemptID = UUID()
+    private var historyMigrationImportError: Error?
+    private let historyMigrationDiagnosticStore: LocalHistoryMigrationDiagnosticStore?
+    private let historyInventoryReader: LocalHistoryInventoryReader?
+    private let historyUnresolvedRepository: LocalHistoryUnresolvedRepository?
 
-HÂˆ\ÚÈÂˆYˆ]ØØ[İÜ˜YÙR[š]X[^˜][Û“Y\ÜØYÙHÂˆX[X[™XÛÜ™Y\ÜØYÙHHØØ[İÜ˜YÙR[š]X[^˜][Û“Y\ÜØYÙBˆ™\Ù[Yİ™\›^HHœÙ][™ÜÂˆ\Ğ›Ûİİ˜\[™ÈH˜[ÙBˆ™]\›‚ˆBˆÈÂˆÈHH]ØZ]ØØ[^[œÙU\ÙPØ\ÙOËœ™\\™T›Ùš[J
-BˆYˆ]XYÛ›ÜİXÈHOÈ\İÜSZYÜ˜][Û‘XYÛ›ÜİXÔİÜ™OËœ™\ÛÛ™S]\İ
-ˆÜ\˜][Ûˆ›ØØ[\İÜ˜YÙKZ[š]‹ˆİ]ÛÛYNˆ¹§+9§.¹¥l9£k¹n¤ùmì¹l,yîê¸à ˆ‹ˆ^XİYXØÛİ[Qˆš[ˆ
-HÂˆØØ[İÜ˜YÙR[š]X[^˜][Û‘XYÛ›ÜİXÈHXYÛ›ÜİXÂˆBˆ™Yœ™\ÚØØ[Ş[˜Ôİ]J
-BˆHØ]ÚÂˆ]XYÛ›ÜİXÈH™XÛÜ™ØØ[İÜ˜YÙR[š]X[^˜][Û‘˜Z[\™J\œ›ÜŠBˆX[X[™XÛÜ™Y\ÜØYÙHHXYÛ›ÜİXÏË\Ù\“Y\ÜØYÙHÏÈ¹§+9g,9¥l9£k¹b'yiâùc%¹i,z-){ï&ùc§ùiâúe&z+ëùmìºf¤:%ãøà ˆ‚ˆBˆ]ØZ]™\İÜ™P]][XØ][ÛŠ
-BˆYˆZ\ÔÚYÛ™Y[ˆÂˆ™\Ù[Yİ™\›^HHœ™XÛÜ™Âˆ]ØZ]ØY™XÛÜ™[Û
-Ù[‹˜İ\œ™[[ÛÙ^K›Ü˜ÙNˆYJBˆBˆ\Ğ›Ûİİ˜\[™ÈH˜[ÙBˆ]ØZ]™Yœ™\Ú›İYšXØ][Û”\›Z\ÜÚ[Û”İ]\Ê
-Bˆ™\Ù[Û˜›Ø\™[™ÒY“™YYY
+    private let authService = SupabaseAuthService()
+    private let dashboardRepository: DashboardRepositoryProtocol
+    private let recordRepository: RecordRepositoryProtocol
+    private let localExpenseUseCase: LocalExpenseUseCaseProtocol?
+    private let localRecordUseCase: LocalRecordUseCaseProtocol?
+    private let localWalletSnapshotUseCase: LocalWalletSnapshotUseCaseProtocol?
+    private let localFactReader: LocalFactReader?
+    private let localCompanionMemoryRepository: LocalCompanionMemoryRepository?
+    private let localExpressionPersistence: LocalExpressionPersistence?
+    private let localImageStore: LocalImageStore?
+    private let localImageIntakeRepository: LocalImageIntakeRepository?
+    private let localRecordPortability: LocalRecordPortability?
+    private let localFactPortability: LocalFactPortability?
+    private let localCompleteBackupPortability: LocalCompleteBackupPortability?
+    private let genericImportService: GenericImportService?
+    private let localPendingFinancialRepository: LocalPendingFinancialRepository?
+    private let localFinancialBindingRepository: LocalFinancialBindingRepository?
+    private let localHistoryMigrationCache: LocalHistoryMigrationCache?
+    private let inboxRepository: InboxRepositoryProtocol
+    private let domainRepository: DomainRepositoryProtocol
+    private let snapshotStore: DashboardSnapshotStoreProtocol
+    private let accountRepository: AccountRepositoryProtocol
+    private let accountManagementRepository: AccountManagementRepositoryProtocol
+    private let accountReadPreparationRepository: AccountReadPreparationRepositoryProtocol
+    private var repaymentActionUseCase: RepaymentActionUseCase?
+    private var screenshotRepaymentUseCase: ScreenshotRepaymentUseCase?
+    private var accountManagementActionUseCase: AccountManagementActionUseCase?
+    private var accountReadPreparationUseCase: AccountReadPreparationUseCase?
+    private var accountBindingUseCase: AccountBindingUseCase?
+    private var accountBindingUseCaseMonthKey: String?
+    private var stagingLifecycleUseCase: StagingLifecycleUseCase?
+    private var pendingConfirmationUseCase: PendingConfirmationUseCase?
+    private var feedbackSubmissionUseCase: FeedbackSubmissionUseCase?
+    private var recordDetailImageUseCase: RecordDetailImageUseCase?
+    private var thumbnailImageUseCase: RecordDetailImageUseCase?
+    private var dashboardCoreTask: Task<Void, Never>?
+    @Published private var loadingLocalReadKeys: Set<String> = []
+    private var localMonthReadVersions: [String: Int] = [:]
+    private var stagingReadVersion = 0
+    private let unboundRecordRepository: UnboundRecordRepositoryProtocol
+    private let walletSnapshotRepository: WalletSnapshotRepositoryProtocol
+    private var walletSnapshotActionUseCase: WalletSnapshotActionUseCase?
+    private let insightsRepository: InsightsRepositoryProtocol
+    private let settingsRepository: SettingsRepositoryProtocol
+    private let financeVocabularyRepository: FinanceVocabularyRepositoryProtocol
+    private let localBindingRepository: LocalBindingRepository?
+    private let localSyncRunner: LocalSyncRunner?
+    private let onboardingProgressStore: OnboardingProgressStore
+    private let sessionProvider: NativeSessionProvider?
+    private let expressionPlanAcknowledgementSleep: NativeSleepProvider
+    private let keychain = KeychainStore.shared
+    private let localVisionModeStore = LocalVisionModeStore()
+    private let localUserSettingsStore: LocalUserSettingsStore
+    private var lastDashboardRefreshAt: Date?
+    private var recordDetailCache: [String: NativeRecordDetail] = [:]
+    private var recordMonthDetails: [String: [String: NativeRecordDetail]] = [:]
+    private var localExpenseMonthGroups: [String: [NativeDayRecordGroup]] = [:]
+    private var localIncomeMonthGroups: [String: [NativeDayRecordGroup]] = [:]
+    private var localRecordMonthGroups: [String: [NativeDayRecordGroup]] = [:]
+    // Remote and local projections have different freshness and deletion
+    // semantics. Keep them separate so loading one cannot erase the other.
+    private var remoteRecordMonthGroups: [String: [NativeDayRecordGroup]] = [:]
+    private var localRecordMonthDetails: [String: [String: NativeRecordDetail]] = [:]
+    private var localFactMonths: [String: LocalFactMonth] = [:]
+    private var loadingLocalExpenseMonthKey: String?
+    private var loadingLocalRecordMonthKey: String?
+    private var remoteRecordMonthTasks: [String: Task<Void, Never>] = [:]
+    private var activeRecordReference: String?
+    private var prefetchingRecordReferences: Set<String> = []
+    private var expressionPlanDeliveryTokens: [String: UUID] = [:]
+    private var pendingRecordExpressionPlans: [String: PendingRecordExpressionPlanDelivery] = [:]
+    private var expressionPlanAcknowledgementTokens: [String: UUID] = [:]
+    private var visibleRecordExpressionPlanCards: [String: String] = [:]
+    private var insightsLoadedAt: Date?
+    private var insightsLoadedLocally = false
+    private var dashboardRefreshGeneration = 0
+    private var userStateGeneration = 0
+    private var dashboardSupplementTask: Task<Void, Never>?
+    private var isLoadingFinanceVocabulary = false
+    private var shouldDeferOnboardingForExternalRoute = false
 
-BˆBˆB‚ˆ\ØØ\™X›T™\İ[ˆš]˜]H[˜È™XÛÜ™ØØ[İÜ˜YÙR[š]X[^˜][Û‘˜Z[\™JÈ\œ›Üˆ\œ›ÜŠHOˆØØ[\İÜSZYÜ˜][Û‘XYÛ›ÜİXÏÈÂˆİX\™]\İÜSZYÜ˜][Û‘XYÛ›ÜİXÔİÜ™H[ÙHÈ™]\›ˆš[Bˆ][HH\İÜSZYÜ˜][Û‘XYÛ›ÜİXÔİÜ™Kœ™XÛÜ™
-ˆ\œ›Ü‹ˆ\ÙNˆ¹§+9§.¹¥l9£k¹n¤ùb'yiâùc%ˆ‹ˆÜ\˜][Ûˆ›ØØ[\İÜ˜YÙKZ[š]‹ˆÛÙSİ™\œšYNˆ“ĞĞSTÕÔQÑKRS’U‹ˆ][\QˆURQ
+    init(
+        dashboardRepository: DashboardRepositoryProtocol = DashboardRepository(),
+        recordRepository: RecordRepositoryProtocol = RecordRepository(),
+        localExpenseUseCase: LocalExpenseUseCaseProtocol? = nil,
+        localRecordUseCase: LocalRecordUseCaseProtocol? = nil,
+        localStorageInitializationMessage: String? = nil,
+        localWalletSnapshotUseCase: LocalWalletSnapshotUseCaseProtocol? = nil,
+        localFactReader: LocalFactReader? = nil,
+        localCompanionMemoryRepository: LocalCompanionMemoryRepository? = nil,
+        localExpressionPersistence: LocalExpressionPersistence? = nil,
+        localImageStore: LocalImageStore? = nil,
+        localImageIntakeRepository: LocalImageIntakeRepository? = nil,
+        localFactPortability: LocalFactPortability? = nil,
+        localCompleteBackupPortability: LocalCompleteBackupPortability? = nil,
+        genericImportService: GenericImportService? = nil,
+        localPendingFinancialRepository: LocalPendingFinancialRepository? = nil,
+        localFinancialBindingRepository: LocalFinancialBindingRepository? = nil,
+        inboxRepository: InboxRepositoryProtocol = InboxRepository(),
+        domainRepository: DomainRepositoryProtocol = DomainRepository(),
+        snapshotStore: DashboardSnapshotStoreProtocol = DashboardSnapshotStore(),
+        accountRepository: AccountRepositoryProtocol = AccountRepository(),
+        accountManagementRepository: AccountManagementRepositoryProtocol? = nil,
+        accountReadPreparationRepository: AccountReadPreparationRepositoryProtocol? = nil,
+        repaymentActionUseCase: RepaymentActionUseCase? = nil,
+        screenshotRepaymentUseCase: ScreenshotRepaymentUseCase? = nil,
+        accountManagementActionUseCase: AccountManagementActionUseCase? = nil,
+        accountReadPreparationUseCase: AccountReadPreparationUseCase? = nil,
+        accountBindingUseCase: AccountBindingUseCase? = nil,
+        stagingLifecycleUseCase: StagingLifecycleUseCase? = nil,
+        pendingConfirmationUseCase: PendingConfirmationUseCase? = nil,
+        feedbackSubmissionUseCase: FeedbackSubmissionUseCase? = nil,
+        recordDetailImageUseCase: RecordDetailImageUseCase? = nil,
+        unboundRecordRepository: UnboundRecordRepositoryProtocol = UnboundRecordRepository(),
+        walletSnapshotRepository: WalletSnapshotRepositoryProtocol = WalletSnapshotRepository(),
+        walletSnapshotActionUseCase: WalletSnapshotActionUseCase? = nil,
+        insightsRepository: InsightsRepositoryProtocol = InsightsRepository(),
+        settingsRepository: SettingsRepositoryProtocol = SettingsRepository(),
+        financeVocabularyRepository: FinanceVocabularyRepositoryProtocol = FinanceVocabularyRepository(),
+        localBindingRepository: LocalBindingRepository? = nil,
+        localSyncRunner: LocalSyncRunner? = nil,
+        onboardingProgressStore: OnboardingProgressStore = OnboardingProgressStore(),
+        sessionProvider: NativeSessionProvider? = nil,
+        localUserSettingsStore: LocalUserSettingsStore = LocalUserSettingsStore(),
+        historyMigrationDiagnosticStore: LocalHistoryMigrationDiagnosticStore? = nil,
+        historyUnresolvedRepository: LocalHistoryUnresolvedRepository? = nil,
+        expressionPlanAcknowledgementSleep: @escaping NativeSleepProvider = {
+            try await Task<Never, Never>.sleep(nanoseconds: $0)
+        }
+    ) {
+        self.dashboardRepository = dashboardRepository
+        self.recordRepository = recordRepository
+        let simulatesLocalStorageInitializationFailure = localStorageInitializationMessage != nil
+        let usesDefaultLocalStorage = !simulatesLocalStorageInitializationFailure
+            && localExpenseUseCase == nil && localRecordUseCase == nil
+        let defaultLocalStorage: AppDefaultLocalStorage?
+        var localStorageInitializationError: Error? = nil
+        var storageInitializationMessage = localStorageInitializationMessage
+        if usesDefaultLocalStorage {
+            do {
+                defaultLocalStorage = try Self.makeDefaultLocalStorage()
+            } catch {
+                defaultLocalStorage = nil
+                localStorageInitializationError = error
+                storageInitializationMessage = nil
+            }
+        } else {
+            defaultLocalStorage = nil
+        }
+        if let localExpenseUseCase {
+            self.localExpenseUseCase = localExpenseUseCase
+        } else if usesDefaultLocalStorage {
+            self.localExpenseUseCase = defaultLocalStorage?.expenseUseCase
+        } else {
+            self.localExpenseUseCase = simulatesLocalStorageInitializationFailure
+                ? nil
+                : Self.defaultLocalExpenseUseCase()
+        }
+        if let localRecordUseCase {
+            self.localRecordUseCase = localRecordUseCase
+        } else if usesDefaultLocalStorage {
+            self.localRecordUseCase = defaultLocalStorage?.recordUseCase
+        } else {
+            // Dependency-injected local stores are intentionally isolated. Creating
+            // the default record use case here would read the user's real local DB
+            // alongside a test/staging expense use case and contaminate projections.
+            self.localRecordUseCase = nil
+        }
+        self.localWalletSnapshotUseCase = localWalletSnapshotUseCase
+            ?? (usesDefaultLocalStorage ? defaultLocalStorage?.walletSnapshotUseCase : nil)
+        self.localFactReader = usesDefaultLocalStorage
+            ? (localFactReader ?? defaultLocalStorage?.factReader)
+            : localFactReader
+        self.localCompanionMemoryRepository = localCompanionMemoryRepository
+            ?? (usesDefaultLocalStorage ? defaultLocalStorage?.companionMemoryRepository : nil)
+        self.localExpressionPersistence = localExpressionPersistence
+            ?? (usesDefaultLocalStorage ? defaultLocalStorage?.expressionPersistence : nil)
+        self.localImageStore = localImageStore ?? defaultLocalStorage?.imageStore ?? Self.defaultLocalImageStore()
+        self.localImageIntakeRepository = localImageIntakeRepository ?? Self.defaultLocalImageIntakeRepository()
+        self.localRecordPortability = Self.defaultLocalRecordPortability()
+        self.localFactPortability = usesDefaultLocalStorage
+            ? (localFactPortability ?? Self.defaultLocalFactPortability())
+            : localFactPortability
+        self.localCompleteBackupPortability = localCompleteBackupPortability ?? Self.defaultLocalCompleteBackupPortability()
+        self.genericImportService = genericImportService ?? Self.defaultGenericImportService()
+        self.localPendingFinancialRepository = localPendingFinancialRepository ?? defaultLocalStorage?.pendingFinancialRepository
+        self.localFinancialBindingRepository = localFinancialBindingRepository ?? defaultLocalStorage?.financialBindingRepository
+        self.localHistoryMigrationCache = defaultLocalStorage?.historyMigrationCache
+        self.historyMigrationDiagnosticStore = historyMigrationDiagnosticStore
+            ?? defaultLocalStorage?.historyMigrationDiagnosticStore
+            ?? (try? LocalHistoryMigrationDiagnosticStore())
+        self.historyInventoryReader = defaultLocalStorage?.historyInventoryReader
+        self.historyUnresolvedRepository = historyUnresolvedRepository ?? defaultLocalStorage?.historyUnresolvedRepository
+        self.inboxRepository = inboxRepository
+        self.domainRepository = domainRepository
+        self.snapshotStore = snapshotStore
+        self.accountRepository = accountRepository
+        self.accountManagementRepository = accountManagementRepository
+            ?? (accountRepository as? AccountManagementRepositoryProtocol)
+            ?? AccountRepository()
+        self.accountReadPreparationRepository = accountReadPreparationRepository
+            ?? (accountRepository as? AccountReadPreparationRepositoryProtocol)
+            ?? AccountRepository()
+        self.accountManagementActionUseCase = accountManagementActionUseCase
+        self.repaymentActionUseCase = repaymentActionUseCase
+        self.screenshotRepaymentUseCase = screenshotRepaymentUseCase
+        self.accountReadPreparationUseCase = accountReadPreparationUseCase
+        self.accountBindingUseCase = accountBindingUseCase
+        self.stagingLifecycleUseCase = stagingLifecycleUseCase
+        self.pendingConfirmationUseCase = pendingConfirmationUseCase
+        self.feedbackSubmissionUseCase = feedbackSubmissionUseCase
+        self.recordDetailImageUseCase = recordDetailImageUseCase
+        self.unboundRecordRepository = unboundRecordRepository
+        self.walletSnapshotRepository = walletSnapshotRepository
+        self.walletSnapshotActionUseCase = walletSnapshotActionUseCase
+        self.insightsRepository = insightsRepository
+        self.settingsRepository = settingsRepository
+        self.financeVocabularyRepository = financeVocabularyRepository
+        self.localBindingRepository = localBindingRepository ?? Self.defaultLocalBindingRepository()
+        self.localSyncRunner = localSyncRunner ?? Self.defaultLocalSyncRunner()
+        self.onboardingProgressStore = onboardingProgressStore
+        self.sessionProvider = sessionProvider
+        self.localUserSettingsStore = localUserSettingsStore
+        self.userSettings = localUserSettingsStore.load()
+        self.expressionPlanAcknowledgementSleep = expressionPlanAcknowledgementSleep
+        self.localStorageInitializationMessage = storageInitializationMessage
+        if let localStorageInitializationError {
+            let entry = recordLocalStorageInitializationFailure(localStorageInitializationError)
+            self.localStorageInitializationMessage = entry?.userMessage ?? "æœ¬åœ°æ•°æ®åˆå§‹åŒ–å¤±è´¥ï¼›åŸå§‹é”™è¯¯å·²éšè—ã€‚"
+        }
+    }
 
-KˆÛÛ[Z]Yˆ˜[ÙKˆ™XÛİ™\PXİ[Ûˆº+íù¨à9§éy§+9§.¹kf9`ª9â­¹  yd#ºaãyd+ùn¥9å*;ï&ù.#z) y®!zfi9n¥9å*9¥l9£k¸à ˆ‚ˆ
-BˆØØ[İÜ˜YÙR[š]X[^˜][Û‘XYÛ›ÜİXÈH[Bˆ™]\›ˆ[BˆB‚ˆš]˜]H[˜È™\İÜ™P]][XØ][ÛŠ
-H\Ş[˜ÈÂˆ]Ù[™\˜][ÛˆH\Ù\”İ]QÙ[™\˜][Û‚ˆÈÂˆ]Ù\ÜÚ[Ûˆİ\X˜\ÙP]]Ù\ÜÚ[Û‚ˆÈÂˆÙ\ÜÚ[ÛˆHH]ØZ]]]Ù\šXÙK˜İ\œ™[Ù\ÜÚ[ÛŠ
-BˆHØ]ÚÂˆİX\™]YØXŞHHOÈ™\]Z\™TÙ\ÜÚ[ÛŠ
-Kˆ]™Yœ™\ÚÚÙ[ˆHYØXŞKœ™Yœ™\ÚÚÙ[‹\™Yœ™\ÚÚÙ[‹š\Ñ[\H[ÙHÂˆ\Õ\ØYÚÙ[ˆH
-HÙ^XÚZ[‹œİš[™Ê›ÜˆÙ^XÚZ[’Ù^\Ë\ØYÚÙ[ŠJOËš\Ñ[\HOH˜[ÙBˆ\]TÚÜİ]Ü™Y[X[Y\ÜØYÙJ
-Bˆ™]\›‚ˆBˆÙ\ÜÚ[ÛˆHH]ØZ]]]Ù\šXÙKœ™\İÜ™TÙ\ÜÚ[ÛŠXØÙ\ÜÕÚÙ[ˆYØXŞK˜XØÙ\ÜÕÚÙ[‹™Yœ™\ÚÚÙ[ˆ™Yœ™\ÚÚÙ[ŠBˆBˆİX\™Ù[™\˜][ÛˆOH\Ù\”İ]QÙ[™\˜][Ûˆ[ÙHÈ™]\›ˆBˆHØ]™JÙ\ÜÚ[ÛˆÙ\ÜÚ[ÛŠBˆ\JÙ\ÜÚ[ÛˆÙ\ÜÚ[ÛŠBˆYˆX^T™XY™[[İP\Ú[™\ÜÑ]HÈ™\İÜ™Q\Ú›Ø\™Û˜\Úİ
-\Ù\’YˆÙ\ÜÚ[Û‹\Ù\‹šY
-HBˆ\Õ\ØYÚÙ[ˆH
-HÙ^XÚZ[‹œİš[™Ê›ÜˆÙ^XÚZ[’Ù^\Ë\ØYÚÙ[ŠJOËš\Ñ[\HOH˜[ÙBˆ\]TÚÜİ]Ü™Y[X[Y\ÜØYÙJ
-Bˆ\ÚÈÂˆ]ØZ]ØYXØÛİ[Ê
-Bˆ]ØZ]™Yœ™\Ú\Ú›Ø\™
+    func bootstrap() {
+        Task {
+            if let localStorageInitializationMessage {
+                manualRecordMessage = localStorageInitializationMessage
+                presentedOverlay = .settings
+                isBootstrapping = false
+                return
+            }
+            do {
+                _ = try await localExpenseUseCase?.prepareProfile()
+                if let diagnostic = try? historyMigrationDiagnosticStore?.resolveLatest(
+                    operation: "local-storage-init",
+                    outcome: "æœ¬æœºæ•°æ®åº“å·²å°±ç»ªã€‚",
+                    expectedAccountID: nil
+                ) {
+                    localStorageInitializationDiagnostic = diagnostic
+                }
+                refreshLocalSyncState()
+            } catch {
+                let diagnostic = recordLocalStorageInitializationFailure(error)
+                manualRecordMessage = diagnostic?.userMessage ?? "æœ¬åœ°æ•°æ®åˆå§‹åŒ–å¤±è´¥ï¼›åŸå§‹é”™è¯¯å·²éšè—ã€‚"
+            }
+            await restoreAuthentication()
+            if !isSignedIn {
+                presentedOverlay = .records
+                await loadRecordMonth(Self.currentMonthKey, force: true)
+            }
+            isBootstrapping = false
+            await refreshNotificationPermissionStatus()
+            presentOnboardingIfNeeded()
+        }
+    }
 
-Bˆ]ØZ]ØY™XÛÜ™[Û
-Ù[‹˜İ\œ™[[ÛÙ^K›Ü˜ÙNˆYJBˆBˆHØ]ÚÂˆİX\™Ù[™\˜][ÛˆOH\Ù\”İ]QÙ[™\˜][Ûˆ[ÙHÈ™]\›ˆBˆYˆ\Ò[˜[Y™Yœ™\ÚÙ\ÜÚ[Û‘\œ›ÜŠ\œ›ÜŠHÂˆ[˜[Y]TÙ\ÜÚ[ÛŠY\ÜØYÙNˆ¹ænùoeyâ­¹  ymì¹i,y¥b;ï#:+íúaãy¥¬9ænùoexà ˆŠBˆH[ÙHÂˆ]]Y\ÜØYÙHH\œ›Ü‹›ØØ[^™Y\ØÜš\[Û‚ˆ]]Y\ÜØYÙR\Ñ\œ›ÜˆHYBˆBˆBˆB‚ˆ[˜ÈÚYÛ’[Š[XZ[ˆİš[™Ë\ÜİÛÜ™ˆİš[™ÊH\Ş[˜ÈÂˆİX\™Z\ÔÚYÛš[™Óİ][ÙHÈ]]Y\ÜØYÙHH¹«hùg*9k£9¢$9."¹«(z` 9aî»ï#:+íùê#yd#ºaãz+åxà ˆÈ™]\›ˆBˆİX\™Z\ÔÚYÛš[™Ò[ˆ[ÙHÈ™]\›ˆBˆ\ÔÚYÛš[™Ò[ˆHYBˆY™\ˆÈ\ÔÚYÛš[™Ò[ˆH˜[ÙHBˆ]]Y\ÜØYÙHHš[ˆ]]Y\ÜØYÙR\Ñ\œ›ÜˆH˜[ÙB‚ˆÈÂˆ]Ù\ÜÚ[ÛˆHH]ØZ]]]Ù\šXÙKœÚYÛ’[Š[XZ[ˆ[XZ[\ÜİÛÜ™ˆ\ÜİÛÜ™
-BˆHØ]™JÙ\ÜÚ[ÛˆÙ\ÜÚ[ÛŠBˆ\JÙ\ÜÚ[ÛˆÙ\ÜÚ[ÛŠBˆ]Ù[™\˜][ÛˆH\Ù\”İ]QÙ[™\˜][Û‚ˆ\Õ\ØYÚÙ[ˆH˜[ÙBˆ]]Y\ÜØYÙHH¹mì¹ænùoe{ï#9§+9§.¹¥l9£k¹cëùîéùîëy/oùå*8à ˆ‚ˆÈÂˆ]\ØYÚÙ[ˆHH]ØZ]]]Ù\šXÙK™™]Ú\ØYÚÙ[Š\Ù\’YˆÙ\ÜÚ[Û‹\Ù\‹šYXØÙ\ÜÕÚÙ[ˆÙ\ÜÚ[Û‹˜XØÙ\ÜÕÚÙ[ŠBˆİX\™\Ğİ\œ™[\Ù\“ØY
-Ù[™\˜][Û‹\Ù\’YˆÙ\ÜÚ[Û‹\Ù\‹šY
-H[ÙHÈ™]\›ˆBˆHÙ^XÚZ[‹œÙ]İš[™Ê\ØYÚÙ[‹›ÜˆÙ^XÚZ[’Ù^\Ë\ØYÚÙ[ŠBˆ\Õ\ØYÚÙ[ˆHYBˆHØ]ÚÂˆİX\™\Ğİ\œ™[\Ù\“ØY
-Ù[™\˜][Û‹\Ù\’YˆÙ\ÜÚ[Û‹\Ù\‹šY
-H[ÙHÈ™]\›ˆBˆ]]Y\ÜØYÙHH¹mì¹ænùoe{ï&ÒÜİY9oêù£mù£!ù.é9aëy£k¹¦ ¹.#ycëùå*;ï#9cëùg*:+¯¹ïk¹.+zaãz+åxà ˆ‚ˆBˆ\]TÚÜİ]Ü™Y[X[Y\ÜØYÙJ
-Bˆ™\Ù[Û˜›Ø\™[™ÒY“™YYY
+    @discardableResult
+    private func recordLocalStorageInitializationFailure(_ error: Error) -> LocalHistoryMigrationDiagnostic? {
+        guard let historyMigrationDiagnosticStore else { return nil }
+        let entry = historyMigrationDiagnosticStore.record(
+            error,
+            phase: "æœ¬æœºæ•°æ®åº“åˆå§‹åŒ–",
+            operation: "local-storage-init",
+            codeOverride: "LOCAL-STORAGE-INIT",
+            attemptID: UUID(),
+            committed: false,
+            recoveryAction: "è¯·æ£€æŸ¥æœ¬æœºå­˜å‚¨çŠ¶æ€åé‡å¯åº”ç”¨ï¼›ä¸è¦æ¸…é™¤åº”ç”¨æ•°æ®ã€‚"
+        )
+        localStorageInitializationDiagnostic = entry
+        return entry
+    }
 
-Bˆ]ØZ]ØYXØÛİ[Ê
-Bˆ]ØZ]™Yœ™\Ú\Ú›Ø\™
+    private func restoreAuthentication() async {
+        let generation = userStateGeneration
+        do {
+            let session: SupabaseAuthSession
+            do {
+                session = try await authService.currentSession()
+            } catch {
+                guard let legacy = try? requireSession(),
+                      let refreshToken = legacy.refreshToken, !refreshToken.isEmpty else {
+                    hasUploadToken = (try keychain.string(for: KeychainKeys.uploadToken))?.isEmpty == false
+                    updateShortcutCredentialMessage()
+                    return
+                }
+                session = try await authService.restoreSession(accessToken: legacy.accessToken, refreshToken: refreshToken)
+            }
+            guard generation == userStateGeneration else { return }
+            try save(session: session)
+            apply(session: session)
+            if mayReadRemoteBusinessData { restoreDashboardSnapshot(userId: session.user.id) }
+            hasUploadToken = (try keychain.string(for: KeychainKeys.uploadToken))?.isEmpty == false
+            updateShortcutCredentialMessage()
+            Task {
+                await loadAccounts()
+                await refreshDashboard()
+                await loadRecordMonth(Self.currentMonthKey, force: true)
+            }
+        } catch {
+            guard generation == userStateGeneration else { return }
+            if isInvalidRefreshSessionError(error) {
+                invalidateSession(message: "ç™»å½•çŠ¶æ€å·²å¤±æ•ˆï¼Œè¯·é‡æ–°ç™»å½•ã€‚")
+            } else {
+                authMessage = error.localizedDescription
+                authMessageIsError = true
+            }
+        }
+    }
 
-Bˆ]ØZ]ØY™XÛÜ™[Û
-Ù[‹˜İ\œ™[[ÛÙ^K›Ü˜ÙNˆYJBˆHØ]ÚÂˆ]]Y\ÜØYÙHH\œ›Ü‹›ØØ[^™Y\ØÜš\[Û‚ˆ]]Y\ÜØYÙR\Ñ\œ›ÜˆHYBˆB‚ˆ\ÔÚYÛš[™Ò[ˆH˜[ÙBˆB‚ˆ[˜ÈÚYÛ•\
-ˆ[XZ[ˆİš[™Ëˆ\ÜİÛÜ™ˆİš[™ËˆXØÙ\Y\›\Îˆ›ÛÛˆXØÙ\YÙ[œÚ]]™Q]Nˆ›ÛÛˆ
-H\Ş[˜ÈÂˆİX\™Z\ÔÚYÛš[™Óİ][ÙHÈ]]Y\ÜØYÙHH¹«hùg*9k£9¢$9."¹«(z` 9aî»ï#:+íùê#yd#ºaãz+åxà ˆÈ™]\›ˆBˆİX\™Z\ÔÚYÛš[™Ò[ˆ[ÙHÈ™]\›ˆBˆİX\™XØÙ\Y=ë®<¶‰ËkºwµçfBVÇ6R²&WGW&âfÇ6RĞ¢wV&BÆö6Å7F÷&vT–æ—F–Æ—¦F–öäÖW76vRÓÒæ–ÂVÇ6R°¢ÖçVÅ&V6÷&DÖW76vRÒÆö6Å7F÷&vT–æ—F–Æ—¦F–öäÖW76vP¢&WGW&âfÇ6P¢Ğ¢—47&VF–ætÖçVÅ&V6÷&BÒG'VP¢ÖçVÅ&V6÷&DÖW76vRÒæ–À¢FVfW"²—47&VF–ætÖçVÅ&V6÷&BÒfÇ6RĞ ¢Fò°¢&WGW&âG'’v—B7&VFUVæ–f–VDÖçVÅ&V6÷&B†G&gBÂFöÖ–ã¢FöÖ–â¢Ò6F6‚°¢ÖçVÅ&V6÷&DÖW76vRÒW'&÷"æÆö6Æ—¦VDFW67&—F–öà¢&WGW&âfÇ6P¢Ğ¢Ğ ¢gVæ2&W&TÆö6Åv÷&·76R‚’7–æ2ÓâÆö6ÄW‡Vç6Uv÷&·76Sò°¢wV&BÆWBÆö6ÄW‡Vç6UW6T66RVÇ6R²&WGW&âæ–ÂĞ¢Fò°¢ÆWBv÷&·76RÒG'’v—BÆö6ÄW‡Vç6UW6T66Rç&W&Uv÷&·76R‚¢Æö6Ä66÷VçG2Òv÷&·76Ræ66÷VçG0¢f"&Ææ6W3¢µUT”C¢–çCcEÒÒ³¥Ğ¢f÷"66÷VçB–âv÷&·76Ræ66÷VçG2°¢&Ææ6W5¶66÷VçBæ–EÒÒG'’v—BÆö6ÄW‡Vç6UW6T66Ræ66÷VçD&Ææ6TÖ–æ÷"†66÷VçBæ–B¢Ğ¢Æö6Ä66÷VçD&Ææ6W2Ò&Ææ6W0¢Æö6Ä66÷VçDÖW76vRÒæ–À¢&WGW&âv÷&·76P¢Ò6F6‚°¢Æö6Ä66÷VçDÖW76vRÒW'&÷"æÆö6Æ—¦VDFW67&—F–öà¢&WGW&âæ–À¢Ğ¢Ğ ¢gVæ27&VFTÆö6Ä66÷VçB…ò6öÖÖæC¢Æö6Ä66÷VçE6WGW6öÖÖæB’7–æ2ÓâÆö6Ä66÷VçCò°¢wV&BÆWBÆö6ÄW‡Vç6UW6T66RVÇ6R²&WGW&âæ–ÂĞ¢Fò°¢ÆWB66÷VçBÒG'’v—BÆö6ÄW‡Vç6UW6T66Ræ7&VFT66÷VçB†6öÖÖæB¢v—BÆöDÆö6Ä66÷VçG2‚¢Æö6Ä66÷VçDÖW76vRÒæ–À¢&WGW&â66÷Vç@¢Ò6F6‚°¢Æö6Ä66÷VçDÖW76vRÒW'&÷"æÆö6Æ—¦VDFW67&—F–öà¢&WGW&âæ–À¢Ğ¢Ğ ¢gVæ27&VFTÆö6ÄW‡Vç6R€¢Ö÷VçEFW‡C¢7G&–ærÀ¢66÷VçD”C¢UT”BÀ¢ÖW&6†çDæÖS¢7G&–ærÀ¢ÆFf÷&Ó¢7G&–ærÀ¢6FVv÷'“¢7G&–ærÀ¢–ÖVçDÖWF†öC¢7G&–ærÀ¢FFS¢FFRÀ¢æ÷FS¢7G&–æp¢’7–æ2Óâ&ööÂ°¢ÆWBG&gBÒæF—fTÖçVÅ&V6÷&DG&gB€¢¶–æC¢æW‡Vç6RÀ¢66÷VçD”C¢66÷VçD”BÀ¢Ö÷VçEFW‡C¢Ö÷VçEFW‡BÀ¢F—FÆS¢ÖW&6†çDæÖRÀ¢ÆFf÷&Ó¢ÆFf÷&ÒÀ¢6FVv÷'“¢6FVv÷'’À¢–ÖVçDÖWF†öC¢–ÖVçDÖWF†öBÀ¢FFS¢FFRÀ¢æ÷FS¢æ÷FP¢¢&WGW&âv—B7&VFTÖçVÅ&V6÷&B†G&gBÂFöÖ–ã¢æ–Â¢Ğ ¢&—fFRgVæ27&VFTÆö6ÄW‡Vç6R…òG&gC¢æF—fTÖçVÅ&V6÷&DG&gB’7–æ2F‡&÷w2Óâ&ööÂ°¢wV&BG&gBæW†—7F–æu&t–BÓÒæ–ÂVÇ6R²F‡&÷rÆö6ÄFFW'&÷"æ–çfÆ–E&V6÷&BĞ¢wV&BÆWBÆö6ÄW‡Vç6UW6T66RVÇ6R°¢F‡&÷rÆö6ÄFFW'&÷"æ–çfÆ–D–FVçF–f–W ¢Ğ¢ÆWB66÷VçEFW‡BÒG&gBæ66÷VçD–@¢ÆWB66÷VçD”BÒ66÷VçEFW‡BæfÆDÖ…UT”Bæ–æ—B‡WV–E7G&–æs¢’¢òòW6W"6â÷VâF†Rf÷&Òv†–ÆRF†R&6¶w&÷VæB66÷VçB&Vg&W6‚—0¢òò7F–ÆÂ'Vææ–ærâVç7W&R6Æ÷VB66÷VçB6VÆV7FVB'’F†RVæ–f–VBf÷&Ğ¢òòW†—7G2–âF†RÆö6Â&ö¦V7F–öâ&Vf÷&RfÆ–FF–ærF†RW‡Vç6Rà¢–bÆWB66÷VçD”BÂÆö6Ä66÷VçG2æ6öçF–ç2‡v†W&S¢²Cæ–BÓÒ66÷VçD”BÒ’À¢ÆWB6Æ÷VD66÷VçBÒ66÷VçG2æf—'7B‡v†W&S¢²Cæ–BÓÒ66÷VçEFW‡BÒ’°¢ÆWBÖ—'&÷"ÒÆö6Ä66÷VçB€¢–C¢66÷VçD”BÀ¢&öf–ÆT”C¢UT”B‚’À¢æÖS¢6Æ÷VD66÷VçBææÖRÀ¢¶–æC¢6Æ÷VD66÷VçBçG—Rç&ufÇVRÀ¢7W'&Væ7“¢6Æ÷VD66÷VçBæ7W'&Væ7’À¢÷Væ–æt&Ææ6TÖ–æ÷#¢–çCcB‚†6Æ÷VD66÷VçBæ–æ—F–Ä&Ææ6R¢’ç&÷VæFVB‚’’À¢7&VFVDC¢FFR‚’À¢–ç7F—GWF–öã¢6Æ÷VD66÷VçBæ–ç7F—GWF–öâÀ¢Æ7CC¢6Æ÷VD66÷VçBæÆ7CBÀ¢&–ÆÄF“¢6Æ÷VD66÷VçBæ&–ÆÄF’À¢–ÖVçDGVTF“¢6Æ÷VD66÷VçBç–ÖVçDGVTF’À¢WFôFV&—D66÷VçD”C¢6Æ÷VD66÷VçBæWFôFV&—D66÷VçD–BæfÆDÖ…UT”Bæ–æ—B‡WV–E7G&–æs¢’’À¢WFô6öæf—&Õ&W–ÖVçC¢6Æ÷VD66÷VçBæWFô6öæf—&Õ&W–ÖVçBÀ¢w&6UW&–öDF—3¢6Æ÷VD66÷VçBæw&6UW&–öDF—2À¢Æ7E&V6öæ6–ÆVDC¢6VÆbç'6T•4óƒc†6Æ÷VD66÷VçBæÆ7E&V6öæ6–ÆVDB’À¢—4FVfVÇDW‡Vç6S¢6Æ÷VD66÷VçBæ—4FVfVÇDW‡Vç6RÀ¢—4FVfVÇD–æ6öÖS¢6Æ÷VD66÷VçBæ—4FVfVÇD–æ6öÖRÀ¢—4&6†—fVC¢6Æ÷VD66÷VçBæ—4&6†—fVBÀ¢6÷'D÷&FW#¢6Æ÷VD66÷VçBç6÷'D÷&FW ¢¢G'’v—BÆö6ÄW‡Vç6UW6T66Ræ–×÷'E&VÖ÷FT66÷VçG2…¶Ö—'&÷%Ò¢òÒv—B&W&TÆö6Åv÷&·76R‚¢Ğ¢ÆWB6öÖÖæBÒÆö6ÄW‡Vç6T6öÖÖæB€¢–C¢UT”B‚’À¢66÷VçD”C¢66÷VçD”BÀ¢Ö÷VçEFW‡C¢G&gBæÖ÷VçEFW‡BÀ¢7W'&Væ7“¢$4å’"À¢ÖW&6†çDæÖS¢G&gBçF—FÆRÀ¢ÆFf÷&Ó¢G&gBçÆFf÷&ÒÀ¢6FVv÷'“¢G&gBæ6FVv÷'’À¢–ÖVçDÖWF†öC¢G&gBç–ÖVçDÖWF†öBÀ¢G&ç67F–öäFFS¢æF—fTÆö6ÄFFRæFFT¶W’†G&gBæFFR’À¢G&ç67F–öåF–ÖS¢G&gBæ–æ6ÇVFW5F–ÖRòæF—fTÆö6ÄFFRçF–ÖT¶W’†G&gBçF–ÖR’¢æ–ÂÀ¢æ÷FS¢G&gBææ÷FRæ—4V×G’òæ–Â¢G&gBææ÷FRÀ¢7&VFVDC¢FFR‚’Â–ÖvTFF¢G&gBæ–ÖvTFF¢¢ÆWB÷WF6öÖRÒG'’v—BÆö6ÄW‡Vç6UW6T66Ræ7&VFR†6öÖÖæB¢–bÆWBW‡Vç6RÒ÷WF6öÖRæW‡Vç6R°¢66†VGVÆTÆö6Ä6ö×æ–öâ†f÷#¢Æö6ÄW‡Vç6U&VDÖöFVÂæFWF–Â†g&öÓ¢W‡Vç6RÂ–ÖvU7F÷&S¢Æö6Ä–ÖvU7F÷&R’¢Ğ¢òÒv—B&W&TÆö6Åv÷&·76R‚¢ÆWBÖöçF„¶W’Ò7G&–ær†6öÖÖæBçG&ç67F–öäFFRç&Vf—‚ƒr’¢v—B&Vg&W6„Æö6ÄÖöçF…&ö¦V7F–öâ†ÖöçF„¶W“¢ÖöçF„¶W’¢ÖçVÅ&V6÷&DÖW76vRÒ÷WF6öÖRæW‡Vç6RÓÒæ–Âò.iÊÎYËŠë[Ù^iÊ®KùŞZÙ‚"¢Æö6Åw&—FTÖW76vR†66÷VçD”BÓÒæ–Âò.Šë[Ù^[{.KùŞZÙûÈK¸^iÊÎiË®ûÈÎŠ^{¹YîXúşYÎjÚ^ûÈ’"¢.Šë[Ù^[{.KùŞZÙûÈiÊÎiË®ûÈ’"¢&WGW&â÷WF6öÖRæW‡Vç6RÒæ–À¢Ğ ¢&—fFRgVæ27&VFTÆö6Ä–æ6öÖR€¢òG&gC¢æF—fTÖçVÅ&V6÷&DG&gBÀ¢FöÖ–ã¢æF—fTFöÖ–äFVf–æ—F–öãğ¢’7–æ2F‡&÷w2Óâ&ööÂ°¢wV&BG&gBæW†—7F–æu&t–BÓÒæ–ÂÂÆWBÆö6ÄW‡Vç6UW6T66RVÇ6R²F‡&÷rÆö6ÄFFW'&÷"æ–çfÆ–E&V6÷&BĞ¢wV&BG&gBçfÆ–FF–öäÖW76vR†FöÖ–ã¢FöÖ–â’ÓÒæ–ÂVÇ6R²F‡&÷rÆö6ÄFFW'&÷"æ–çfÆ–E&V6÷&BĞ¢ÆWB66÷VçD”BÒG&gBæ66÷VçD–BæfÆDÖ…UT”Bæ–æ—B‡WV–E7G&–æs¢’¢–bÆWB66÷VçD”BÂÆö6Ä66÷VçG2æ6öçF–ç2‡v†W&S¢²Cæ–BÓÒ66÷VçD”BÒ’À¢ÆWB6Æ÷VD66÷VçBÒ66÷VçG2æf—'7B‡v†W&S¢²Cæ–BÓÒ66÷VçD”BçWV–E7G&–ærÒ’°¢ÆWBÖ—'&÷"ÒÆö6Ä66÷VçB€¢–C¢66÷VçD”BÂ&öf–ÆT”C¢UT”B‚’ÂæÖS¢6Æ÷VD66÷VçBææÖRÀ¢¶–æC¢6Æ÷VD66÷VçBçG—Rç&ufÇVRÂ7W'&Væ7“¢6Æ÷VD66÷VçBæ7W'&Væ7’À¢÷Væ–æt&Ææ6TÖ–æ÷#¢–çCcB‚†6Æ÷VD66÷VçBæ–æ—F–Ä&Ææ6R¢’ç&÷VæFVB‚’’Â7&VFVDC¢FFR‚’À¢–ç7F—GWF–öã¢6Æ÷VD66÷VçBæ–ç7F—GWF–öâÂÆ7CC¢6Æ÷VD66÷VçBæÆ7CBÀ¢&–ÆÄF“¢6Æ÷VD66÷VçBæ&–ÆÄF’Â–ÖVçDGVTF“¢6Æ÷VD66÷VçBç–ÖVçDGVTF’À¢WFôFV&—D66÷VçD”C¢6Æ÷VD66÷VçBæWFôFV&—D66÷VçD–BæfÆDÖ…UT”Bæ–æ—B‡WV–E7G&–æs¢’’À¢WFô6öæf—&Õ&W–ÖVçC¢6Æ÷VD66÷VçBæWFô6öæf—&Õ&W–ÖVçBÂw&6UW&–öDF—3¢6Æ÷VD66÷VçBæw&6UW&–öDF—2À¢Æ7E&V6öæ6–ÆVDC¢6VÆbç'6T•4óƒc†6Æ÷VD66÷VçBæÆ7E&V6öæ6–ÆVDB’À¢—4FVfVÇDW‡Vç6S¢6Æ÷VD66÷VçBæ—4FVfVÇDW‡Vç6RÂ—4FVfVÇD–æ6öÖS¢6Æ÷VD66÷VçBæ—4FVfVÇD–æ6öÖRÀ¢—4&6†—fVC¢6Æ÷VD66÷VçBæ—4&6†—fVBÂ6÷'D÷&FW#¢6Æ÷VD66÷VçBç6÷'D÷&FW ¢¢G'’v—BÆö6ÄW‡Vç6UW6T66Ræ–×÷'E&VÖ÷FT66÷VçG2…¶Ö—'&÷%Ò¢òÒv—B&W&TÆö6Åv÷&·76R‚¢Ğ¢ÆWBö67W'&VDC¢FFSğ¢–bÆWBF–ÖW7F×ÒG&gBæö67W'&VDB°¢wV&BÆWB'6VBÒ•4óƒcFFTf÷&ÖGFW"‚’æFFR†g&öÓ¢F–ÖW7F×’À¢æF—fTÆö6ÄFFRæFFT¶W’‡'6VB’ÓÒG&gBæFFT¶W’VÇ6R°¢F‡&÷rÆö6ÄFFW'&÷"æ–çfÆ–E&V6÷&@¢Ğ¢ö67W'&VDBÒ'6V@¢ÒVÇ6R°¢ö67W'&VDBÒæ–À¢Ğ¢ÆWB6fVBÒG'’v—BÆö6ÄW‡Vç6UW6T66Ræ7&VFT–æ6öÖR„Æö6Ä–æ6öÖT6öÖÖæB€¢–C¢UT”B‚’Â66÷VçD”C¢66÷VçD”BÂÖ÷VçEFW‡C¢G&gBæÖ÷VçEFW‡BÂ7W'&Væ7“¢$4å’"À¢6÷W&6TæÖS¢G&gBçF—FÆRÂ6FVv÷'“¢G&gBæ6FVv÷'’Â–æ6öÖTFFS¢G&gBæFFT¶W’À¢ö67W'&VDC¢ö67W'&VDBÀ¢æ÷FS¢G&gBææ÷FRçG&–ÖÖ–æt6†&7FW'2†–ã¢çv†—FW76W4æDæWvÆ–æW2’æ—4V×G’òæ–Â¢G&gBææ÷FRÀ¢7&VFVDC¢FFR‚’Â–ÖvTFF¢G&gBæ–ÖvTFF¢’¢66†VGVÆTÆö6Ä6ö×æ–öâ†f÷#¢Æö6Ä–æ6öÖU&VDÖöFVÂæFWF–Â†g&öÓ¢6fVBÂ–ÖvU7F÷&S¢Æö6Ä–ÖvU7F÷&R’¢òÒv—B&W&TÆö6Åv÷&·76R‚¢v—B&Vg&W6„Æö6ÄÖöçF…&ö¦V7F–öâ†ÖöçF„¶W“¢7G&–ær‡6fVBæ–æ6öÖTFFRç&Vf—‚ƒr’’¢ÖçVÅ&V6÷&DÖW76vRÒÆö6Åw&—FTÖW76vR‚.iKnXZ^[{.Šë[Ù^ûÈiÊÎiË®ûÈ’"¢&WGW&âG'VP¢Ğ ¢&—fFRgVæ27&VFTÆö6ÄFöÖ–å&V6÷&B€¢òG&gC¢æF—fTÖçVÅ&V6÷&DG&gBÀ¢FöÖ–ã¢æF—fTFöÖ–äFVf–æ—F–öãğ¢’7–æ2F‡&÷w2Óâ&ööÂ°¢wV&BÆWBÆö6Å&V6÷&EW6T66RÀ¢Æö6Å&V6÷&EfÆ–FF–öâç7W÷'FVDFöÖ–ä¶W—2æ6öçF–ç2†G&gBæFöÖ–ä¶W’’VÇ6R°¢F‡&÷rÆö6ÄFFW'&÷"æ–çfÆ–E&V6÷&@¢Ğ¢wV&BG&gBçfÆ–FF–öäÖW76vR†FöÖ–ã¢FöÖ–â’ÓÒæ–ÂVÇ6R°¢F‡&÷rÆö6ÄFFW'&÷"æ–çfÆ–E&V6÷&@¢Ğ¢ÆWB–ÆöBÒG&gBçVæ—fW'6Å–ÆöB†FöÖ–ã¢FöÖ–â¢ÆWBF—FÆRÒG&gBç&W6öÇfVEF—FÆR†FöÖ–ã¢FöÖ–â¢ÆWB7VÖÖ'’ÒG&gBç&W6öÇfVE7VÖÖ'’†FöÖ–ã¢FöÖ–â¢ÆWB&V6÷&C¢Æö6Å&V6÷&@¢f"&Wf–÷W4ÖöçF„¶W“¢7G&–æsğ¢–bÆWBW†—7F–æu&t–BÒG&gBæW†—7F–æu&t–B°¢wV&BÆWBW†—7F–æt”BÒUT”B‡WV–E7G&–æs¢W†—7F–æu&t–B’VÇ6R°¢F‡&÷rÆö6ÄFFW'&÷"æ–çfÆ–D–FVçF–f–W ¢Ğ¢wV&BÆWB7W'&VçBÒG'’v—BÆö6Å&V6÷&EW6T66Rç&V6÷&B†–C¢W†—7F–æt”B’VÇ6R°¢F‡&÷rÆö6ÄFFW'&÷"ç&V6÷&Dæ÷Df÷Væ@¢Ğ¢&Wf–÷W4ÖöçF„¶W’Ò7G&–ær†7W'&VçBæ'W6–æW74FFRç&Vf—‚ƒr’¢ÆWBWFFVBÒG'’v—BÆö6Å&V6÷&EW6T66RçWFFR„Æö6Å&V6÷&EWFFT6öÖÖæB€¢–C¢W†—7F–æt”BÀ¢W‡V7FVEfW'6–öã¢7W'&VçBæÆö6ÅfW'6–öâÀ¢F—FÆS¢F—FÆRÀ¢7VÖÖ'“¢7VÖÖ'’À¢–ÆöC¢–ÆöBÀ¢&V6÷&DFFS¢G&gBæFFT¶W’À¢&V6÷&EF–ÖS¢G&gBçF–ÖT¶W’À¢æ÷FS¢G&gBææ÷FRçG&–ÖÖ–æt6†&7FW'2†–ã¢çv†—FW76W4æDæWvÆ–æW2’æ—4V×G’òæ–Â¢G&gBææ÷FRÀ¢WFFVDC¢FFR‚’À¢–ÖvTFF¢G&gBæ–ÖvTFFÀ¢&VÖ÷fT–ÖvS¢G&gBç&VÖ÷fT–ÖvP¢’¢&V6÷&BÒWFFVBç&V6÷&@¢ÒVÇ6R°¢ÆWB7&VFVBÒG'’v—BÆö6Å&V6÷&EW6T66Ræ7&VFR„Æö6Å&V6÷&D6öÖÖæB€¢–C¢UT”B‚’À¢FöÖ–ä¶W“¢G&gBæFöÖ–ä¶W’À¢F—FÆS¢F—FÆRÀ¢7VÖÖ'“¢7VÖÖ'’À¢–ÆöC¢–ÆöBÀ¢&V6÷&DFFS¢G&gBæFFT¶W’À¢&V6÷&EF–ÖS¢G&gBçF–ÖT¶W’À¢æ÷FS¢G&gBææ÷FRçG&–ÖÖ–æt6†&7FW'2†–ã¢çv†—FW76W4æDæWvÆ–æW2’æ—4V×G’òæ–Â¢G&gBææ÷FRÀ¢–ÖvTFF¢G&gBæ–ÖvTFFÀ¢7&VFVDC¢FFR‚¢’¢&V6÷&BÒ7&VFVBç&V6÷&@¢Ğ¢66†VGVÆTÆö6Ä6ö×æ–öâ†f÷#¢Æö6Å&V6÷&E&VDÖöFVÂæFWF–Â†g&öÓ¢&V6÷&BÂ–ÖvU7F÷&S¢Æö6Ä–ÖvU7F÷&R’¢ÆWBÖöçF„¶W’Ò7G&–ær‡&V6÷&Bç&V6÷&DFFRç&Vf—‚ƒr’¢–bÆWB&Wf–÷W4ÖöçF„¶W’Â&Wf–÷W4ÖöçF„¶W’ÒÖöçF„¶W’°¢v—B&Vg&W6„Æö6ÄÖöçF…&ö¦V7F–öâ†ÖöçF„¶W“¢&Wf–÷W4ÖöçF„¶W’¢Ğ¢v—B&Vg&W6„Æö6ÄÖöçF…&ö¦V7F–öâ†ÖöçF„¶W“¢ÖöçF„¶W’¢–bÆWBW†—7F–æu&t–BÒG&gBæW†—7F–æu&t–B°¢ÆWBöÆE&VfW&Væ6RÒ&Æö6ÂÖFFõÂ†W†—7F–æu&t–B’ ¢–çfÆ–FFU&V6÷&DW‡&W76–öåÆå7FFR†gFW$6†æv–æs¢¶öÆE&VfW&Væ6UÒ¢&V6÷&DFWF–Ä66†Rç&VÖ÷fUfÇVR†f÷$¶W“¢æF—fU&V6÷&E&VfW&Væ6R†öÆE&VfW&Væ6R’æ6æöæ–6ÅfÇVR¢v—BÆöE&V6÷&DFWF–Â‡&VfW&Væ6S¢&Æö6ÂÖFFõÂ‡&V6÷&Bæ–BçWV–E7G&–ær’"Âf÷&6S¢G'VR¢Ğ¢ÖçVÅ&V6÷&DÖW76vRÒÆö6Åw&—FTÖW76vR†G&gBæW†—7F–æu&t–BÓÒæ–Âò.Šë[Ù^[{.KùŞZÙûÈiÊÎiË®ûÈ’"¢.Šë[Ù^[{.i»NikûÈiÊÎiË®ûÈ’"¢&WGW&âG'VP¢Ğ ¢&—fFRgVæ27&VFUVæ–f–VDÖçVÅ&V6÷&B€¢òG&gC¢æF—fTÖçVÅ&V6÷&DG&gBÀ¢FöÖ–ã¢æF—fTFöÖ–äFVf–æ—F–öãğ¢’7–æ2F‡&÷w2Óâ&ööÂ°¢–bG&gBæ¶–æBÒçVæ—fW'6ÂÂÆWBW†—7F–æt”BÒG&gBæW†—7F–æu&t–BÀ¢ÆWB–BÒUT”B‡WV–E7G&–æs¢W†—7F–æt”B’ÂÆWBÆö6ÄW‡Vç6UW6T66R°¢ÆWBöÆDFFS¢7G&–æp¢–bG&gBæ¶–æBÓÒæW‡Vç6R°¢wV&BÆWB7W'&VçBÒG'’v—BÆö6ÄW‡Vç6UW6T66RæW‡Vç6R†–C¢–B’VÇ6R²F‡&÷rÆö6ÄFFW'&÷"ç&V6÷&Dæ÷Df÷VæBĞ¢öÆDFFRÒ7W'&VçBçG&ç67F–öäFFP¢òÒG'’v—BÆö6ÄW‡Vç6UW6T66RçWFFR„Æö6ÄW‡Vç6UWFFT6öÖÖæB†–C¢–BÀ¢W‡V7FVEfW'6–öã¢G&gBæÆö6ÅfW'6–öâóò7W'&VçBæÆö6ÅfW'6–öâÀ¢66÷VçD”C¢G&gBæ66÷VçD–BæfÆDÖ…UT”Bæ–æ—B‡WV–E7G&–æs¢’’ÂÖ÷VçEFW‡C¢G&gBæÖ÷VçEFW‡BÀ¢7W'&Væ7“¢7W'&VçBæ7W'&Væ7’ÂÖW&6†çDæÖS¢G&gBçF—FÆRÂÆFf÷&Ó¢G&gBçÆFf÷&ÒÀ¢6FVv÷'“¢G&gBæ6FVv÷'’Â–ÖVçDÖWF†öC¢G&gBç–ÖVçDÖWF†öBÀ¢G&ç67F–öäFFS¢G&gBæFFT¶W’ÂG&ç67F–öåF–ÖS¢G&gBçF–ÖT¶W’Âæ÷FS¢G&gBææ÷FRÀ¢WFFVDC¢FFR‚’Â–ÖvTFF¢G&gBæ–ÖvTFFÂ&VÖ÷fT–ÖvS¢G&gBç&VÖ÷fT–ÖvR’¢–bÆWBWFFVBÒG'’v—BÆö6ÄW‡Vç6UW6T66RæW‡Vç6R†–C¢–B’°¢66†VGVÆTÆö6Ä6ö×æ–öâ†f÷#¢Æö6ÄW‡Vç6U&VDÖöFVÂæFWF–Â†g&öÓ¢WFFVBÂ–ÖvU7F÷&S¢Æö6Ä–ÖvU7F÷&R’¢Ğ¢ÒVÇ6R°¢wV&BÆWB7W'&VçBÒG'’v—BÆö6ÄW‡Vç6UW6T66Ræ–æ6öÖR†–C¢–B’VÇ6R²F‡&÷rÆö6ÄFFW'&÷"ç&V6÷&Dæ÷Df÷VæBĞ¢öÆDFFRÒ7W'&VçBæ–æ6öÖTFFP¢òÒG'’v—BÆö6ÄW‡Vç6UW6T66RçWFFT–æ6öÖR„Æö6Ä–æ6öÖUWFFR†–C¢–BÂ&öf–ÆT”C¢7W'&VçBç&öf–ÆT”BÀ¢W‡V7FVEfW'6–öã¢G&gBæÆö6ÅfW'6–öâóò7W'&VçBæÆö6ÅfW'6–öâÀ¢66÷VçD”C¢G&gBæ66÷VçD–BæfÆDÖ…UT”Bæ–æ—B‡WV–E7G&–æs¢’’À¢Ö÷VçDÖ–æ÷#¢G'’Æö6ÄW‡Vç6TÖW"æÖ÷VçDÖ–æ÷"†G&gBæÖ÷VçEFW‡B’Â7W'&Væ7“¢7W'&VçBæ7W'&Væ7’À¢6÷W&6TæÖS¢G&gBçF—FÆRÂ6FVv÷'“¢G&gBæ6FVv÷'’Â–æ6öÖTFFS¢G&gBæFFT¶W’À¢ö67W'&VDC¢G&gBæö67W'&VDBæfÆDÖ²•4óƒcFFTf÷&ÖGFW"‚’æFFR†g&öÓ¢C’ÒÂæ÷FS¢G&gBææ÷FRÀ¢WFFVDC¢FFR‚’Â–ÖvTFF¢G&gBæ–ÖvTFFÂ&VÖ÷fT–ÖvS¢G&gBç&VÖ÷fT–ÖvR’¢–bÆWBWFFVBÒG'’v—BÆö6ÄW‡Vç6UW6T66Ræ–æ6öÖR†–C¢–B’°¢66†VGVÆTÆö6Ä6ö×æ–öâ†f÷#¢Æö6Ä–æ6öÖU&VDÖöFVÂæFWF–Â†g&öÓ¢WFFVBÂ–ÖvU7F÷&S¢Æö6Ä–ÖvU7F÷&R’¢Ğ¢Ğ¢òÒv—B&W&TÆö6Åv÷&·76R‚¢v—B&Vg&W6„Æö6ÄÖöçF…&ö¦V7F–öâ†ÖöçF„¶W“¢7G&–ær†öÆDFFRç&Vf—‚ƒr’’¢–b7G&–ær†öÆDFFRç&Vf—‚ƒr’’Ò7G&–ær†G&gBæFFT¶W’ç&Vf—‚ƒr’’°¢v—B&Vg&W6„Æö6ÄÖöçF…&ö¦V7F–öâ†ÖöçF„¶W“¢7G&–ær†G&gBæFFT¶W’ç&Vf—‚ƒr’’¢Ğ¢ÆWB&VfW&Væ6RÒ%Â†G&gBæ¶–æBÓÒæW‡Vç6Rò&W‡Vç6R"¢&–æ6öÖR"’õÂ†–BçWV–E7G&–ær’ ¢&V6÷&DFWF–Ä66†Rç&VÖ÷fUfÇVR†f÷$¶W“¢æF—fU&V6÷&E&VfW&Væ6R‡&VfW&Væ6R’æ6æöæ–6ÅfÇVR¢v—BÆöE&V6÷&DFWF–Â‡&VfW&Væ6S¢&VfW&Væ6RÂf÷&6S¢G'VR¢v—B&WG'”Æö6Ä–ÖvT6ÆVçW2‚¢ÖçVÅ&V6÷&DÖW76vRÒÆö6Åw&—FTÖW76vR‚.Šë[Ù^[{.i»NikûÈiÊÎiË®ûÈ’"¢&WGW&âG'VP¢Ğ¢–bG&gBæ¶–æBÓÒçVæ—fW'6ÂÂG&gBæFöÖ–ä¶W’ÓÒ'vÆÆWB"À¢G&gBæW†—7F–æu&t–BÓÒæ–ÂÂÆö6ÅvÆÆWE6æ6†÷EW6T66RÒæ–Â°¢&WGW&âG'’v—B7&VFTÆö6ÅvÆÆWE6æ6†÷B†G&gBÂFöÖ–ã¢FöÖ–â¢Ğ¢–bG&gBæ¶–æBÓÒæW‡Vç6RÂÆö6ÄW‡Vç6UW6T66RÒæ–Â°¢&WGW&âG'’v—B7&VFTÆö6ÄW‡Vç6R†G&gB¢Ğ¢–bG&gBæ¶–æBÓÒæ–æ6öÖRÂÆö6ÄW‡Vç6UW6T66RÒæ–Â°¢&WGW&âG'’v—B7&VFTÆö6Ä–æ6öÖR†G&gBÂFöÖ–ã¢FöÖ–â¢Ğ¢–bG&gBæ¶–æBÓÒçVæ—fW'6ÂÀ¢Æö6Å&V6÷&EW6T66RÒæ–ÂÀ¢Æö6Å&V6÷&EfÆ–FF–öâç7W÷'FVDFöÖ–ä¶W—2æ6öçF–ç2†G&gBæFöÖ–ä¶W’’À¢v—B6†÷VÆD7&VFTÆö6ÄFöÖ–å&V6÷&B†f÷#¢G&gB’°¢&WGW&âG'’v—B7&VFTÆö6ÄFöÖ–å&V6÷&B†G&gBÂFöÖ–ã¢FöÖ–â¢Ğ¢&WGW&âG'’v—B7&VFU&VÖ÷FTÖçVÅ&V6÷&B†G&gBÂFöÖ–ã¢FöÖ–â¢Ğ ¢&—fFRgVæ27&VFTÆö6ÅvÆÆWE6æ6†÷B€¢òG&gC¢æF—fTÖçVÅ&V6÷&DG&gBÀ¢FöÖ–ã¢æF—fTFöÖ–äFVf–æ—F–öãğ¢’7–æ2F‡&÷w2Óâ&ööÂ°¢wV&BÆWBÆö6ÅvÆÆWE6æ6†÷EW6T66RÂG&gBæW†—7F–æu&t–BÓÒæ–ÂÀ¢G&gBçfÆ–FF–öäÖW76vR†FöÖ–ã¢FöÖ–â’ÓÒæ–ÂVÇ6R°¢F‡&÷rÆö6ÄFFW'&÷"æ–çfÆ–E&V6÷&@¢Ğ¢ÆWBÖ÷VçDÖ–æ÷"ÒG'’Æö6ÄW‡Vç6TÖW"æÖ÷VçDÖ–æ÷"†G&gBç&–Ö'•fÇVUFW‡B¢ÆWB–ÆöBÒG&gBçVæ—fW'6Å–ÆöB†FöÖ–ã¢FöÖ–â¢ÆWB6æ6†÷BÒG'’v—BÆö6ÅvÆÆWE6æ6†÷EW6T66Ræ7&VFR„Æö6ÅvÆÆWE6æ6†÷D6öÖÖæB€¢–C¢UT”B‚’À¢F—FÆS¢G&gBç&W6öÇfVEF—FÆR†FöÖ–ã¢FöÖ–â’À¢7VÖÖ'“¢G&gBç&W6öÇfVE7VÖÖ'’†FöÖ–ã¢FöÖ–â’À¢–ÆöC¢–ÆöBÀ¢&V6÷&DFFS¢G&gBæFFT¶W’À¢&V6÷&EF–ÖS¢G&gBçF–ÖT¶W’À¢ö67W'&VDC¢G&gBæö67W'&VDBÀ¢&Ææ6TÖ–æ÷#¢Ö÷VçDÖ–æ÷"À¢7W'&Væ7“¢$4å’"À¢¶–æC¢G&gBçvÆÆWE&V6÷&D¶–æBÓÒ&Æ–&–Æ—G•÷6æ6†÷B"òæÆ–&–Æ—G’¢æ76WBÀ¢–ÖvTFF¢G&gBæ–ÖvTFFÀ¢7&VFVDC¢FFR‚¢’¢ÆWB6æ6†÷E–ÆöBÒ‡G'“òÆö6Å&V6÷&D6öFV2æFV6öFR‡6æ6†÷Bç–ÆöD¥4ôâ’’óò³¥Ğ¢66†VGVÆTÆö6Ä6ö×æ–öâ†f÷#¢æF—fU&V6÷&DFWF–Â€¢–C¢&Æö6Â×vÆÆWBõÂ‡6æ6†÷Bæ–BçWV–E7G&–ær’"À¢&t–C¢6æ6†÷Bæ–BçWV–E7G&–ærÀ¢¶–æC¢'vÆÆWB"À¢F—FÆS¢6æ6†÷BçF—FÆRÀ¢7V'F—FÆS¢6æ6†÷Bç&V6÷&DFFRÀ¢fÇVS¢7G&–ær†f÷&ÖC¢,*RRã&b"Â6æ6†÷Bæ&Ææ6R’À¢FWF–Å&÷w3¢µÒÀ¢–ÖvUU$Ã¢æ–ÂÀ¢–ÖvTÆöDW'&÷#¢fÇ6RÀ¢–ÖvUFƒ¢6æ6†÷Bæ–ÖvUF‚À¢–ÖvT†6ƒ¢6æ6†÷Bæ–ÖvT†6‚À¢Ö÷VçC¢6æ6†÷Bæ&Ææ6RÀ¢ÖW&6†çDæÖS¢æ–ÂÀ¢ÆFf÷&Ó¢æ–ÂÀ¢6FVv÷'“¢æ–ÂÀ¢–ÖVçDÖWF†öC¢æ–ÂÀ¢&V6÷&DFFS¢6æ6†÷Bç&V6÷&DFFRÀ¢æ÷FS¢æ–ÂÀ¢6ö×æ–öäÖW76vS¢6æ6†÷E–ÆöBç7G&–ær‚&6ö×æ–öåöÖW76vR"’À¢66÷VçD–C¢6æ6†÷BæÆ–æ¶VD66÷VçD”CòçWV–E7G&–ærÀ¢7—7FVÔ–ÖvS¢'vÆÆWBç72"À¢–ÆöC¢6æ6†÷E–ÆöBÀ¢G&ç67F–öåF–ÖS¢6æ6†÷Bç&V6÷&EF–ÖRÀ¢FöÖ–ä¶W“¢'vÆÆWB"À¢6÷W&6S¢&Æö6Â"À¢7FGW3¢&Æö6Â"À¢”fVVF&6³¢æF—fT”fVVF&6²‡–ÆöC¢6æ6†÷E–ÆöBæF–7F–öæ'’‚&•öfVVF&6²"’’À¢ÆææW$”fVVF&6³¢æF—fT”fVVF&6²‡–ÆöC¢6æ6†÷E–ÆöBæF–7F–öæ'’‚'ÆææW%ö•öfVVF&6²"’¢’¢Fò°¢G'’v—BÆöDÆö6ÅvÆÆWE6æ6†÷G2‚¢Ò6F6‚°¢ÖçVÅ&V6÷&DÖW76vRÒ.[ú¾xZ~[{.KùŞZÙYÊiÊÎiË®ûÈÎKØnX‰~ŠX‹~ikZK‹J^ûÉ¥Â†W'&÷"æÆö6Æ—¦VDFW67&—F–öâ’ ¢&WGW&âG'VP¢Ğ¢ÖçVÅ&V6÷&DÖW76vRÒ.™+XÈ^[ú¾xZ~[{.KùŞZÙûÈiÊÎiË®ûÈ’ ¢&WGW&âG'VP¢Ğ ¢&—fFRgVæ26†÷VÆD7&VFTÆö6ÄFöÖ–å&V6÷&B†f÷"G&gC¢æF—fTÖçVÅ&V6÷&DG&gB’7–æ2Óâ&ööÂ°¢wV&BÆWBÆö6Å&V6÷&EW6T66RVÇ6R²&WGW&âfÇ6RĞ¢wV&BÆWBW†—7F–æu&t–BÒG&gBæW†—7F–æu&t–BVÇ6R²&WGW&âG'VRĞ¢wV&BÆWBW†—7F–æt”BÒUT”B‡WV–E7G&–æs¢W†—7F–æu&t–B’VÇ6R²&WGW&âfÇ6RĞ¢&WGW&â‡G'“òv—BÆö6Å&V6÷&EW6T66Rç&V6÷&B†–C¢W†—7F–æt”B’’Òæ–À¢Ğ ¢&—fFRgVæ27&VFU&VÖ÷FTÖçVÅ&V6÷&B…òG&gC¢æF—fTÖçVÅ&V6÷&DG&gBÂFöÖ–ã¢æF—fTFöÖ–äFVf–æ—F–öãò’7–æ2F‡&÷w2Óâ&ööÂ°¢ÆWB6W76–öâÒG'’v—BfÆ–E6W76–öâ‚¢ÆWB&VfW&Væ6RÒG'’v—B&V6÷&E&W÷6—F÷'’æ7&VFR€¢G&gBÀ¢FöÖ–ã¢FöÖ–âÀ¢W6W$–C¢6W76–öâçW6W"æ–BÀ¢66W75Fö¶Vã¢6W76–öâæ66W75Fö¶Và¢¢ÆWB6fVE&VfW&Væ6RÒæF—fU&V6÷&E&VfW&Væ6R‡&VfW&Væ6R’æ6æöæ–6ÅfÇVP¢–bÆWBW†—7F–æu&t–BÒG&gBæW†—7F–æu&t–B°¢ÆWB÷&–v–æÅ&VfW&Væ6RÒæF—fU&V6÷&E&VfW&Væ6R€¢¶–æC¢&FF"À¢&t–C¢W†—7F–æu&t–@¢’æ6æöæ–6ÅfÇVP¢–çfÆ–FFU&V6÷&DW‡&W76–öåÆå7FFR†gFW$6†æv–æs¢¶÷&–v–æÅ&VfW&Væ6RÂ6fVE&VfW&Væ6UÒ¢Ğ¢–bG&gBæ¶–æBÓÒæW‡Vç6R°¢66†VGVÆT6öæf—&ÖVDW‡Vç6Ufö6'VÆ'’€¢ÆFf÷&Ó¢G&gBçÆFf÷&ÒÀ¢6FVv÷'“¢G&gBæ6FVv÷'’À¢–ÖVçDÖWF†öC¢G&gBç–ÖVçDÖWF†öBÀ¢66÷VçD–C¢G&gBæ66÷VçD–BÀ¢W6W$–C¢6W76–öâçW6W"æ–BÀ¢66W75Fö¶Vã¢6W76–öâæ66W75Fö¶Và¢¢Ğ¢v—B&Vg&W6„gFW%&V6÷&Ew&—FR†ffV7FVDFFT¶W—3¢¶G&gBæFFT¶W•Ò¢–bG&gBæ¶–æBÒçVæ—fW'6ÂÇÂG&gBæFöÖ–ä¶W’ÓÒ'vÆÆWB"°¢v—BÆöD66÷VçG2‚¢Ğ¢–bG&gBæW†—7F–æu&t–BÒæ–Â°¢&V6÷&DFWF–Ä66†Rç&VÖ÷fUfÇVR†f÷$¶W“¢6fVE&VfW&Væ6R¢v—BÆöE&V6÷&DFWF–Â‡&VfW&Væ6S¢6fVE&VfW&Væ6RÂf÷&6S¢G'VR¢Ğ¢ÖçVÅ&V6÷&DÖW76vRÒG&gBæW†—7F–æu&t–BÓÒæ–Âò.Šë[Ù^[{.KùŞZÙ‚"¢.Šë[Ù^[{.i»Nik ¢&WGW&âG'VP¢Ğ ¢&—fFR7FF–2gVæ2Ö¶TFVfVÇDÆö6Å7F÷&vR‚’F‡&÷w2ÓâFVfVÇDÆö6Å7F÷&vR°¢ÆWBFF&6RÒG'’Æö6ÄFF&6R‚¢ÆWB–ÖvU7F÷&RÒG'’Æö6Ä–ÖvU7F÷&R‚¢ÆWB&öf–ÆU7F÷&RÒÆö6Å&öf–ÆU7F÷&R†FF&6S¢FF&6R¢ÆWBW‡Vç6U&W÷6—F÷'’ÒG'’Æö6ÄW‡Vç6U&W÷6—F÷'’†FF&6S¢FF&6R¢ÆWB&V6÷&E&W÷6—F÷'’ÒG'’Æö6Å&V6÷&E&W÷6—F÷'’†FF&6S¢FF&6R¢ÆWBvÆÆWE6æ6†÷E&W÷6—F÷'’ÒG'’Æö6ÅvÆÆWE6æ6†÷E&W÷6—F÷'’†FF&6S¢FF&6R¢ÆWBf7E&VFW"ÒG'’Æö6Äf7E&VFW"†FF&6S¢FF&6R¢ÆWB6ö×æ–öäÖVÖ÷'•&W÷6—F÷'’ÒÆö6Ä6ö×æ–öäÖVÖ÷'•&W÷6—F÷'’†FF&6S¢FF&6R¢ÆWBW‡&W76–öåW'6—7FVæ6RÒÆö6ÄW‡&W76–öåW'6—7FVæ6R€¢FF&6S¢FF&6RÀ¢ÖVÖ÷'•&W÷6—F÷'“¢6ö×æ–öäÖVÖ÷'•&W÷6—F÷'¢¢&WGW&âFVfVÇDÆö6Å7F÷&vR€¢W‡Vç6UW6T66S¢Æö6ÄW‡Vç6UW6T66R€¢&öf–ÆU7F÷&S¢&öf–ÆU7F÷&RÀ¢&W÷6—F÷'“¢W‡Vç6U&W÷6—F÷'’À¢–ÖvU7F÷&S¢–ÖvU7F÷&RÀ¢W‡&W76–öåW'6—7FVæ6S¢W‡&W76–öåW'6—7FVæ6P¢’À¢&V6÷&EW6T66S¢Æö6Å&V6÷&EW6T66R€¢&öf–ÆU7F÷&S¢&öf–ÆU7F÷&RÀ¢&W÷6—F÷'“¢&V6÷&E&W÷6—F÷'’À¢–ÖvU7F÷&S¢–ÖvU7F÷&RÀ¢W‡&W76–öåW'6—7FVæ6S¢W‡&W76–öåW'6—7FVæ6P¢’À¢vÆÆWE6æ6†÷EW6T66S¢Æö6ÅvÆÆWE6æ6†÷EW6T66R€¢&öf–ÆU7F÷&S¢&öf–ÆU7F÷&RÀ¢&W÷6—F÷'“¢vÆÆWE6æ6†÷E&W÷6—F÷'’À¢–ÖvU7F÷&S¢–ÖvU7F÷&RÀ¢W‡&W76–öåW'6—7FVæ6S¢W‡&W76–öåW'6—7FVæ6P¢’À¢f7E&VFW#¢f7E&VFW"À¢6ö×æ–öäÖVÖ÷'•&W÷6—F÷'“¢6ö×æ–öäÖVÖ÷'•&W÷6—F÷'’À¢W‡&W76–öåW'6—7FVæ6S¢W‡&W76–öåW'6—7FVæ6RÀ¢–ÖvU7F÷&S¢–ÖvU7F÷&RÀ¢VæF–ætf–ææ6–Å&W÷6—F÷'“¢Æö6ÅVæF–ætf–ææ6–Å&W÷6—F÷'’†FF&6S¢FF&6R’À¢f–ææ6–Ä&–æF–æu&W÷6—F÷'“¢G'’Æö6Äf–ææ6–Ä&–æF–æu&W÷6—F÷'’†FF&6S¢FF&6R’À¢†—7F÷'”Ö–w&F–öä66†S¢Æö6Ä†—7F÷'”Ö–w&F–öä66†R†FF&6S¢FF&6RÂ–ÖvU7F÷&S¢–ÖvU7F÷&R’À¢†—7F÷'”Ö–w&F–öäF–væ÷7F–57F÷&S¢G'“òÆö6Ä†—7F÷'”Ö–w&F–öäF–væ÷7F–57F÷&R‚’À¢†—7F÷'”–çfVçF÷'•&VFW#¢Æö6Ä†—7F÷'”–çfVçF÷'•&VFW"†FF&6S¢FF&6RÂ–ÖvU7F÷&S¢–ÖvU7F÷&R’À¢†—7F÷'•Vç&W6öÇfVE&W÷6—F÷'“¢Æö6Ä†—7F÷'•Vç&W6öÇfVE&W÷6—F÷'’†FF&6S¢FF&6R¢¢Ğ ¢&—fFR7FF–2gVæ2FVfVÇDÆö6ÄW‡Vç6UW6T66R‚’ÓâÆö6ÄW‡Vç6UW6T66U&÷Fö6öÃò°¢wV&BÆWBFF&6RÒG'“òÆö6ÄFF&6R‚’À¢ÆWB&W÷6—F÷'’ÒG'“òÆö6ÄW‡Vç6U&W÷6—F÷'’†FF&6S¢FF&6R’À¢ÆWB–ÖvU7F÷&RÒG'“òÆö6Ä–ÖvU7F÷&R‚’VÇ6R²&WGW&âæ–ÂĞ¢&WGW&âÆö6ÄW‡Vç6UW6T66R€¢&öf–ÆU7F÷&S¢Æö6Å&öf–ÆU7F÷&R†FF&6S¢FF&6R’À¢&W÷6—F÷'“¢&W÷6—F÷'’À¢–ÖvU7F÷&S¢–ÖvU7F÷&RÀ¢W‡&W76–öåW'6—7FVæ6S¢Æö6ÄW‡&W76–öåW'6—7FVæ6R†FF&6S¢FF&6R¢¢Ğ ¢&—fFR7FF–2gVæ2FVfVÇDÆö6Å&V6÷&EW6T66R‚’ÓâÆö6Å&V6÷&EW6T66U&÷Fö6öÃò°¢wV&BÆWBFF&6RÒG'“òÆö6ÄFF&6R‚’À¢ÆWB&W÷6—F÷'’ÒG'“òÆö6Å&V6÷&E&W÷6—F÷'’†FF&6S¢FF&6R’À¢ÆWB–ÖvU7F÷&RÒG'“òÆö6Ä–ÖvU7F÷&R‚’VÇ6R²&WGW&âæ–ÂĞ¢&WGW&âÆö6Å&V6÷&EW6T66R€¢&öf–ÆU7F÷&S¢Æö6Å&öf–ÆU7F÷&R†FF&6S¢FF&6R’À¢&W÷6—F÷'“¢&W÷6—F÷'’À¢–ÖvU7F÷&S¢–ÖvU7F÷&P¢¢Ğ ¢&—fFR7FF–2gVæ2FVfVÇDÆö6Ä–ÖvU7F÷&R‚’ÓâÆö6Ä–ÖvU7F÷&Sò°¢G'“òÆö6Ä–ÖvU7F÷&R‚¢Ğ ¢&—fFR7FF–2gVæ2FVfVÇDÆö6Ä–ÖvT–çF¶U&W÷6—F÷'’‚’ÓâÆö6Ä–ÖvT–çF¶U&W÷6—F÷'“ò°¢wV&BÆWBFF&6RÒG'“òÆö6ÄFF&6R‚’VÇ6R²&WGW&âæ–ÂĞ¢&WGW&âÆö6Ä–ÖvT–çF¶U&W÷6—F÷'’†FF&6S¢FF&6R¢Ğ ¢òòòXŠN˜xŞX	˜iú^Šú.KéŞ‹Yn‹ùKŠ®K¹>[©>ûÉ¾kÈşk:XZ^KÉ®ŠêKŠN˜>XŠN˜xŞ˜;Şh»şX‹z›®X	˜8™Ù›¹ZKiX8 ¢&—fFR7FF–2gVæ2FVfVÇDf–ææ6–ÄGWÆ–6FU&Wf–Wu&W÷6—F÷'’‚’ÓâÆö6Äf–ææ6–ÄGWÆ–6FU&Wf–Wu&W÷6—F÷'“ò°¢wV&BÆWBFF&6RÒG'“òÆö6ÄFF&6R‚’VÇ6R²&WGW&âæ–ÂĞ¢&WGW&âÆö6Äf–ææ6–ÄGWÆ–6FU&Wf–Wu&W÷6—F÷'’†FF&6S¢FF&6R¢Ğ ¢òòò˜	®yú^ih~j˜xÎy¨N8ÎK¸®ZJ[{.ˆ«òiÊÎiÈiKnXZ^8Ş™ÚZè>zé~ûÉ¾kÈşk:XZ^i{n‹ùKŠNKŠ®i[ZÙ~h.K‹¢8 ¢&—fFR7FF–2gVæ2FVfVÇE&V6övæ—F–öäW‡Vç6U&W÷6—F÷'’‚’ÓâÆö6ÄW‡Vç6U&W÷6—F÷'•&÷Fö6öÃò°¢wV&BÆWBFF&6RÒG'“òÆö6ÄFF&6R‚’À¢ÆWB&W÷6—F÷'’ÒG'“òÆö6ÄW‡Vç6U&W÷6—F÷'’†FF&6S¢FF&6R’VÇ6R²&WGW&âæ–ÂĞ¢&WGW&â&W÷6—F÷'¢Ğ ¢&—fFR7FF–2gVæ2FVfVÇDÆö6Å&V6÷&E÷'F&–Æ—G’‚’ÓâÆö6Å&V6÷&E÷'F&–Æ—G“ò°¢wV&BÆWBFF&6RÒG'“òÆö6ÄFF&6R‚’À¢ÆWB–ÖvU7F÷&RÒG'“òÆö6Ä–ÖvU7F÷&R‚’VÇ6R²&WGW&âæ–ÂĞ¢&WGW&âÆö6Å&V6÷&E÷'F&–Æ—G’†FF&6S¢FF&6RÂ–ÖvU7F÷&S¢–ÖvU7F÷&R¢Ğ ¢&—fFR7FF–2gVæ2FVfVÇDÆö6Äf7E÷'F&–Æ—G’‚’ÓâÆö6Äf7E÷'F&–Æ—G“ò°¢wV&BÆWBFF&6RÒG'“òÆö6ÄFF&6R‚’À¢ÆWB–ÖvU7F÷&RÒG'“òÆö6Ä–ÖvU7F÷&R‚’VÇ6R²&WGW&âæ–ÂĞ¢&WGW&âÆö6Äf7E÷'F&–Æ—G’†FF&6S¢FF&6RÂ–ÖvU7F÷&S¢–ÖvU7F÷&R¢Ğ ¢&—fFR7FF–2gVæ2FVfVÇDÆö6Ä6ö×ÆWFT&6·W÷'F&–Æ—G’‚’ÓâÆö6Ä6ö×ÆWFT&6·W÷'F&–Æ—G“ò°¢wV&BÆWBFF&6RÒG'“òÆö6ÄFF&6R‚’À¢ÆWB–ÖvU7F÷&RÒG'“òÆö6Ä–ÖvU7F÷&R‚’VÇ6R²&WGW&âæ–ÂĞ¢&WGW&âÆö6Ä6ö×ÆWFT&6·W÷'F&–Æ—G’†FF&6S¢FF&6RÂ–ÖvU7F÷&S¢–ÖvU7F÷&R¢Ğ ¢&—fFR7FF–2gVæ2FVfVÇDvVæW&–4–×÷'E6W'f–6R‚’ÓâvVæW&–4–×÷'E6W'f–6Sò°¢wV&BÆWBFF&6RÒG'“òÆö6ÄFF&6R‚’VÇ6R²&WGW&âæ–ÂĞ¢&WGW&âvVæW&–4–×÷'E6W'f–6R†FF&6S¢FF&6R¢Ğ ¢&—fFR7FF–2gVæ2FVfVÇDÆö6Ä&–æF–æu&W÷6—F÷'’‚’ÓâÆö6Ä&–æF–æu&W÷6—F÷'“ò°¢wV&BÆWBFF&6RÒG'“òÆö6ÄFF&6R‚’VÇ6R²&WGW&âæ–ÂĞ¢&WGW&âÆö6Å&öf–ÆU7F÷&R†FF&6S¢FF&6R¢Ğ ¢&—fFR7FF–2gVæ2FVfVÇDÆö6Å7–æ5'VææW"‚’ÓâÆö6Å7–æ5'VææW#ò°¢wV&BÆWBFF&6RÒG'“òÆö6ÄFF&6R‚’À¢ÆWB&W÷6—F÷'’ÒG'“òÆö6ÄW‡Vç6U&W÷6—F÷'’†FF&6S¢FF&6R’VÇ6R²&WGW&âæ–ÂĞ¢ÆWB&öf–ÆU7F÷&RÒÆö6Å&öf–ÆU7F÷&R†FF&6S¢FF&6R¢ÆWBG&ç7÷'BÒ7W&6U7–æ5G&ç7÷'B€¢&VÖ÷FT6Æ–VçC¢7W&6U&VÖ÷FT6Æ–VçB‚’À¢66W75Fö¶Vã¢°¢G'’v—B7W&6TWF…6W'f–6R‚’æ7W'&VçE6W76–öâ‚’æ66W75Fö¶Và¢Ğ¢¢&WGW&âÆö6Å7–æ46ö÷&F–æF÷"€¢7FFU7F÷&S¢&öf–ÆU7F÷&RÀ¢&W÷6—F÷'“¢&W÷6—F÷'’À¢÷'F&–Æ—G“¢Æö6ÄW‡Vç6U÷'F&–Æ—G’†FF&6S¢FF&6R’À¢G&ç7÷'C¢G&ç7÷'@¢¢Ğ ¢&—fFR7FF–2ÆWBÖöçF„¶W”f÷&ÖGFW#¢FFTf÷&ÖGFW"Ò°¢ÆWBf÷&ÖGFW"ÒFFTf÷&ÖGFW"‚¢f÷&ÖGFW"æÆö6ÆRÒÆö6ÆR†–FVçF–f–W#¢&VåõU5õõ4•‚"¢f÷&ÖGFW"æFFTf÷&ÖBÒ'———’ÔÔÒ ¢&WGW&âf÷&ÖGFW ¢Ò‚ ¢&—fFR7FF–2f"7W'&VçDÖöçF„¶W“¢7G&–ær°¢ÖöçF„¶W”f÷&ÖGFW"ç7G&–ær†g&öÓ¢FFR‚’¢Ğ§Ğ ¢òòòK©NYùşK‹¾YË®išşy¨NjŠ®k¹YùşûÈ„”õ2Õc"Õ4„TÄÂÓûÈ8 ¦VçVÒFöÖ–ã¢7G&–ærÂ66T—FW&&ÆRÂ–FVçF–f–&ÆR°¢66RW‡Vç6P¢66R6ÆVW ¢66Rföö@¢66R7÷'@¢66R&VF–æp ¢f"–C¢7G&–ær²&ufÇVRĞ ¢7FF–2gVæ2vW$FöÖ–â†Bƒ¢4tfÆöB’ÓâFöÖ–ãò°¢ÆWBv–GF‚Ò¦–W¦•&÷F÷G—TÆ–÷WBçvUöF÷Eö†—E÷v–GF€¢wV&B‚æ—4f–æ—FRÂv–GF‚âVÇ6R²&WGW&âæ–ÂĞ¢–b‚ÃÒ²&WGW&âÆÄ66W2æf—'7BĞ¢–b‚ãÒ4tfÆöB†ÆÄ66W2æ6÷VçB’¢v–GF‚²&WGW&âÆÄ66W2æÆ7BĞ¢&WGW&âÆÄ66W5´–çB‡‚òv–GF‚•Ğ¢Ğ ¢f"F—FÆS¢7G&–ær°¢7v—F6‚6VÆb°¢66RæW‡Vç6S¢&WGW&â.Šë‹Jb ¢66Rç6ÆVW¢&WGW&â.yÚyÊ ¢66RæfööC¢&WGW&â.šZîš9ò ¢66Rç7÷'C¢&WGW&â.‹ùXª‚ ¢66Rç&VF–æs¢&WGW&â.™ˆ^Šû² ¢Ğ¢Ğ ¢f"7—7FVÔ–ÖvS¢7G&–ær°¢7v—F6‚6VÆb°¢66RæW‡Vç6S¢&WGW&â&7&VF—F6&B ¢66Rç6ÆVW¢&WGW&â&Öööâç§§¢ ¢66RæfööC¢&WGW&â&f÷&²æ¶æ–fR ¢66Rç7÷'C¢&WGW&â&f–wW&Rç'Vâ ¢66Rç&VF–æs¢&WGW&â&&öö² ¢Ğ¢Ğ ¢òòòikZ;>K©NYùşKˆâF6†&ö&BæFöÖ–ç2KŠŞiz~Yùò¶W’y¨NZû[©NX[>{;¾ûÈyJK¨îz›®hXŠNZé®KˆîYî{ºŞXh^Zëhê^{«şûÈ8 ¢f"ÆVv7”FöÖ–ä¶W“¢7G&–ær°¢7v—F6‚6VÆb°¢66RæW‡Vç6S¢&WGW&â&W‡Vç6R ¢66Rç6ÆVWÂæfööBÂç7÷'BÂç&VF–æs¢&WGW&â&ufÇVP¢Ğ¢Ğ§Ğ ¢òòòK‹¾YË®išşK˜¾Kˆ®y¨NXZ[şŠhny¹n[.ûÈ„”õ2Õc"Õ4„TÄÂÓNûÈûÉ¶ææöæVŠzK®izŠhny¹n[.8XÎyYYÊK©NYùşjŠ®k¹8 ¦VçVÒ÷fW&Æ“¢7G&–ærÂ66T—FW&&ÆRÂ–FVçF–f–&ÆR°¢66RæöæP¢66R–æ&÷€¢66R&V6÷&G0¢66R–ç6–v‡G0¢66RvÆÆW@¢66R6WGF–æw0 ¢f"–C¢7G&–ær²&ufÇVRĞ ¢f"F—FÆS¢7G&–ær°¢7v—F6‚6VÆb°¢66RææöæS¢&WGW&â" ¢66Ræ–æ&÷ƒ¢&WGW&â.iKnK»nzë ¢66Rç&V6÷&G3¢&WGW&â.Šë[ÙR ¢66Ræ–ç6–v‡G3¢&WGW&â.Šx.Zùò ¢66RçvÆÆWC¢&WGW&â.™+XÈR ¢66Rç6WGF–æw3¢&WGW&â.Šëî{Úâ ¢Ğ¢Ğ§Ğ
+    func signIn(email: String, password: String) async {
+        guard !isSigningOut else { authMessage = "æ­£åœ¨å®Œæˆä¸Šæ¬¡é€€å‡ºï¼Œè¯·ç¨åé‡è¯•ã€‚"; return }
+        guard !isSigningIn else { return }
+        isSigningIn = true
+        defer { isSigningIn = false }
+        authMessage = nil
+        authMessageIsError = false
+
+        do {
+            let session = try await authService.signIn(email: email, password: password)
+            try save(session: session)
+            apply(session: session)
+            let generation = userStateGeneration
+            hasUploadToken = false
+            authMessage = "å·²ç™»å½•ï¼Œæœ¬æœºæ•°æ®å¯ç»§ç»­ä½¿ç”¨ã€‚"
+            do {
+                let uploadToken = try await authService.fetchUploadToken(userId: session.user.id, accessToken: session.accessToken)
+                guard isCurrentUserLoad(generation, userId: session.user.id) else { return }
+                try keychain.setString(uploadToken, for: KeychainKeys.uploadToken)
+                hasUploadToken = true
+            } catch {
+                guard isCurrentUserLoad(generation, userId: session.user.id) else { return }
+                authMessage = "å·²ç™»å½•ï¼›Hosted å¿«æ·æŒ‡ä»¤å‡­æ®æš‚ä¸å¯ç”¨ï¼Œå¯åœ¨è®¾ç½®ä¸­é‡è¯•ã€‚"
+            }
+            updateShortcutCredentialMessage()
+            presentOnboardingIfNeeded()
+            await loadAccounts()
+            await refreshDashboard()
+            await loadRecordMonth(Self.currentMonthKey, force: true)
+        } catch {
+            authMessage = error.localizedDescription
+            authMessageIsError = true
+        }
+
+        isSigningIn = false
+    }
+
+    func signUp(
+        email: String,
+        password: String,
+        acceptedTerms: Bool,
+        acceptedSensitiveData: Bool
+    ) async {
+        guard !isSigningOut else { authMessage = "æ­£åœ¨å®Œæˆä¸Šæ¬¡é€€å‡ºï¼Œè¯·ç¨åé‡è¯•ã€‚"; return }
+        guard !isSigningIn else { return }
+        guard acceptedTerms else {
+            authMessage = "è¯·å…ˆé˜…è¯»å¹¶åŒæ„æœåŠ¡åè®®ä¸éšç§æ”¿ç­–"
+            authMessageIsError = true
+            return
+        }
+        guard acceptedSensitiveData else {
+            authMessage = "è¯·ç¡®è®¤åŒæ„å¤„ç†ä¸»åŠ¨æäº¤çš„æ•æ„Ÿæ•°æ®åŠè·¨å¢ƒå­˜å‚¨è¯´æ˜"
+            authMessageIsError = true
+            return
+        }
+        isSigningIn = true
+        authMessage = nil
+        authMessageIsError = false
+        defer { isSigningIn = false }
+
+        do {
+            let result = try await authService.signUp(
+                email: email,
+                password: password,
+                consent: .current()
+            )
+            switch result {
+            case .confirmationRequired(let address):
+                authMessage = "æ³¨å†ŒæˆåŠŸã€‚è¯·å‰å¾€ \(address) å®Œæˆé‚®ç®±ç¡®è®¤ï¼Œç„¶åè¿”å›ç™»å½•ã€‚"
+                authMessageIsError = false
+
+            case .signedIn(let session):
+                let uploadToken = try? await fetchUploadTokenAfterRegistration(session: session)
+                if let uploadToken, !uploadToken.isEmpty {
+                    try save(session: session, uploadToken: uploadToken)
+                    hasUploadToken = true
+                } else {
+                    try save(session: session)
+                    hasUploadToken = false
+                }
+                apply(session: session)
+                authMessage = hasUploadToken
+                    ? "æ³¨å†ŒæˆåŠŸï¼Œå¿«æ·æŒ‡ä»¤å‡­æ®å·²åŒæ­¥ã€‚"
+                    : "æ³¨å†ŒæˆåŠŸã€‚ä¸Šä¼ å‡­æ®æ­£åœ¨ç”Ÿæˆï¼Œå¯ç¨ååœ¨è®¾ç½®ä¸­é‡æ–°æ£€æŸ¥ã€‚"
+                updateShortcutCredentialMessage()
+                presentOnboardingIfNeeded()
+                await refreshDashboard()
+            }
+        } catch {
+            authMessage = error.localizedDescription
+            authMessageIsError = true
+        }
+    }
+
+    func signOut() {
+        guard !isSigningOut else { return }
+        let userId = currentUserId.isEmpty ? (try? requireSession().user.id) : currentUserId
+        // Revoke UI/request generations before awaiting the SDK's network work.
+        invalidateSession(message: "")
+        isSigningOut = true
+        let generation = userStateGeneration
+        if let userId { try? snapshotStore.remove(userId: userId) }
+        Task {
+            defer { isSigningOut = false }
+            do {
+                try await authService.signOut()
+            } catch {
+                guard generation == userStateGeneration else { return }
+                authMessage = "æœ¬æœºå·²é€€å‡ºï¼›äº‘ç«¯ä¼šè¯æ³¨é”€æš‚æœªç¡®è®¤ï¼š\(error.localizedDescription)"
+                authMessageIsError = true
+            }
+        }
+    }
+
+    func verifyShortcutCredential() {
+        do {
+            hasUploadToken = (try keychain.string(for: KeychainKeys.uploadToken))?.isEmpty == false
+            updateShortcutCredentialMessage()
+        } catch {
+            shortcutCredentialMessage = error.localizedDescription
+        }
+    }
+
+    func refreshLocalSyncState() {
+        guard let localBindingRepository else {
+            localSyncState = nil
+            return
+        }
+        do {
+            let profile = try localBindingRepository.activeProfile()
+            localSyncState = try localBindingRepository.syncState(profileID: profile.id)
+            localSyncMessage = nil
+        } catch {
+            localSyncState = nil
+            localSyncMessage = "æœ¬åœ°åŒæ­¥çŠ¶æ€è¯»å–å¤±è´¥ï¼š\(error.localizedDescription)"
+        }
+    }
+
+    func prepareLocalBindingPreview() async {
+        guard isSignedIn, !currentUserId.isEmpty else { return }
+        guard let localBindingRepository else {
+            localSyncMessage = "æœ¬åœ°åŒæ­¥æœåŠ¡ä¸å¯ç”¨ã€‚"
+            return
+        }
+        guard !isLoadingLocalBindingPreview else { return }
+        isLoadingLocalBindingPreview = true
+        localSyncMessage = nil
+        defer { isLoadingLocalBindingPreview = false }
+
+        do {
+            let session = try await validSession()
+            let userID = session.user.id
+            guard userID == currentUserId else { return }
+            let useCase = LocalBindingPreviewUseCase(
+                repository: localBindingRepository,
+                scopeProvider: DomainRepositoryBindingScopeProvider(
+                    repository: domainRepository,
+                    accessTokenProvider: { [weak self] in
+                        guard let self else { throw SupabaseRemoteError.missingSession }
+                        let session = try await self.validSession()
+                        return session.accessToken
+                    }
+                )
+            )
+            localBindingPreview = try await useCase.makePreview(
+                cloudUserID: userID,
+                email: session.user.email
+            )
+        } catch {
+            localBindingPreview = nil
+            localSyncMessage = "æ— æ³•è¯»å–äº‘ç«¯åŒæ­¥èŒƒå›´ï¼š\(error.localizedDescription)"
+        }
+    }
+
+    func deferLocalSync() {
+        localBindingPreview = nil
+        refreshLocalSyncState()
+        localSyncMessage = "å·²ä¿ç•™æœ¬åœ°æ•°æ®ï¼ŒåŒæ­¥å°šæœªå¼€å¯ã€‚"
+    }
+
+    func disableLocalSync() {
+        guard let localBindingRepository else { return }
+        do {
+            let profile = try localBindingRepository.activeProfile()
+            localSyncState = try localBindingRepository.disableSync(profileID: profile.id)
+            localBindingPreview = nil
+            localSyncMessage = "äº‘åŒæ­¥å·²å…³é—­ï¼Œæœ¬åœ°æ•°æ®ä»ä¿ç•™åœ¨æ­¤ iPhoneã€‚"
+        } catch {
+            localSyncMessage = "å…³é—­äº‘åŒæ­¥å¤±è´¥ï¼š\(error.localizedDescription)"
+        }
+    }
+
+    func confirmLocalBinding() {
+        guard let preview = localBindingPreview,
+              let localBindingRepository else { return }
+        do {
+            localSyncState = try localBindingRepository.confirmBinding(
+                profileID: preview.workspaceID,
+                cloudUserID: preview.candidateCloudUserID
+            )
+            localBindingPreview = nil
+            localSyncMessage = "å·²ç»‘å®šæœ¬åœ° workspaceï¼Œæ­£åœ¨è¿›è¡Œé¦–æ¬¡åŒæ­¥ã€‚"
+            Task { await synchronizeLocalData() }
+        } catch {
+            localSyncMessage = error.localizedDescription
+        }
+    }
+
+    func synchronizeLocalData() async {
+        guard !isSynchronizingLocalData else { return }
+        guard isSignedIn, !currentUserId.isEmpty else {
+            localSyncMessage = "è¯·å…ˆç™»å½•åå†åŒæ­¥ã€‚"
+            return
+        }
+        guard let localBindingRepository else {
+            localSyncMessage = "æœ¬åœ°åŒæ­¥æœåŠ¡ä¸å¯ç”¨ã€‚"
+            return
+        }
+        guard let localSyncRunner else {
+            localSyncMessage = "æœ¬åœ°åŒæ­¥æœåŠ¡ä¸å¯ç”¨ã€‚"
+            return
+        }
+
+        isSynchronizingLocalData = true
+        localSyncMessage = nil
+        defer { isSynchronizingLocalData = false }
+
+        let syncAttemptID = UUID()
+        var diagnosticProfileID: UUID?
+        var pendingOperationCount = 0
+        do {
+            let profile = try localBindingRepository.activeProfile()
+            diagnosticProfileID = profile.id
+            pendingOperationCount = try localBindingRepository.workspaceSummary(profileID: profile.id).pendingOutboxCount
+            localSyncDiagnostic = LocalSyncDiagnostic(
+                phase: .preflight,
+                profileID: profile.id,
+                pendingOperationCount: pendingOperationCount,
+                uploadedOperationCount: 0,
+                importedRecordCount: 0,
+                failure: nil,
+                syncStatus: localSyncState?.status
+            )
+            let session = try await validSession()
+            guard session.user.id == currentUserId else {
+                throw LocalSyncError.syncNotAuthorized
+            }
+            localSyncDiagnostic = LocalSyncDiagnostic(
+                phase: .transport,
+                profileID: profile.id,
+                pendingOperationCount: pendingOperationCount,
+                uploadedOperationCount: 0,
+                importedRecordCount: 0,
+                failure: nil,
+                syncStatus: .syncing
+            )
+            let result = try await localSyncRunner.synchronize(
+                profileID: profile.id,
+                cloudUserID: session.user.id
+            )
+            localSyncState = result.state
+            localSyncDiagnostic = LocalSyncDiagnostic(
+                phase: .completed,
+                profileID: profile.id,
+                pendingOperationCount: pendingOperationCount,
+                uploadedOperationCount: result.uploadedOperationCount,
+                importedRecordCount: result.importedRecordCount,
+                failure: nil,
+                syncStatus: result.state.status
+            )
+            _ = await prepareLocalWorkspace()
+            await loadRecordMonth(Self.currentMonthKey, force: true)
+            // Refreshing the current dashboard may run concurrently with the
+            // sync completion projection. Keep the authoritative runner
+            // result visible unless that refresh explicitly invalidated the
+            // session (in which case the state was intentionally reset).
+            if isSignedIn {
+                localSyncState = result.state
+            }
+            if let diagnostic = try? historyMigrationDiagnosticStore?.resolveLatest(
+                operation: "local-sync",
+                outcome: "é‡è¯•åŒæ­¥å·²å®Œæˆã€‚",
+                expectedAccountID: currentUserId
+            ) {
+                localSyncFailureDiagnostic = diagnostic
+            }
+            localSyncMessage = result.importedRecordCount > 0
+                ? "åŒæ­¥å®Œæˆï¼Œå·²åˆå¹¶ \(result.importedRecordCount) æ¡æœ¬åœ°è®°å½•ã€‚"
+                : "åŒæ­¥å®Œæˆã€‚"
+        } catch {
+            refreshLocalSyncState()
+            if let diagnosticProfileID {
+                localSyncDiagnostic = LocalSyncDiagnostic(
+                    phase: .failed,
+                    profileID: diagnosticProfileID,
+                    pendingOperationCount: pendingOperationCount,
+                    uploadedOperationCount: 0,
+                    importedRecordCount: 0,
+                    failure: Self.syncDiagnosticFailure(for: error),
+                    syncStatus: localSyncState?.status
+                )
+            }
+            let failure = Self.syncDiagnosticFailure(for: error)
+            let entry = historyMigrationDiagnosticStore?.record(
+                error,
+                phase: "åŒæ­¥è¯·æ±‚",
+                accountID: currentUserId,
+                operation: "local-sync",
+                codeOverride: Self.syncDiagnosticCode(for: failure),
+                progressSummary: Self.syncProgressSummary(for: error, pendingOperationCount: pendingOperationCount),
+                attemptID: syncAttemptID,
+                committed: false,
+                recoveryAction: "æœ¬æœºäº‹å®ä¿ç•™ï¼›æ ¸å¯¹åŒæ­¥çŠ¶æ€åå¯é‡è¯•å½“å‰æ”¯æŒèŒƒå›´ã€‚"
+            )
+            localSyncFailureDiagnostic = entry
+            localSyncMessage = entry?.userMessage ?? "äº‘åŒæ­¥æœªå®Œæˆï¼›æœ¬æœºæ•°æ®ä¿ç•™ï¼Œè¯·æ£€æŸ¥è®¾ç½®ä¸­çš„åŒæ­¥çŠ¶æ€åé‡è¯•ã€‚"
+        }
+    }
+
+    private static func syncDiagnosticCode(for failure: LocalSyncDiagnosticFailure) -> String {
+        switch failure {
+        case .transport: return "SYNC-TRANSPORT"
+        case .notAuthorized: return "SYNC-NOT-AUTHORIZED"
+        case .partialFailure: return "SYNC-PARTIAL-FAILURE"
+        case .cursorExpired: return "SYNC-CURSOR-EXPIRED"
+        case .conflict: return "SYNC-CONFLICT"
+        case .invalidResponse: return "SYNC-INVALID-RESPONSE"
+        case .localConstraint: return "SYNC-LOCAL-CONSTRAINT"
+        case .unknown: return "SYNC-UNKNOWN"
+        }
+    }
+
+    private static func syncProgressSummary(for error: Error, pendingOperationCount: Int) -> String {
+        if let syncError = error as? LocalSyncError,
+           case .partialFailure(let rejectedOperationIDs) = syncError {
+            return "å¼€å§‹æ—¶å¾…å¤„ç† \(pendingOperationCount) é¡¹ï¼›æœåŠ¡ç«¯æ‹’ç» \(rejectedOperationIDs.count) é¡¹ã€‚"
+        }
+        return "å¼€å§‹æ—¶å¾…å¤„ç† \(pendingOperationCount) é¡¹ã€‚"
+    }
+
+    func loadLatestLocalSyncDiagnostic() {
+        guard let historyMigrationDiagnosticStore, !currentUserId.isEmpty else {
+            localSyncFailureDiagnostic = nil
+            return
+        }
+        let accountHint = LocalHistoryMigrationDiagnosticStore.identityHint(currentUserId)
+        localSyncFailureDiagnostic = (try? historyMigrationDiagnosticStore.recent())?.last {
+            $0.operation == "local-sync" && $0.accountHint == accountHint
+        }
+    }
+
+    private static func syncDiagnosticFailure(for error: Error) -> LocalSyncDiagnosticFailure {
+        if let syncError = error as? LocalSyncError {
+            switch syncError {
+            case .syncNotAuthorized, .bindingMismatch: return .notAuthorized
+            case .partialFailure: return .partialFailure
+            case .cursorExpired: return .cursorExpired
+            case .remoteConflict: return .conflict
+            case .invalidResponse: return .invalidResponse
+            case .invalidWorkspace, .staleAttempt: return .unknown
+            }
+        }
+        if error is LocalWriteConstraintError {
+            return .localConstraint
+        }
+        if error is SupabaseRemoteError {
+            return .transport
+        }
+        return .transport
+    }
+
+    func refreshDashboard() async {
+        if let task = dashboardCoreTask { await task.value; return }
+        let generation = userStateGeneration
+        let task = Task { @MainActor in
+            defer { if generation == self.userStateGeneration { self.dashboardCoreTask = nil } }
+            await self.performDashboardRefresh()
+        }
+        dashboardCoreTask = task
+        await task.value
+    }
+
+    private func performDashboardRefresh() async {
+        guard !isLoadingDashboard else { return }
+        dashboardRefreshGeneration += 1
+        let generation = dashboardRefreshGeneration
+        dashboardSupplementTask?.cancel()
+        isLoadingDashboard = true
+        dashboardMessage = nil
+        lastDashboardRefreshAt = Date()
+        defer {
+            if generation == dashboardRefreshGeneration {
+                isLoadingDashboard = false
+            }
+        }
+
+        if !mayReadRemoteBusinessData,
+           localFactReader != nil || localExpenseUseCase != nil || localRecordUseCase != nil {
+            dashboard = DashboardSnapshot()
+            dashboard.domains = Self.fallbackDomains
+            isShowingCachedDashboard = false
+            let monthKey = Self.currentMonthKey
+            var monthKeys = Set(localFactMonths.keys)
+            monthKeys.formUnion(localExpenseMonthGroups.keys)
+            monthKeys.formUnion(localRecordMonthGroups.keys)
+            monthKeys.insert(monthKey)
+            if localFactReader != nil {
+                for key in monthKeys.sorted() {
+                    await readDeviceFactMonth(key, force: true)
+                }
+            } else {
+                for key in monthKeys.sorted() {
+                    if localExpenseUseCase != nil { await readDeviceExpenseMonth(key, force: true) }
+                    if localRecordUseCase != nil { await readDeviceRecordMonth(key, force: true) }
+                }
+                if monthKey == Self.currentMonthKey {
+                    applyLocalRecordMonth()
+                    await applyLocalStagingProjection()
+                }
+            }
+            dashboard.domains = domainsWithUpdatedCounts(Self.fallbackDomains, snapshot: dashboard)
+            dashboardMessage = recordMonthMessages[monthKey]
+            return
+        }
+
+        do {
+            let (fetchedSnapshot, session) = try await fetchDashboardCoreWithValidSession()
+            guard generation == dashboardRefreshGeneration else { return }
+            let snapshot = preparedCoreSnapshot(fetchedSnapshot)
+            publishDashboard(snapshot, userId: session.user.id)
+            await importRemoteExpenseDetails(snapshot.recordDetails.values)
+            guard generation == dashboardRefreshGeneration else { return }
+            scheduleDashboardSupplement(snapshot, session: session, generation: generation)
+            Task { [weak self] in await self?.loadFinanceVocabulary() }
+        } catch {
+            guard generation == dashboardRefreshGeneration, !(error is CancellationError) else { return }
+            if isInvalidRefreshSessionError(error) {
+                invalidateSession(message: "ç™»å½•çŠ¶æ€å·²å¤±æ•ˆï¼Œè¯·é‡æ–°ç™»å½•ã€‚")
+            } else {
+                dashboardMessage = isShowingCachedDashboard
+                    ? "ç½‘ç»œåŒæ­¥æš‚æ—¶å¤±è´¥ï¼Œæ­£åœ¨å±•ç¤ºä¸Šæ¬¡ä¿å­˜çš„æ•°æ®ã€‚"
+                    : error.localizedDescription
+            }
+        }
+
+    }
+
+    private func fetchDashboardCoreWithValidSession() async throws -> (DashboardSnapshot, SupabaseAuthSession) {
+        var session = try await validSession()
+        do {
+            return (try await dashboardRepository.fetchDashboardCore(accessToken: session.accessToken), session)
+        } catch {
+            guard isExpiredJWTError(error) else { throw error }
+            session = try await validSession(forceRefresh: true)
+            return (try await dashboardRepository.fetchDashboardCore(accessToken: session.accessToken), session)
+        }
+    }
+
+    private func preparedCoreSnapshot(_ snapshot: DashboardSnapshot) -> DashboardSnapshot {
+        let mergedSnapshot = snapshot.mergingUnavailableSections(from: dashboard)
+        var cachedImageURLs: [String: URL] = [:]
+        for detail in dashboard.recordDetails.values {
+            if let path = detail.imagePath, let url = detail.imageURL { cachedImageURLs[path] = url }
+        }
+        for record in dashboard.stagingRecords {
+            if let path = record.imagePath, let url = record.imageURL { cachedImageURLs[path] = url }
+        }
+        for expense in dashboard.pendingExpenses {
+            if let path = expense.imagePath, let url = expense.imageURL { cachedImageURLs[path] = url }
+        }
+        for detail in recordDetailCache.values {
+            if let path = detail.imagePath, let url = detail.imageURL { cachedImageURLs[path] = url }
+        }
+
+        var prepared = mergedSnapshot.applyingSignedImageURLs(
+            cachedImageURLs,
+            markMissingAsFailure: false
+        )
+        let definitions = dashboard.domains.isEmpty ? Self.fallbackDomains : dashboard.domains
+        prepared.domains = domainsWithUpdatedCounts(definitions, snapshot: prepared)
+        return prepared
+    }
+
+    private func publishDashboard(_ snapshot: DashboardSnapshot, userId: String) {
+        dashboard = snapshot
+        isShowingCachedDashboard = false
+        try? snapshotStore.save(snapshot, userId: userId)
+        for detail in snapshot.recordDetails.values {
+            let canonicalReference = NativeRecordReference(detail.id).canonicalValue
+            recordDetailCache[canonicalReference] = detailPreservingExpressionFeedback(detail)
+        }
+    }
+
+    private func scheduleDashboardSupplement(
+        _ snapshot: DashboardSnapshot,
+        session: SupabaseAuthSession,
+        generation: Int
+    ) {
+        dashboardSupplementTask = Task { [weak self] in
+            guard let self else { return }
+            async let resolvedDomains = self.resolvedDomains(
+                accessToken: session.accessToken,
+                snapshot: snapshot
+            )
+            async let hydratedSnapshot = try? self.dashboardRepository.hydrateDashboardImages(
+                snapshot,
+                accessToken: session.accessToken
+            )
+            let (domains, hydrated) = await (resolvedDomains, hydratedSnapshot)
+            guard !Task.isCancelled,
+                  self.isSignedIn,
+                  generation == self.dashboardRefreshGeneration else { return }
+
+            var supplemented = hydrated ?? snapshot
+            supplemented.domains = domains
+            self.publishDashboard(supplemented, userId: session.user.id)
+            await self.importRemoteExpenseDetails(supplemented.recordDetails.values)
+            if let selectedId = self.selectedRecordDetail?.id,
+               let selected = self.recordDetailCache[NativeRecordReference(selectedId).canonicalValue] {
+                self.selectedRecordDetail = selected
+            }
+            self.prefetchDashboardImages(supplemented)
+        }
+    }
+
+    private func restoreDashboardSnapshot(userId: String) {
+        guard let persisted = try? snapshotStore.load(userId: userId) else { return }
+        dashboard = persisted.dashboardSnapshot
+        isShowingCachedDashboard = true
+        lastDashboardRefreshAt = persisted.savedAt
+    }
+
+    private func fetchUploadTokenAfterRegistration(session: SupabaseAuthSession) async throws -> String {
+        var lastError: Error?
+        for attempt in 0..<3 {
+            do {
+                return try await authService.fetchUploadToken(
+                    userId: session.user.id,
+                    accessToken: session.accessToken
+                )
+            } catch {
+                lastError = error
+                if attempt < 2 {
+                    try await Task.sleep(for: .milliseconds(500))
+                }
+            }
+        }
+        throw lastError ?? SupabaseAuthServiceError.emptyUploadToken
+    }
+
+    private func resolvedDomains(accessToken: String, snapshot: DashboardSnapshot) async -> [NativeDomainDefinition] {
+        let definitions = (try? await domainRepository.fetchDefinitions(accessToken: accessToken)) ?? Self.fallbackDomains
+        return domainsWithUpdatedCounts(definitions, snapshot: snapshot)
+    }
+
+    private func domainsWithUpdatedCounts(
+        _ definitions: [NativeDomainDefinition],
+        snapshot: DashboardSnapshot
+    ) -> [NativeDomainDefinition] {
+        let counts = Dictionary(
+            grouping: snapshot.dayRecordGroups.flatMap(\.records).filter { $0.kind != .staging }
+        ) { $0.domainKey ?? $0.kind.rawValue }.mapValues(\.count)
+        return definitions.map { domain in
+            NativeDomainDefinition(
+                id: domain.id,
+                name: domain.name,
+                description: domain.description,
+                icon: domain.icon,
+                isSystem: domain.isSystem,
+                schema: domain.schema,
+                display: domain.display,
+                recordCount: counts[domain.id] ?? 0
+            )
+        }
+    }
+
+    private static let fallbackDomains = InboxArchiveDomains.all.map { NativeDomainDefinition(id: $0.id, name: $0.title, description: "", icon: "", isSystem: true, schema: [:], display: [:], recordCount: 0) }
+
+    private func prefetchDashboardImages(_ snapshot: DashboardSnapshot) {
+        let urls = snapshot.recordDetails.values.compactMap(\.imageURL)
+            + snapshot.stagingRecords.compactMap(\.imageURL)
+            + snapshot.pendingExpenses.compactMap(\.imageURL)
+        Task {
+            await RemoteImageRepository.shared.prefetch(urls)
+        }
+    }
+
+    func refreshDashboardIfStale(minInterval: TimeInterval = 3, force: Bool = false) async {
+        if !force,
+           let lastDashboardRefreshAt,
+           Date().timeIntervalSince(lastDashboardRefreshAt) < minInterval {
+            return
+        }
+        let generation = userStateGeneration
+        _ = await prepareLocalWorkspace()
+        guard generation == userStateGeneration else { return }
+        // Intent å¯ä»ç‹¬ç«‹è¿æ¥å†™å…¥ï¼›å›å‰å°å…ˆé‡è¯»å½“å‰åŠå·²æ‰“å¼€æœˆä»½çš„æœ¬æœºäº‹å®ã€‚
+        var months = Set(localFactMonths.keys)
+            .union(localExpenseMonthGroups.keys)
+            .union(localIncomeMonthGroups.keys)
+            .union(localRecordMonthGroups.keys)
+        months.insert(Self.currentMonthKey)
+        if let selectedMonth = NativeLocalDate.monthKey(from: selectedDateKey) {
+            months.insert(selectedMonth)
+        }
+        for month in months.sorted() {
+            await refreshLocalMonthProjection(monthKey: month)
+            guard generation == userStateGeneration else { return }
+        }
+        guard isSignedIn else {
+            lastDashboardRefreshAt = Date()
+            return
+        }
+        await refreshDashboard()
+    }
+
+    func recordGroups(monthKey: String) -> [NativeDayRecordGroup] {
+        let local = (localExpenseMonthGroups[monthKey] ?? [])
+            + (localIncomeMonthGroups[monthKey] ?? [])
+            + (localRecordMonthGroups[monthKey] ?? [])
+        // æˆåŠŸè¯»å–çš„æœ¬åœ°æœˆä»½ï¼ˆåŒ…æ‹¬ç©ºæœˆï¼‰æ˜¯æœªç™»å½•æ€æƒå¨ï¼Œä¸èƒ½æŠŠå·²åˆ é™¤çš„æ—§ Dashboard æŠ•å½±åˆå¹¶å›æ¥ã€‚
+        if !mayReadRemoteBusinessData,
+           localExpenseMonthGroups[monthKey] != nil || localIncomeMonthGroups[monthKey] != nil || localRecordMonthGroups[monthKey] != nil {
+            return Self.mergeRecordGroups(local: local, remote: [])
+        }
+        let remote = monthKey == Self.currentMonthKey
+            ? dashboard.dayRecordGroups
+            : (remoteRecordMonthGroups[monthKey] ?? [])
+        guard !local.isEmpty else { return remote }
+        return Self.mergeRecordGroups(local: local, remote: remote)
+    }
+
+    func hasLoadedRecordMonth(_ monthKey: String) -> Bool {
+        if !mayReadRemoteBusinessData {
+            return localExpenseMonthGroups[monthKey] != nil || localIncomeMonthGroups[monthKey] != nil || localRecordMonthGroups[monthKey] != nil
+        }
+        return localExpenseMonthGroups[monthKey] != nil
+            || localIncomeMonthGroups[monthKey] != nil
+            || localRecordMonthGroups[monthKey] != nil
+            || remoteRecordMonthGroups[monthKey] != nil
+    }
+
+    func isLoadingRecordMonth(_ monthKey: String) -> Bool {
+        loadingRecordMonthKey == monthKey || loadingRemoteRecordMonthKeys.contains(monthKey)
+            || loadingLocalReadKeys.contains { $0.hasSuffix(":\(monthKey)") }
+            || (monthKey == Self.currentMonthKey && isLoadingDashboard)
+    }
+
+    func recordGroups(from startDateKey: String, through endDateKey: String) -> [NativeDayRecordGroup] {
+        let monthKeys = NativeLocalDate.monthKeys(from: startDateKey, through: endDateKey)
+        guard !monthKeys.isEmpty else { return [] }
+        let groups = monthKeys.flatMap { recordGroups(monthKey: $0) }
+        return NativeRecordQuery.groups(
+            from: groups,
+            startingOn: startDateKey,
+            through: endDateKey
+        )
+    }
+
+    func recordDetails(from startDateKey: String, through endDateKey: String) -> [String: NativeRecordDetail] {
+        let interval = Self.recordReadSignposter.beginInterval("CollectRecordDetails", id: Self.recordReadSignposter.makeSignpostID())
+        defer { Self.recordReadSignposter.endInterval("CollectRecordDetails", interval) }
+        let monthKeys = NativeLocalDate.monthKeys(from: startDateKey, through: endDateKey)
+        var result = mayReadRemoteBusinessData ? dashboard.recordDetails : [:]
+        for monthKey in monthKeys {
+            if mayReadRemoteBusinessData {
+                result.merge(recordMonthDetails[monthKey] ?? [:], uniquingKeysWith: { _, remote in remote })
+            }
+            result.merge(localRecordMonthDetails[monthKey] ?? [:], uniquingKeysWith: { _, local in local })
+        }
+        if mayReadRemoteBusinessData {
+            for (reference, detail) in recordDetailCache {
+                result[reference] = detail
+            }
+        }
+        return result
+    }
+
+    func loadRecordDateWindow(around dateKey: String, force: Bool = false) async {
+        // äº”åŸŸå…±äº«æµè§ˆæ—¥æœŸï¼šä¸€æ¬¡è¡¥é½è‡ªç„¶å‘¨å’Œæˆªæ­¢æ‰€é€‰æ—¥çš„è¿‘ä¸ƒæ—¥ï¼Œåˆ‡åŸŸæ— éœ€å†ç­‰ä¸€æ¬¡è·¨æœˆè¯»å–ã€‚
+        let days = (NativeLocalDate.weekDateKeys(containing: dateKey)
+            + NativeDomainScenePresentation.trendDateKeys(for: .sleep, dateKey: dateKey)
+            + [NativeLocalDate.shiftedDateKey(dateKey, byDays: -30) ?? dateKey]).sorted()
+        guard let start = days.first, let end = days.last else { return }
+        let selectedMonth = String(dateKey.prefix(7))
+        let months = NativeLocalDate.monthKeys(from: start, through: end)
+        let orderedMonths = months.contains(selectedMonth)
+            ? [selectedMonth] + months.filter { $0 != selectedMonth } : months
+        for monthKey in orderedMonths {
+            if Task.isCancelled { return }
+            await loadRecordMonth(monthKey, force: force)
+        }
+    }
+
+    func dailyExpenseAmounts(monthKey: String) -> [String: Double] {
+        let interval = Self.calendarSignposter.beginInterval("AggregateCalendarExpense", id: Self.calendarSignposter.makeSignpostID())
+        defer { Self.calendarSignposter.endInterval("AggregateCalendarExpense", interval) }
+        let groups = recordGroups(monthKey: monthKey)
+        let days = NativeLocalDate.monthDateKeys(monthKey)
+        guard let firstDay = days.first, let lastDay = days.last else { return [:] }
+        let details = recordDetails(from: firstDay, through: lastDay)
+        var totals: [String: Double] = [:]
+        for record in groups.flatMap(\.records) where NativeRecordQuery.isFormal(record)
+            && record.kind == .expense && record.transactionType != "income" {
+            guard let amount = Self.expenseAmount(for: record, details: details) else { continue }
+            totals[record.dateKey, default: 0] += amount
+        }
+        return totals
+    }
+
+    private static func expenseAmount(for record: NativeDayRecord, details: [String: NativeRecordDetail]) -> Double? {
+        let canonical = NativeRecordReference(record.reference).canonicalValue
+        if let detail = details[record.reference]
+            ?? details[canonical]
+            ?? details.values.first(where: { NativeRecordReference($0.id).canonicalValue == canonical }),
+           let amount = detail.amount {
+            return amount
+        }
+        let numeric = record.value.filter { $0.isNumber || $0 == "." || $0 == "-" }
+        guard !numeric.isEmpty else { return nil }
+        return Double(numeric)
+    }
+
+    private static func mergeRecordGroups(
+        local: [NativeDayRecordGroup],
+        remote: [NativeDayRecordGroup]
+    ) -> [NativeDayRecordGroup] {
+        let localReferences = Set(
+            local.flatMap(\.records).map { NativeRecordReference($0.reference).canonicalValue }
+        )
+        let merged = local + remote.map { group in
+            NativeDayRecordGroup(
+                dateKey: group.dateKey,
+                records: group.records.filter {
+                    !localReferences.contains(NativeRecordReference($0.reference).canonicalValue)
+                }
+            )
+        }
+        return Dictionary(grouping: merged.flatMap { group in
+            group.records.map { (group.dateKey, $0) }
+        }, by: \.0).map { dateKey, entries in
+            NativeDayRecordGroup(
+                dateKey: dateKey,
+                records: entries.map(\.1).sorted {
+                    NativeLocalDate.listTimeSortKey($0.timeLabel) > NativeLocalDate.listTimeSortKey($1.timeLabel)
+                }
+            )
+        }.sorted { $0.dateKey > $1.dateKey }
+    }
+
+    func loadRecordMonth(_ monthKey: String, force: Bool = false) async {
+        await loadUnifiedRecordMonth(monthKey, force: force)
+    }
+
+    private func loadUnifiedRecordMonth(_ monthKey: String, force: Bool = false) async {
+        if localFactReader != nil {
+            await readDeviceFactMonth(monthKey, force: force)
+            if mayReadRemoteBusinessData {
+                await loadRemoteRecordMonth(monthKey, force: force)
+            }
+            return
+        }
+        if localExpenseUseCase != nil || localRecordUseCase != nil {
+            if localExpenseUseCase != nil {
+                await readDeviceExpenseMonth(monthKey, force: force)
+            }
+            if localRecordUseCase != nil {
+                await readDeviceRecordMonth(monthKey, force: force)
+            }
+            if mayReadRemoteBusinessData {
+                await loadRemoteRecordMonth(monthKey, force: force)
+            }
+            return
+        }
+        await loadRemoteRecordMonth(monthKey, force: force)
+    }
+
+    private var mayReadRemoteBusinessData: Bool {
+        // The local fact reader is the production authority. Binding authorizes
+        // the expense/accounts coordinator, not the legacy five-domain REST loader.
+        // Repository-only legacy adapters retain their explicit binding contract.
+        guard localFactReader == nil, localStorageInitializationMessage == nil,
+              isSignedIn, !currentUserId.isEmpty,
+              localSyncState?.binding == .bound(currentUserId),
+              localSyncState?.status != .disabled else {
+            return false
+        }
+        return true
+    }
+
+    /// SL-02ï¼ˆC4ï¼‰ï¼šæ‰€æœ‰å†™è·¯å¾„çš„"å†™åå½“æœˆæŠ•å½±åˆ·æ–°"ç»Ÿä¸€èµ°è¿™é‡Œã€‚
+    /// FactReader æƒå¨æ¨¡å¼åˆ·æ–°ç»Ÿä¸€äº‹å®æœˆï¼›é™çº§åŒ UseCase æ¨¡å¼åˆ·æ–°å…¶æ‹¥æœ‰çš„ä¸¤ä¸ªæœ¬åœ°æœˆç¼“å­˜ã€‚
+    /// è¯»å–è·¯å¾„ï¼ˆloadUnifiedRecordMonthã€è¯†åˆ«æŠ•å½±ï¼‰ä¸ä½¿ç”¨æœ¬æ–¹æ³•ã€‚
+    private func refreshLocalMonthProjection(monthKey: String) async {
+        let generation = userStateGeneration
+        let wasMonthPending = pendingLocalRefreshMonths.contains(monthKey)
+        let hadPendingRefresh = !pendingLocalRefreshMonths.isEmpty
+        insightsLoadedAt = nil
+        if localFactReader != nil {
+            await readDeviceFactMonth(monthKey, force: true)
+        } else if localExpenseUseCase != nil {
+            await readDeviceExpenseMonth(monthKey, force: true)
+        }
+        if localFactReader == nil, localRecordUseCase != nil {
+            await readDeviceRecordMonth(monthKey, force: true)
+        }
+        guard generation == userStateGeneration else { return }
+        if recordMonthMessages[monthKey] != nil {
+            pendingLocalRefreshMonths.insert(monthKey)
+        } else {
+            pendingLocalRefreshMonths.remove(monthKey)
+        }
+        if pendingLocalRefreshMonths.isEmpty {
+            localProjectionRefreshMessage = nil
+            if wasMonthPending,
+               let diagnostic = try? historyMigrationDiagnosticStore?.resolveLatest(
+                   operation: "local-write-refresh",
+                   outcome: "æœ¬æœºåˆ—è¡¨å·²åˆ·æ–°ï¼›åŸä¿å­˜æ“ä½œæœªé‡æ”¾ã€‚",
+                   expectedAccountID: currentUserId.isEmpty ? nil : currentUserId
+               ) {
+                localProjectionRefreshDiagnostic = diagnostic
+            }
+            if wasMonthPending { resolvePostCommitMigrationRefreshIfNeeded() }
+        } else if !hadPendingRefresh {
+            let entry = historyMigrationDiagnosticStore?.record(
+                LocalWriteRefreshError(),
+                phase: "æœ¬æœºåˆ—è¡¨åˆ·æ–°",
+                accountID: currentUserId.isEmpty ? nil : currentUserId,
+                operation: "local-write-refresh",
+                codeOverride: "LOCAL-POST-COMMIT-REFRESH",
+                progressSummary: "å¾…è¯»å–æœˆä»½ \(pendingLocalRefreshMonths.count) ä¸ªã€‚",
+                attemptID: UUID(),
+                committed: true,
+                recoveryAction: "åªé‡è¯•è¯»å–æœ¬æœºåˆ—è¡¨ï¼›ä¸è¦é‡å¤æ‰§è¡ŒåŸä¿å­˜æ“ä½œã€‚"
+            )
+            localProjectionRefreshDiagnostic = entry
+            localProjectionRefreshMessage = entry?.userMessage
+                ?? "æ•°æ®å·²ä¿å­˜ï¼Œåˆ—è¡¨åˆ·æ–°å¤±è´¥ï¼›è¯·åªé‡è¯•è¯»å–ï¼Œæ— éœ€å†æ¬¡ä¿å­˜ã€‚"
+        } else {
+            localProjectionRefreshMessage = "æ•°æ®å·²ä¿å­˜ï¼Œåˆ—è¡¨åˆ·æ–°å¤±è´¥ï¼›è¯·åªé‡è¯•è¯»å–ï¼Œæ— éœ€å†æ¬¡ä¿å­˜ã€‚"
+        }
+    }
+
+    func retryLocalProjectionRefresh() async {
+        for month in pendingLocalRefreshMonths.sorted() {
+            await refreshLocalMonthProjection(monthKey: month)
+        }
+        if pendingLocalRefreshMonths.isEmpty {
+            resolvePostCommitMigrationRefreshIfNeeded()
+        }
+    }
+
+    private func resolvePostCommitMigrationRefreshIfNeeded() {
+        if let diagnostic = historyMigrationDiagnostic, diagnostic.code == "HIST-POST-COMMIT-REFRESH" {
+            try? historyMigrationDiagnosticStore?.resolve(diagnostic.id, outcome: "æœ¬æœºåˆ—è¡¨å·²åˆ·æ–°ï¼›è¿ç§»å…¥è´¦æœªé‡æ”¾ã€‚", expectedAccountID: currentUserId)
+            loadLatestHistoryMigrationDiagnostic()
+            if historyMigrationPhase == "å·²å…¥è´¦" || historyMigrationPhase == "å·²ä¿ç•™å¾…æ ¸å¯¹" {
+                historyMigrationMessage = historyMigrationUnresolvedCount > 0
+                    ? "è¿ç§»å†…å®¹å·²ä¿å­˜ï¼Œå« \(historyMigrationUnresolvedCount) æ¡å†å²å¾…æ ¸å¯¹åŸæ–‡ï¼›åˆ—è¡¨åˆ·æ–°å®Œæˆï¼Œæœªé‡å¤æäº¤ã€‚"
+                    : "å†å²è®°å½•å·²å…¥è´¦ï¼›æœ¬æœºåˆ—è¡¨åˆ·æ–°å®Œæˆï¼Œæœªé‡å¤æäº¤ã€‚"
+            }
+        }
+    }
+
+    private func localWriteMessage(_ message: String) -> String {
+        localProjectionRefreshMessage.map { "\(message)ã€‚\($0)" } ?? message
+    }
+
+    private func refreshAfterRecordWrite(affectedDateKeys: [String] = []) async {
+        let generation = userStateGeneration
+        var months = Set(remoteRecordMonthGroups.keys).union(recordMonthDetails.keys).union(remoteRecordMonthTasks.keys)
+        months.formUnion(affectedDateKeys.compactMap { NativeLocalDate.monthKey(from: $0) })
+        if let month = NativeLocalDate.monthKey(from: selectedDateKey) { months.insert(month) }
+        if let pending = dashboardCoreTask { await pending.value }
+        guard generation == userStateGeneration else { return }
+        await refreshDashboard()
+        guard generation == userStateGeneration else { return }
+        await refreshLocalMonthProjection(monthKey: Self.currentMonthKey)
+        for month in months.sorted() where month != Self.currentMonthKey {
+            // å†™å…¥å‰çš„åœ¨é€”è¯»å–å…ˆç»“æŸï¼Œéšåå¼ºåˆ¶è¯»å–å†™å…¥åçš„äº‹å®ã€‚
+            if let task = remoteRecordMonthTasks[month] { await task.value }
+            guard generation == userStateGeneration else { return }
+            await loadRecordMonth(month, force: true)
+            guard generation == userStateGeneration else { return }
+        }
+    }
+
+    // Compatibility name retained for older feature tests; new callers use the unified facade above.
+    private func loadLocalExpenseMonth(_ monthKey: String, force: Bool) async {
+        await readDeviceExpenseMonth(monthKey, force: force)
+    }
+
+    func ingestHostedImageLocally(
+        data: Data,
+        captureKind: String,
+        filename: String,
+        uploadToken: String? = nil
+    ) async throws -> LocalImageIntakeOutcome {
+        guard localVisionMode != .disabled else { throw LocalDataError.invalidRecord }
+        guard let localRecordUseCase, let localImageStore, let localImageIntakeRepository else {
+            throw LocalDataError.invalidRecord
+        }
+        let provider: LocalImageRecognitionProvider
+        let recognitionUploadToken: String?
+        var isRecognitionRequestCurrent: @MainActor () -> Bool = { true }
+        switch localVisionMode {
+        case .disabled:
+            throw LocalDataError.invalidRecord
+        case .hosted:
+            provider = HostedAIImageRecognitionProvider()
+            recognitionUploadToken = uploadToken
+        case .byok:
+            let apiKey = (try? keychain.string(for: KeychainKeys.byokQwenAPIKey)) ?? ""
+            provider = QwenBYOKImageRecognitionProvider(apiKey: apiKey)
+            let credentialStore = keychain
+            isRecognitionRequestCurrent = {
+                (try? credentialStore.string(for: KeychainKeys.byokQwenAPIKey)) == apiKey
+            }
+            recognitionUploadToken = nil
+        }
+        let credentialCheck = isRecognitionRequestCurrent
+        let generation = userStateGeneration
+        let requestedMode = localVisionMode
+        isRecognitionRequestCurrent = { [weak self] in
+            guard let self, self.userStateGeneration == generation, self.localVisionMode == requestedMode else { return false }
+            return credentialCheck()
+        }
+        let recognition = LocalImageRecognitionUseCase(
+            localRecordUseCase: localRecordUseCase,
+            imageStore: localImageStore,
+            intakeRepository: localImageIntakeRepository,
+            provider: provider,
+            isRecognitionRequestCurrent: isRecognitionRequestCurrent,
+            pendingRepository: localPendingFinancialRepository,
+            expenseRepository: Self.defaultRecognitionExpenseRepository(),
+            duplicateReviewRepository: Self.defaultFinancialDuplicateReviewRepository(),
+            expressionPersistence: localExpressionPersistence
+        )
+        let outcome = try await recognition.ingest(
+            imageData: data,
+            captureKind: captureKind,
+            filename: filename,
+            uploadToken: recognitionUploadToken
+        )
+        return await composeLocalImageCompanion(outcome, using: recognition, mode: requestedMode)
+    }
+
+    private func composeLocalImageCompanion(
+        _ outcome: LocalImageIntakeOutcome,
+        using recognition: LocalImageRecognitionUseCase,
+        mode: LocalVisionMode
+    ) async -> LocalImageIntakeOutcome {
+        let isArchived: Bool
+        switch outcome.result {
+        case .archived(_), .financialArchived(_): isArchived = true
+        case .staged(_), .financialPending(_): isArchived = false
+        }
+        guard userSettings.companionEnabled, localVisionModeStore.mode == mode, isArchived else { return outcome }
+        let provider: LocalCompanionProvider
+        let providerMode: LocalExpressionProviderMode
+        switch mode {
+        case .hosted:
+            guard let session = try? await validSession() else { return outcome }
+            provider = HostedAICompanionProvider(accessToken: session.accessToken)
+            providerMode = .hosted
+        case .byok:
+            guard let apiKey = try? keychain.string(for: KeychainKeys.byokQwenAPIKey),
+                  !apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return outcome }
+            provider = QwenBYOKCompanionProvider(apiKey: apiKey)
+            providerMode = .byok
+        case .disabled:
+            return outcome
+        }
+        guard let composed = await recognition.composeCompanion(
+            for: outcome.result,
+            provider: provider,
+            settings: userSettings,
+            providerMode: providerMode
+        ) else { return outcome }
+        let message = composed.companionMessage?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let composedFeedback = composed.aiFeedback.flatMap { NativeAIFeedback(payload: $0) }
+        let feedback = composedFeedback ?? outcome.feedback
+        let feedbackConfidence = composed.aiFeedback?.double("confidence") ?? outcome.feedbackConfidence
+        let deliveryFeedback: NativeAIFeedback?
+        if let feedback, let feedbackConfidence, feedbackConfidence < 0.5 {
+            deliveryFeedback = nil
+        } else {
+            deliveryFeedback = feedback
+        }
+        return LocalImageIntakeOutcome(
+            result: outcome.result,
+            imageHash: outcome.imageHash,
+            notificationText: LocalIntakeNotificationText.merge(
+                baseText: outcome.notificationText,
+                companionMessage: message,
+                feedbackParts: deliveryFeedback.map {
+                    LocalIntakeNotificationFeedback($0, confidence: feedbackConfidence)
+                }
+            ),
+            feedback: deliveryFeedback,
+            feedbackConfidence: feedbackConfidence
+        )
+    }
+
+    func receiveImageForManualProcessing(
+        data: Data,
+        captureKind: String,
+        filename: String
+    ) throws -> LocalImageIntake {
+        guard let localRecordUseCase, let localImageStore, let localImageIntakeRepository else {
+            throw LocalDataError.invalidRecord
+        }
+        let recognition = LocalImageRecognitionUseCase(
+            localRecordUseCase: localRecordUseCase,
+            imageStore: localImageStore,
+            intakeRepository: localImageIntakeRepository,
+            provider: HostedAIImageRecognitionProvider()
+        )
+        let intake = try recognition.receiveForManual(
+            imageData: data, captureKind: captureKind, filename: filename
+        )
+        Task { await refreshFailedLocalImageIntakes() }
+        return intake
+    }
+
+    func hasPersistedInputImage(_ data: Data) -> Bool {
+        guard let repository = localImageIntakeRepository, let store = localImageStore,
+              let profile = try? repository.activeProfile(),
+              let intake = try? repository.intake(id: "\(profile.id.uuidString)-\(LocalImageStore.sha256(data))", profileID: profile.id),
+              let saved = try? store.data(at: intake.imagePath) else { return false }
+        return saved == data
+    }
+
+    func setLocalVisionMode(_ mode: LocalVisionMode) {
+        if mode == .byok, !hasBYOKAPIKey {
+            settingsMessage = "å…ˆä¿å­˜ BYOK API Keyï¼Œå†å¯ç”¨ BYOKã€‚"
+            return
+        }
+        localVisionModeStore.save(mode)
+        localVisionMode = mode
+    }
+
+    func saveBYOKAPIKey(_ apiKey: String) -> Bool {
+        let normalized = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalized.isEmpty else {
+            settingsMessage = "API Key ä¸èƒ½ä¸ºç©ºã€‚"
+            return false
+        }
+        do {
+            try keychain.setString(normalized, for: KeychainKeys.byokQwenAPIKey)
+            hasBYOKAPIKey = true
+            settingsMessage = "API Key å·²å®‰å…¨ä¿å­˜ï¼›å°šæœªå‘é€ä»»ä½•å›¾ç‰‡ã€‚"
+            setLocalVisionMode(.byok)
+            return true
+        } catch {
+            settingsMessage = "API Key æœªèƒ½ä¿å­˜åˆ° Keychainï¼š\(error.localizedDescription)"
+            return false
+        }
+    }
+
+    func deleteBYOKAPIKey() -> Bool {
+        do {
+            try keychain.remove(KeychainKeys.byokQwenAPIKey)
+            hasBYOKAPIKey = false
+            if localVisionMode == .byok { setLocalVisionMode(.disabled) }
+            settingsMessage = "æœ¬æœº BYOK API Key å·²åˆ é™¤ï¼›ä¾›åº”å•†è´¦æˆ·ä¸­çš„ Key ä»éœ€å•ç‹¬æ’¤é”€ã€‚"
+            return true
+        } catch {
+            settingsMessage = "API Key æœªèƒ½ä» Keychain åˆ é™¤ï¼š\(error.localizedDescription)"
+            return false
+        }
+    }
+
+    var supportsLocalDomainRecords: Bool { localRecordUseCase != nil && localImageStore != nil }
+
+    func localImageDataForRecord(id: String) async throws -> Data {
+        guard let recordID = UUID(uuidString: id),
+              let localImageStore else {
+            throw LocalDataError.recordNotFound
+        }
+        if let record = try await localRecordUseCase?.record(id: recordID), let path = record.imagePath {
+            return try localImageStore.data(at: path)
+        }
+        if let expense = try await localExpenseUseCase?.expense(id: recordID), let path = expense.imagePath {
+            return try localImageStore.data(at: path)
+        }
+        if let income = try await localExpenseUseCase?.income(id: recordID), let path = income.imagePath {
+            return try localImageStore.data(at: path)
+        }
+        throw LocalDataError.recordNotFound
+    }
+
+    func localImageDataForWalletSnapshot(id: UUID) throws -> Data {
+        guard let snapshot = localWalletSnapshotHistory.first(where: { $0.id == id }),
+              let imagePath = snapshot.imagePath,
+              let localImageStore else {
+            throw LocalDataError.recordNotFound
+        }
+        return try localImageStore.data(at: imagePath)
+    }
+
+    func refreshLocalRecognitionProjection(monthKey requestedMonthKey: String? = nil) async {
+        let monthKey = requestedMonthKey ?? Self.currentMonthKey
+        if localFactReader != nil {
+            await readDeviceFactMonth(monthKey, force: true)
+            if monthKey == Self.currentMonthKey, let month = localFactMonths[monthKey] {
+                applyLocalFactMonth(month)
+            }
+        } else {
+            await readDeviceRecordMonth(monthKey, force: true)
+            if monthKey == Self.currentMonthKey {
+                applyLocalRecordMonth()
+            }
+        }
+        if monthKey == Self.currentMonthKey {
+            await applyLocalStagingProjection()
+        }
+    }
+
+    /// Rebuilds the Inbox from the authoritative local projection when no
+    /// cloud session is available. Remote repayment candidates remain
+    /// session-scoped and are intentionally loaded only when signed in.
+    func refreshInboxProjection() async {
+        await refreshFailedLocalImageIntakes()
+        await refreshLocalImageCleanups()
+        if !mayReadRemoteBusinessData {
+            await refreshLocalRecognitionProjection()
+        }
+        await loadInboxRepaymentCandidates()
+    }
+
+    func refreshLocalImageCleanups() async {
+        guard let localRecordUseCase else {
+            pendingLocalImageCleanups = []
+            return
+        }
+        do {
+            pendingLocalImageCleanups = try localRecordUseCase.retryPendingImageCleanups()
+        } catch {
+            inboxActionMessage = "æœ¬åœ°å›¾ç‰‡æ¸…ç†çŠ¶æ€è¯»å–å¤±è´¥ï¼š\(error.localizedDescription)"
+            inboxActionMessageIsError = true
+        }
+    }
+
+    func retryLocalImageCleanups() async {
+        await refreshLocalImageCleanups()
+        if pendingLocalImageCleanups.isEmpty {
+            inboxActionMessage = "æœ¬æœºå›¾ç‰‡æ¸…ç†å·²å®Œæˆ"
+            inboxActionMessageIsError = false
+        } else {
+            inboxActionMessage = "ä»æœ‰ \(pendingLocalImageCleanups.count) å¼ å›¾ç‰‡å¾…æ¸…ç†"
+            inboxActionMessageIsError = true
+        }
+    }
+
+    func refreshFailedLocalImageIntakes() async {
+        guard let repository = localImageIntakeRepository,
+              let profile = try? repository.activeProfile() else {
+            failedLocalImageIntakes = []
+            return
+        }
+        do {
+            try repository.recoverInterrupted(profileID: profile.id, before: Date().addingTimeInterval(-120))
+            failedLocalImageIntakes = try repository.failedIntakes(profileID: profile.id)
+        } catch {
+            dashboardMessage = "æœ¬åœ°å›¾ç‰‡æ”¶ä»¶ç®±è¯»å–å¤±è´¥ï¼š\(error.localizedDescription)"
+        }
+    }
+
+    func retryLocalImageIntake(_ intake: LocalImageIntake) async -> Bool {
+        guard localVisionMode != .disabled else {
+            inboxActionMessage = "AI è¯†åˆ«å·²å…³é—­ï¼›è¯·å¼€å¯åé‡è¯•ï¼Œæˆ–æ‰‹åŠ¨å¤„ç†åŸå›¾ã€‚"
+            inboxActionMessageIsError = true
+            return false
+        }
+        guard let localRecordUseCase, let localImageStore, let localImageIntakeRepository else { return false }
+        do {
+            let provider: LocalImageRecognitionProvider
+            let uploadToken: String?
+            var isRecognitionRequestCurrent: @MainActor () -> Bool = { true }
+            switch localVisionMode {
+            case .disabled:
+                return false
+            case .hosted:
+                provider = HostedAIImageRecognitionProvider()
+                uploadToken = try? keychain.string(for: KeychainKeys.uploadToken)
+            case .byok:
+                let apiKey = (try? keychain.string(for: KeychainKeys.byokQwenAPIKey)) ?? ""
+                provider = QwenBYOKImageRecognitionProvider(apiKey: apiKey)
+                let credentialStore = keychain
+                isRecognitionRequestCurrent = {
+                    (try? credentialStore.string(for: KeychainKeys.byokQwenAPIKey)) == apiKey
+                }
+                uploadToken = nil
+            }
+            let credentialCheck = isRecognitionRequestCurrent
+            let generation = userStateGeneration
+            let requestedMode = localVisionMode
+            isRecognitionRequestCurrent = { [weak self] in
+                guard let self, self.userStateGeneration == generation, self.localVisionMode == requestedMode else { return false }
+                return credentialCheck()
+            }
+            let recognition = LocalImageRecognitionUseCase(
+                localRecordUseCase: localRecordUseCase,
+                imageStore: localImageStore,
+                intakeRepository: localImageIntakeRepository,
+                provider: provider,
+                isRecognitionRequestCurrent: isRecognitionRequestCurrent,
+                pendingRepository: localPendingFinancialRepository,
+                expenseRepository: Self.defaultRecognitionExpenseRepository(),
+                duplicateReviewRepository: Self.defaultFinancialDuplicateReviewRepository(),
+                expressionPersistence: localExpressionPersistence
+            )
+            let outcome = try await recognition.retry(intakeID: intake.id, uploadToken: uploadToken)
+            _ = await composeLocalImageCompanion(outcome, using: recognition, mode: requestedMode)
+            await refreshFailedLocalImageIntakes()
+            await refreshLocalRecognitionProjection()
+            return true
+        } catch {
+            await refreshFailedLocalImageIntakes()
+            inboxActionMessage = "é‡è¯•æœªå®Œæˆï¼š\(error.localizedDescription)"
+            inboxActionMessageIsError = true
+            return false
+        }
+    }
+
+    func discardLocalImageIntake(_ intake: LocalImageIntake) -> Bool {
+        guard let repository = localImageIntakeRepository,
+              let profile = try? repository.activeProfile() else { return false }
+        do {
+            try repository.discard(id: intake.id, profileID: profile.id)
+            failedLocalImageIntakes.removeAll { $0.id == intake.id }
+            pendingLocalImageCleanups = try localRecordUseCase?.retryPendingImageCleanups() ?? []
+            return true
+        } catch {
+            inboxActionMessage = "å›¾ç‰‡æœªèƒ½ä¸¢å¼ƒï¼š\(error.localizedDescription)"
+            inboxActionMessageIsError = true
+            return false
+        }
+    }
+
+    func localImageData(for intake: LocalImageIntake) throws -> Data {
+        guard let repository = localImageIntakeRepository,
+              let imageStore = localImageStore,
+              let profile = try? repository.activeProfile(),
+              intake.profileID == profile.id else {
+            throw LocalDataError.invalidIdentifier
+        }
+        return try imageStore.data(at: intake.imagePath)
+    }
+
+    func hasLocalImage(for intake: LocalImageIntake) -> Bool {
+        localImageStore?.contains(path: intake.imagePath) == true
+    }
+
+    func discardLocalImageIntake(matching imageData: Data) -> Bool {
+        guard let repository = localImageIntakeRepository,
+              let profile = try? repository.activeProfile() else { return false }
+        let id = "\(profile.id.uuidString)-\(LocalImageStore.sha256(imageData))"
+        do {
+            guard let intake = try repository.intake(id: id, profileID: profile.id) else { return true }
+            return discardLocalImageIntake(intake)
+        } catch {
+            return false
+        }
+    }
+
+    private func readDeviceFactMonth(_ monthKey: String, force: Bool) async {
+        guard let localFactReader else { return }
+        guard force || localFactMonths[monthKey] == nil else { return }
+        let readKey = "facts:\(monthKey)"
+        guard force || !loadingLocalReadKeys.contains(readKey) else { return }
+        let readVersion = (localMonthReadVersions[readKey] ?? 0) + 1
+        localMonthReadVersions[readKey] = readVersion
+        loadingLocalReadKeys.insert(readKey)
+        let interval = Self.recordReadSignposter.beginInterval("ReadAndProjectLocalFactMonth", id: Self.recordReadSignposter.makeSignpostID())
+        defer { Self.recordReadSignposter.endInterval("ReadAndProjectLocalFactMonth", interval) }
+        let generation = userStateGeneration
+        loadingLocalExpenseMonthKey = monthKey
+        loadingLocalRecordMonthKey = monthKey
+        loadingRecordMonthKey = monthKey
+        recordMonthMessages.removeValue(forKey: monthKey)
+        defer {
+            if generation == userStateGeneration, localMonthReadVersions[readKey] == readVersion {
+                loadingLocalReadKeys.remove(readKey)
+                if loadingLocalExpenseMonthKey == monthKey { loadingLocalExpenseMonthKey = nil }
+                if loadingLocalRecordMonthKey == monthKey { loadingLocalRecordMonthKey = nil }
+                if loadingRecordMonthKey == monthKey, !loadingRemoteRecordMonthKeys.contains(monthKey),
+                   !loadingLocalReadKeys.contains(where: { $0.hasSuffix(":\(monthKey)") }) {
+                    loadingRecordMonthKey = nil
+                }
+            }
+        }
+        do {
+            guard let month = try await localFactReader.activeMonth(monthKey: monthKey) else { return }
+            guard generation == userStateGeneration, localMonthReadVersions[readKey] == readVersion else { return }
+            localFactMonths[monthKey] = month
+            localExpenseMonthGroups[monthKey] = LocalFactReadModel.groups(
+                from: month,
+                including: [.expense, .income]
+            )
+            localIncomeMonthGroups[monthKey] = []
+            localRecordMonthGroups[monthKey] = LocalFactReadModel.groups(
+                from: month,
+                including: [.record]
+            )
+            localRecordMonthDetails[monthKey] = LocalFactReadModel.details(
+                from: month,
+                imageStore: localImageStore
+            )
+            if monthKey == Self.currentMonthKey && !mayReadRemoteBusinessData {
+                applyLocalFactMonth(month)
+                await applyLocalStagingProjection()
+            }
+        } catch {
+            guard generation == userStateGeneration, localMonthReadVersions[readKey] == readVersion else { return }
+            recordMonthMessages[monthKey] = error.localizedDescription
+        }
+    }
+
+    private func applyLocalFactMonth(_ month: LocalFactMonth) {
+        let todayKey = NativeLocalDate.dateKey(Date())
+        let groups = recordGroups(monthKey: Self.currentMonthKey)
+        let expenses = month.facts.filter { $0.kind == .expense }
+        let incomes = month.facts.filter { $0.kind == .income }
+        let todayExpenses = expenses.filter { $0.businessDate == todayKey }
+        let todayIncomes = incomes.filter { $0.businessDate == todayKey }
+        dashboard.dayRecordGroups = groups
+        dashboard.dailySummaries = groups.map { group in
+            let expense = expenses
+                .filter { $0.businessDate == group.dateKey }
+                .reduce(0.0) { total, fact in
+                    let payload = (try? LocalRecordCodec.decode(fact.payloadJSON)) ?? [:]
+                    return total + ((payload.double("amount_minor") ?? 0) / 100)
+                }
+            let income = incomes
+                .filter { $0.businessDate == group.dateKey }
+                .reduce(0.0) { total, fact in
+                    let payload = (try? LocalRecordCodec.decode(fact.payloadJSON)) ?? [:]
+                    return total + ((payload.double("amount_minor") ?? 0) / 100)
+                }
+            return NativeDailySummary(
+                dateKey: group.dateKey,
+                expense: expense,
+                income: income,
+                pendingCount: 0,
+                recordCount: group.records.count
+            )
+        }
+        dashboard.todayCount = groups.first(where: { $0.dateKey == todayKey })?.records.count ?? 0
+        dashboard.monthCount = groups.flatMap(\.records).count
+        dashboard.todayExpense = todayExpenses.reduce(0) { total, fact in
+            let payload = (try? LocalRecordCodec.decode(fact.payloadJSON)) ?? [:]
+            return total + ((payload.double("amount_minor") ?? 0) / 100)
+        }
+        dashboard.monthExpense = expenses.reduce(0) { total, fact in
+            let payload = (try? LocalRecordCodec.decode(fact.payloadJSON)) ?? [:]
+            return total + ((payload.double("amount_minor") ?? 0) / 100)
+        }
+        dashboard.todayIncome = todayIncomes.reduce(0) { total, fact in
+            let payload = (try? LocalRecordCodec.decode(fact.payloadJSON)) ?? [:]
+            return total + ((payload.double("amount_minor") ?? 0) / 100)
+        }
+        dashboard.monthIncome = incomes.reduce(0) { total, fact in
+            let payload = (try? LocalRecordCodec.decode(fact.payloadJSON)) ?? [:]
+            return total + ((payload.double("amount_minor") ?? 0) / 100)
+        }
+        dashboard.pendingCount = 0
+        dashboard.recordDetails = localRecordMonthDetails[Self.currentMonthKey] ?? [:]
+        dashboard.recentRecords = []
+        dashboard.stagingRecords = []
+        dashboard.pendingExpenses = []
+    }
+
+    private func applyLocalStagingProjection() async {
+        stagingReadVersion += 1
+        let version = stagingReadVersion
+        let generation = userStateGeneration
+        if let repository = localPendingFinancialRepository {
+            do {
+                if let profile = try await localExpenseUseCase?.prepareProfile() {
+                    let pending = try repository.pending(profileID: profile.id)
+                    guard generation == userStateGeneration else { return }
+                    dashboard.pendingExpenses = pending.map { record in
+                        // è¿ç§»è¿›æœ¬æœºçš„å¾…è¡¥å…¨è´¦å•ï¼ŒåŸå›¾å°±åœ¨æœ¬æœº records/history-<sha256>.jpgã€‚
+                        // åªå¡« image_url æ˜¯äº‘ç«¯è·¯å¾„ï¼Œè¿™é‡Œè¡¥ä¸€ä»½æœ¬æœºæ–‡ä»¶ URLï¼Œå¡ç‰‡æ‰èƒ½å‡ºè¯æ®åº•ç‰‡ã€‚
+                        let imageURL: URL? = record.imagePath.flatMap { path -> URL? in
+                            guard let store = localImageStore, store.contains(path: path) else { return nil }
+                            return store.url(for: path)
+                        }
+                        return NativePendingExpense(id: record.id.uuidString, title: record.merchantName,
+                            amount: Double(record.amountMinor) / 100, dateKey: record.transactionDate,
+                            reference: "expense/\(record.id.uuidString)", imagePath: record.imagePath,
+                            imageURL: imageURL,
+                            occurredAtLabel: record.transactionTime,
+                            createdAtLabel: "\(NativeLocalDate.dateKey(record.createdAt)) \(NativeLocalDate.timeKey(record.createdAt))",
+                            platform: record.platform,
+                            category: record.category,
+                            paymentMethod: record.paymentMethod)
+                    }
+                }
+            } catch { inboxFinanceMessage = "æœ¬æœºå¾…è¡¥å…¨è¯»å–å¤±è´¥ï¼š\(error.localizedDescription)" }
+        }
+        guard let localRecordUseCase else {
+            dashboard.stagingRecords = []
+            dashboard.pendingCount = dashboard.pendingExpenses.count
+            return
+        }
+        do {
+            let records = try await localRecordUseCase.stagingRecords()
+            guard generation == userStateGeneration, version == stagingReadVersion else { return }
+            let definitions = dashboard.domains.isEmpty ? Self.fallbackDomains : dashboard.domains
+            dashboard.stagingRecords = records.map { record in
+                let domainName = definitions.first(where: { $0.id == record.domainKey })?.shortName
+                return LocalStagingReadModel.native(
+                    from: record,
+                    imageStore: localImageStore,
+                    domainName: domainName,
+                    plannerEnabled: userSettings.companionEnabled
+                )
+            }
+            dashboard.pendingCount = dashboard.pendingExpenses.count + dashboard.stagingRecords.count
+        } catch {
+            guard generation == userStateGeneration, version == stagingReadVersion else { return }
+            dashboard.stagingRecords = []
+            dashboard.pendingCount = dashboard.pendingExpenses.count
+            inboxFinanceMessage = "æœ¬åœ°ä¸­è½¬ç«™æš‚æ—¶æ— æ³•è¯»å–ï¼š\(error.localizedDescription)"
+        }
+    }
+
+    private func readDeviceExpenseMonth(_ monthKey: String, force: Bool) async {
+        guard force || localExpenseMonthGroups[monthKey] == nil else { return }
+        let readKey = "expense:\(monthKey)"
+        guard force || !loadingLocalReadKeys.contains(readKey) else { return }
+        let readVersion = (localMonthReadVersions[readKey] ?? 0) + 1
+        localMonthReadVersions[readKey] = readVersion
+        loadingLocalReadKeys.insert(readKey)
+        let generation = userStateGeneration
+        loadingLocalExpenseMonthKey = monthKey
+        loadingRecordMonthKey = monthKey
+        recordMonthMessages.removeValue(forKey: monthKey)
+        defer {
+            if generation == userStateGeneration, localMonthReadVersions[readKey] == readVersion {
+                loadingLocalReadKeys.remove(readKey)
+                if loadingLocalExpenseMonthKey == monthKey { loadingLocalExpenseMonthKey = nil }
+                if loadingRecordMonthKey == monthKey, !loadingRemoteRecordMonthKeys.contains(monthKey),
+                   !loadingLocalReadKeys.contains(where: { $0.hasSuffix(":\(monthKey)") }) {
+                    loadingRecordMonthKey = nil
+                }
+            }
+        }
+        do {
+            guard let localExpenseUseCase else { throw LocalDataError.invalidRecord }
+            let month = try await localExpenseUseCase.month(monthKey)
+            let incomeMonth = try await localExpenseUseCase.incomes(monthKey)
+            guard generation == userStateGeneration, localMonthReadVersions[readKey] == readVersion else { return }
+            let groups = Self.mergeRecordGroups(
+                local: LocalExpenseReadModel.groups(from: month) + LocalIncomeReadModel.groups(from: incomeMonth),
+                remote: []
+            )
+            localExpenseMonthGroups[monthKey] = LocalExpenseReadModel.groups(from: month)
+            localIncomeMonthGroups[monthKey] = LocalIncomeReadModel.groups(from: incomeMonth)
+            let localDomainDetails = (localRecordMonthDetails[monthKey] ?? [:]).filter {
+                $0.value.kind == "data"
+            }
+            localRecordMonthDetails[monthKey] = Dictionary(
+                uniqueKeysWithValues: month.expenses.map {
+                    let detail = LocalExpenseReadModel.detail(from: $0, imageStore: localImageStore)
+                    return (detail.id, detail)
+                }
+            ).merging(
+                Dictionary(uniqueKeysWithValues: incomeMonth.incomes.map {
+                    let detail = LocalIncomeReadModel.detail(from: $0, imageStore: localImageStore)
+                    return (detail.id, detail)
+                }), uniquingKeysWith: { _, income in income }
+            ).merging(localDomainDetails, uniquingKeysWith: { local, _ in local })
+            if monthKey == Self.currentMonthKey && !isSignedIn {
+                applyLocalExpenseMonth(month, incomeMonth: incomeMonth, groups: groups)
+            }
+        } catch {
+            guard generation == userStateGeneration, localMonthReadVersions[readKey] == readVersion else { return }
+            recordMonthMessages[monthKey] = error.localizedDescription
+        }
+    }
+
+    private func readDeviceRecordMonth(_ monthKey: String, force: Bool) async {
+        guard let localRecordUseCase else { return }
+        guard force || localRecordMonthGroups[monthKey] == nil else { return }
+        let readKey = "records:\(monthKey)"
+        guard force || !loadingLocalReadKeys.contains(readKey) else { return }
+        let readVersion = (localMonthReadVersions[readKey] ?? 0) + 1
+        localMonthReadVersions[readKey] = readVersion
+        loadingLocalReadKeys.insert(readKey)
+        let generation = userStateGeneration
+        loadingLocalRecordMonthKey = monthKey
+        loadingRecordMonthKey = monthKey
+        recordMonthMessages.removeValue(forKey: monthKey)
+        defer {
+            if generation == userStateGeneration, localMonthReadVersions[readKey] == readVersion {
+                loadingLocalReadKeys.remove(readKey)
+                if loadingLocalRecordMonthKey == monthKey { loadingLocalRecordMonthKey = nil }
+                if loadingRecordMonthKey == monthKey,
+                   !loadingRemoteRecordMonthKeys.contains(monthKey),
+                   !loadingLocalReadKeys.contains(where: { $0.hasSuffix(":\(monthKey)") }) {
+                    loadingRecordMonthKey = nil
+                }
+            }
+        }
+        do {
+            let month = try await localRecordUseCase.month(monthKey)
+            guard generation == userStateGeneration, localMonthReadVersions[readKey] == readVersion else { return }
+            let groups = LocalRecordReadModel.groups(from: month, imageStore: localImageStore)
+            localRecordMonthGroups[monthKey] = groups
+            let localExpenseDetails = (localRecordMonthDetails[monthKey] ?? [:]).filter {
+                $0.value.kind == "expense"
+            }
+            localRecordMonthDetails[monthKey] = localExpenseDetails.merging(
+                Dictionary(uniqueKeysWithValues: month.records.map {
+                    let detail = LocalRecordReadModel.detail(from: $0, imageStore: localImageStore)
+                    return (detail.id, detail)
+                }),
+                uniquingKeysWith: { _, local in local }
+            )
+            if monthKey == Self.currentMonthKey {
+                applyLocalRecordMonth()
+                if !isSignedIn {
+                    await applyLocalStagingProjection()
+                }
+            }
+        } catch {
+            guard generation == userStateGeneration, localMonthReadVersions[readKey] == readVersion else { return }
+            recordMonthMessages[monthKey] = error.localizedDescription
+        }
+    }
+
+    private func applyLocalRecordMonth() {
+        let mergedGroups = recordGroups(monthKey: Self.currentMonthKey)
+        let todayKey = NativeLocalDate.dateKey(Date())
+        dashboard.dayRecordGroups = mergedGroups
+        dashboard.todayCount = mergeâ€¦37486 tokens truncatedâ€¦lse { throw LocalDataError.invalidRecord }
+        let current = try await localDomainRecordForReference(reference)
+        _ = try await localRecordUseCase.delete(LocalRecordDeleteCommand(
+            id: current.id,
+            expectedVersion: current.localVersion,
+            deletedAt: Date()
+        ))
+        invalidateRecordExpressionPlanState(afterChanging: [reference])
+        recordsPath = NavigationPath()
+        await refreshLocalMonthProjection(monthKey: String(current.businessDate.prefix(7)))
+        return true
+    }
+
+    private func saveRemoteRecordDetail(_ draft: NativeRecordEditDraft) async throws -> Bool {
+        let session = try await validSession()
+        let reference = try await recordRepository.saveDetail(draft, accessToken: session.accessToken)
+        let oldReference = NativeRecordReference(draft.reference).canonicalValue
+        let savedReference = NativeRecordReference(reference).canonicalValue
+        invalidateRecordExpressionPlanState(
+            afterChanging: [oldReference, savedReference]
+        )
+        await refreshAfterRecordWrite(affectedDateKeys: [draft.recordDate])
+        await loadAccounts()
+        recordDetailCache.removeValue(forKey: savedReference)
+        await loadRecordDetail(reference: savedReference, force: true)
+        return true
+    }
+
+    private func deleteRemoteRecord(reference: String) async throws -> Bool {
+        let session = try await validSession()
+        try await recordRepository.delete(reference: reference, accessToken: session.accessToken)
+        invalidateRecordExpressionPlanState(afterChanging: [reference])
+        recordsPath = NavigationPath()
+        await loadAccounts()
+        await refreshAfterRecordWrite()
+        return true
+    }
+
+    func saveRecordDetail(_ draft: NativeRecordEditDraft) async -> Bool {
+        guard !isSavingRecordDetail else { return false }
+        isSavingRecordDetail = true
+        recordDetailMessage = nil
+        defer { isSavingRecordDetail = false }
+
+        do {
+            if isLocalIncomeReference(draft.reference) {
+                return try await saveLocalIncomeDetail(draft)
+            }
+            if isLocalExpenseReference(draft.reference) {
+                return try await saveLocalRecordDetail(draft)
+            }
+            if isLocalDomainReference(draft.reference) {
+                return try await saveLocalDomainRecord(draft)
+            }
+            guard mayReadRemoteBusinessData else { throw LocalDataError.recordNotFound }
+            return try await saveRemoteRecordDetail(draft)
+        } catch {
+            recordDetailMessage = error.localizedDescription
+            return false
+        }
+    }
+
+    func deleteRecord(reference: String) async -> Bool {
+        guard !isDeletingRecordDetail else { return false }
+        isDeletingRecordDetail = true
+        recordDetailMessage = nil
+        defer { isDeletingRecordDetail = false }
+
+        do {
+            if !mayReadRemoteBusinessData, let repository = localPendingFinancialRepository,
+               let profile = try await localExpenseUseCase?.prepareProfile(),
+               let id = UUID(uuidString: NativeRecordReference(reference).rawId),
+               NativeRecordReference(reference).kind == "expense",
+               try repository.record(profileID: profile.id, id: id) != nil {
+                try repository.delete(profileID: profile.id, id: id)
+                selectedRecordDetail = nil
+                await applyLocalStagingProjection()
+                await retryLocalImageCleanups()
+                return true
+            }
+            if isLocalIncomeReference(reference) {
+                return try await deleteLocalIncome(reference: reference)
+            }
+            if isLocalExpenseReference(reference) {
+                return try await deleteLocalRecord(reference: reference)
+            }
+            if isLocalDomainReference(reference) {
+                return try await deleteLocalDomainRecord(reference: reference)
+            }
+            guard mayReadRemoteBusinessData else { throw LocalDataError.recordNotFound }
+            return try await deleteRemoteRecord(reference: reference)
+        } catch {
+            recordDetailMessage = error.localizedDescription
+            return false
+        }
+    }
+
+    func confirmPendingRecord(
+        _ draft: NativePendingResolutionDraft,
+        preserveInboxNavigation: Bool = false
+    ) async -> Bool {
+        guard !isConfirmingPendingRecord else { return false }
+        if let validationMessage = draft.validationMessage {
+            pendingResolutionMessage = validationMessage
+            return false
+        }
+        isConfirmingPendingRecord = true
+        pendingResolutionMessage = "æ­£åœ¨ä¿å­˜â€¦"
+        defer { isConfirmingPendingRecord = false }
+        let generation = userStateGeneration
+        if !mayReadRemoteBusinessData {
+            do {
+                guard let repository = localPendingFinancialRepository,
+                      let profile = try await localExpenseUseCase?.prepareProfile(),
+                      let id = UUID(uuidString: draft.pendingId),
+                      let source = try repository.record(profileID: profile.id, id: id) else { throw LocalDataError.recordNotFound }
+                guard generation == userStateGeneration else { return false }
+                let accepted = try repository.resolve(profileID: profile.id, pendingID: id, draft: draft)
+                if accepted.recordType == "expense",
+                   let expenseID = UUID(uuidString: accepted.recordId),
+                   let expense = try await localExpenseUseCase?.expense(id: expenseID) {
+                    localExpressionPersistence?.refresh(expense: expense)
+                    scheduleLocalCompanion(for: LocalExpenseReadModel.detail(from: expense, imageStore: localImageStore))
+                } else if accepted.recordType == "income",
+                          let incomeID = UUID(uuidString: accepted.recordId),
+                          let income = try await localExpenseUseCase?.income(id: incomeID) {
+                    localExpressionPersistence?.refresh(income: income)
+                    scheduleLocalCompanion(for: LocalIncomeReadModel.detail(from: income, imageStore: localImageStore))
+                }
+                await loadLocalAccounts()
+                await refreshLocalMonthProjection(monthKey: String(source.transactionDate.prefix(7)))
+                await applyLocalStagingProjection()
+                guard generation == userStateGeneration else { return true }
+                if !preserveInboxNavigation { inboxPath = NavigationPath() }
+                pendingResolutionMessage = localWriteMessage(draft.kind == .income ? "æ”¶å…¥å·²è®°å½•ï¼ˆæœ¬æœºï¼‰" : (draft.accountId == nil ? "æ”¯å‡ºå·²è¡¥å…¨ï¼ˆä»…æœ¬æœºï¼Œå¾…è¡¥ç»‘è´¦æˆ·ï¼‰" : "æ”¯å‡ºå·²è¡¥å…¨ï¼ˆæœ¬æœºï¼‰"))
+                return true
+            } catch {
+                guard generation == userStateGeneration else { return false }
+                pendingResolutionMessage = "ä¿å­˜å¤±è´¥ï¼š\(error.localizedDescription)"
+                return false
+            }
+        }
+        let result = await resolvedPendingConfirmationUseCase().perform(
+            draft
+        )
+        switch result.transaction {
+        case .accepted(let accepted):
+            if accepted.recordType == "expense" {
+                await scheduleConfirmedExpenseVocabularyIfCurrent(draft)
+            }
+            if !preserveInboxNavigation { inboxPath = NavigationPath() }
+            let message = draft.kind == .income ? "æ”¶å…¥å·²è®°å½•" : "æ”¯å‡ºå·²è¡¥å…¨"
+            pendingResolutionMessage = result.refresh.failureMessage.map {
+                "\(message)ï¼Œåˆ·æ–°å¤±è´¥ï¼š\($0)"
+            } ?? message
+            return true
+        case .rejected(.unauthenticated):
+            pendingResolutionMessage = "ç™»å½•çŠ¶æ€å·²å¤±æ•ˆï¼Œè¯·é‡æ–°ç™»å½•"
+        case .rejected(.invalidInput):
+            pendingResolutionMessage = draft.validationMessage ?? "å¾…è¡¥å…¨è´¦å•æ— æ•ˆ"
+        case .conflict:
+            pendingResolutionMessage = "è¿™æ¡å¾…è¡¥å…¨è´¦å•æ­£åœ¨ä¿å­˜"
+        case .failed(let message):
+            pendingResolutionMessage = "ä¿å­˜å¤±è´¥ï¼š\(message)"
+        case .stale:
+            return false
+        }
+        return false
+    }
+
+    private func scheduleConfirmedExpenseVocabularyIfCurrent(
+        _ draft: NativePendingResolutionDraft
+    ) async {
+        guard let session = try? await validSession(),
+              isCurrentUserLoad(userStateGeneration, userId: session.user.id) else { return }
+        scheduleConfirmedExpenseVocabulary(
+            platform: draft.platform,
+            category: draft.category,
+            paymentMethod: draft.paymentMethod,
+            accountId: draft.accountId,
+            userId: session.user.id,
+            accessToken: session.accessToken
+        )
+    }
+
+    func submitRecordFeedback(
+        choice: NativeAIFeedbackReviewChoice,
+        freeText: String,
+        feedbackIdentity: String? = nil
+    ) async {
+        if case .submitting = recordFeedbackState { return }
+        guard let detail = selectedRecordDetail,
+              let feedback = NativeRecordExpressionFeedbackPolicy.feedbackForReview(
+                  voiceFeedback: detail.voiceAiFeedback,
+                  plannerFeedback: detail.expressionPlannerAiFeedback,
+                  fallbackFeedback: detail.aiFeedback,
+                  renderIdentity: feedbackIdentity
+              ) else { return }
+        recordFeedbackState = .submitting
+        if feedback.exposureEventId?.hasPrefix("local:") == true {
+            // Local Planner feedback never calls the remote feedback RPC.
+            recordFeedbackState = .submitted
+            return
+        }
+        let result = await resolvedFeedbackSubmissionUseCase().perform(
+            FeedbackSubmissionInput(
+                recordId: detail.rawId,
+                feedbackIdentity: feedback.renderIdentity,
+                choice: choice,
+                freeText: freeText,
+                exposureEventId: feedback.exposureEventId
+            )
+        )
+        switch result.transaction {
+        case .accepted:
+            recordFeedbackState = .submitted
+        case .rejected(.unauthenticated):
+            recordFeedbackState = .failed("ç™»å½•çŠ¶æ€å·²å¤±æ•ˆï¼Œè¯·é‡æ–°ç™»å½•")
+        case .rejected(.invalidInput):
+            recordFeedbackState = .failed("åé¦ˆå‚æ•°æ— æ•ˆ")
+        case .failed(let message):
+            recordFeedbackState = .failed(message)
+        case .stale:
+            return
+        }
+    }
+
+    private func resolvedFeedbackSubmissionUseCase() -> FeedbackSubmissionUseCase {
+        if let feedbackSubmissionUseCase { return feedbackSubmissionUseCase }
+        let useCase = FeedbackSubmissionUseCase(
+            repository: recordRepository,
+            sessionProvider: { [weak self] forceRefresh in
+                guard let self else {
+                    throw SupabaseRemoteError.requestFailed("app_state_unavailable")
+                }
+                return try await self.validSession(forceRefresh: forceRefresh)
+            },
+            contextProvider: { [weak self] in
+                guard let self else {
+                    return FeedbackSubmissionUserContext(userId: "", generation: -1, isSignedIn: false)
+                }
+                return FeedbackSubmissionUserContext(
+                    userId: self.currentUserId,
+                    generation: self.userStateGeneration,
+                    isSignedIn: self.isSignedIn
+                )
+            }
+        )
+        feedbackSubmissionUseCase = useCase
+        return useCase
+    }
+
+    func loadUserSettings() async {
+        userSettings = localUserSettingsStore.load()
+        settingsMessage = nil
+    }
+
+    func loadCloudPrivacySettings() async {
+        guard !isLoadingSettings else { return }
+        guard isSignedIn else {
+            settingsMessage = "ç™»å½•åå¯è¯»å–æˆ–ä¿®æ”¹äº‘ç«¯ç­–ç•¥ï¼›æœ¬æœºåŸå›¾ä¸å—è¿™äº›æœŸé™å½±å“ã€‚"
+            return
+        }
+        let generation = userStateGeneration
+        isLoadingSettings = true
+        defer { if generation == userStateGeneration { isLoadingSettings = false } }
+        do {
+            let session = try await validSession()
+            guard isCurrentUserLoad(generation, userId: session.user.id) else { return }
+            let remote = try await settingsRepository.fetch(userId: session.user.id, accessToken: session.accessToken)
+            guard isCurrentUserLoad(generation, userId: session.user.id) else { return }
+            // Display cloud policy without importing ordinary preferences or
+            // changing the device AI mode and its explicit consent.
+            userSettings.aiLogsEnabled = remote.aiLogsEnabled
+            userSettings.promptOptimizationEnabled = remote.promptOptimizationEnabled
+            userSettings.expressionImprovementEnabled = remote.expressionImprovementEnabled
+            userSettings.keepSourceImages = remote.keepSourceImages
+            userSettings.imageRetentionDays = remote.imageRetentionDays
+            settingsMessage = nil
+        } catch {
+            guard generation == userStateGeneration else { return }
+            settingsMessage = "æœªèƒ½ç¡®è®¤å½“å‰äº‘ç«¯ç­–ç•¥ï¼Œè¯·è”ç½‘åé‡è¯•ï¼š\(error.localizedDescription)"
+        }
+    }
+
+    func setCompanionEnabled(_ enabled: Bool) async {
+        await updateSettings(["companion_enabled": AnyCodable(enabled)]) { $0.companionEnabled = enabled }
+    }
+
+    func setCompanionMemoryEnabled(_ enabled: Bool) async {
+        await updateSettings(["companion_memory_enabled": AnyCodable(enabled)]) { $0.companionMemoryEnabled = enabled }
+    }
+
+    func setCompanionPersona(_ value: String) async {
+        await updateSettings(["companion_persona": AnyCodable(value)]) { $0.companionPersona = value }
+    }
+
+    func setCompanionMemoryStrength(_ value: String) async {
+        await updateSettings(["companion_memory_strength": AnyCodable(value)]) { $0.companionMemoryStrength = value }
+    }
+
+    func setCompanionExpressionStyle(_ value: String) async {
+        await updateSettings(["companion_expression_style": AnyCodable(value)]) { $0.companionExpressionStyle = value }
+    }
+
+    func setCompanionCustomNote(_ value: String) async {
+        let value = String(value.trimmingCharacters(in: .whitespacesAndNewlines).prefix(80))
+        await updateSettings(["companion_custom_note": AnyCodable(value)]) { $0.companionCustomNote = value }
+    }
+
+    func setInsightProvider(_ value: String) async {
+        let provider = NativeSettingsOptions.normalizedInsightProvider(value)
+        await updateSettings(["ai_insight_provider": AnyCodable(provider)]) { $0.aiInsightProvider = provider }
+    }
+
+    func setVisionProvider(_ value: String, forPhoto: Bool) async {
+        let provider = NativeSettingsOptions.normalizedVisionProvider(value, fallback: forPhoto ? "qwen" : "auto")
+        let key = forPhoto ? "photo_vision_primary" : "screenshot_vision_primary"
+        var values = [key: AnyCodable(provider)]
+        if !forPhoto { values["vision_primary"] = AnyCodable(provider) }
+        await updateSettings(values) {
+            if forPhoto { $0.photoVisionPrimary = provider }
+            else { $0.screenshotVisionPrimary = provider }
+        }
+    }
+
+    func setQwenModel(_ value: String, forPhoto: Bool) async {
+        let model = NativeSettingsOptions.normalizedQwenModel(value)
+        let key = forPhoto ? "qwen_photo_model" : "qwen_screenshot_model"
+        await updateSettings([key: AnyCodable(model)]) {
+            if forPhoto { $0.qwenPhotoModel = model }
+            else { $0.qwenScreenshotModel = model }
+        }
+    }
+
+    func setQwenThinking(_ enabled: Bool, forPhoto: Bool) async {
+        let key = forPhoto ? "qwen_photo_enable_thinking" : "qwen_screenshot_enable_thinking"
+        await updateSettings([key: AnyCodable(enabled)]) {
+            if forPhoto { $0.qwenPhotoThinking = enabled }
+            else { $0.qwenScreenshotThinking = enabled }
+        }
+    }
+
+    func setAILogsEnabled(_ enabled: Bool) async {
+        await updateSettings(["ai_logs_enabled": AnyCodable(enabled)]) { $0.aiLogsEnabled = enabled }
+    }
+
+    func setPromptOptimizationEnabled(_ enabled: Bool) async {
+        await updateSettings(["prompt_optimization_enabled": AnyCodable(enabled)]) { $0.promptOptimizationEnabled = enabled }
+    }
+
+    func setExpressionImprovementEnabled(_ enabled: Bool) async {
+        await updateSettings(["expression_improvement_enabled": AnyCodable(enabled)]) { $0.expressionImprovementEnabled = enabled }
+    }
+
+    func setImageRetention(days: Int, cleanupExisting: Bool = false) async {
+        let keepImages = days != 0
+        let retentionDays = keepImages ? days : 7
+        await updateSettings([
+            "keep_source_images": AnyCodable(keepImages),
+            "image_retention_days": AnyCodable(retentionDays)
+        ]) {
+            $0.keepSourceImages = keepImages
+            $0.imageRetentionDays = retentionDays
+        }
+        guard cleanupExisting, settingsMessage == nil else { return }
+        guard !isCleaningSourceImages else { return }
+        isCleaningSourceImages = true
+        settingsMessage = "æ­£åœ¨æ¸…ç†å·²æœ‰äº‘ç«¯åŸå›¾â€¦"
+        defer { isCleaningSourceImages = false }
+        do {
+            let session = try await validSession()
+            let cleanup = try await settingsRepository.cleanupSourceImages(accessToken: session.accessToken)
+            await RemoteImageRepository.shared.clear()
+            dashboard = dashboard.clearingSignedImageURLs()
+            recordDetailCache = recordDetailCache.mapValues { detail in
+                var cleared = detail
+                cleared.imageURL = nil
+                cleared.imageLoadError = false
+                return cleared
+            }
+            if var detail = selectedRecordDetail {
+                detail.imageURL = nil
+                detail.imageLoadError = false
+                selectedRecordDetail = detail
+            }
+            await refreshDashboard()
+            settingsMessage = cleanup.displayMessage
+        } catch {
+            settingsMessage = "ç•™å­˜è®¾ç½®å·²ä¿å­˜ï¼Œä½†æ¸…ç†å·²æœ‰åŸå›¾å¤±è´¥ï¼š\(error.localizedDescription)"
+        }
+    }
+
+    func exportData(_ request: NativeDataExportRequest) async -> NativeExportedFile? {
+        guard !isExportingData else { return nil }
+        isExportingData = true
+        settingsMessage = nil
+        defer { isExportingData = false }
+        do {
+            if localFactPortability != nil || request.content == .universal {
+                let data: Data
+                let filenamePrefix: String
+                if let localFactPortability {
+                    data = try localFactPortability.exportArchive(request: request)
+                    filenamePrefix = "jiezi-local-facts"
+                } else if let localRecordPortability {
+                    data = try localRecordPortability.exportArchive(request: request)
+                    filenamePrefix = "jiezi-local-records"
+                } else {
+                    throw LocalDataError.invalidRecord
+                }
+                let filename = "\(filenamePrefix)-\(NativeLocalDate.dateKey(Date())).\(request.format.rawValue)"
+                let url = FileManager.default.temporaryDirectory.appendingPathComponent(filename)
+                try data.write(to: url, options: .atomic)
+                return NativeExportedFile(url: url)
+            }
+            throw LocalDataError.invalidRecord
+        } catch {
+            settingsMessage = "å¯¼å‡ºå¤±è´¥ï¼š\(error.localizedDescription)"
+            return nil
+        }
+    }
+
+    func exportCompleteLocalBackup() async -> NativeExportedFile? {
+        guard !isExportingData, let portability = localCompleteBackupPortability else { return nil }
+        isExportingData = true
+        settingsMessage = nil
+        defer { isExportingData = false }
+        do {
+            let data = try await Task.detached(priority: .userInitiated) {
+                try portability.exportBackup()
+            }.value
+            let filename = "jiezi-local-complete-backup-\(NativeLocalDate.dateKey(Date())).json"
+            let url = FileManager.default.temporaryDirectory.appendingPathComponent(filename)
+            try data.write(to: url, options: .atomic)
+            return NativeExportedFile(url: url)
+        } catch {
+            settingsMessage = "å®Œæ•´æœ¬åœ°å¤‡ä»½å¤±è´¥ï¼š\(error.localizedDescription)"
+            return nil
+        }
+    }
+
+    func previewCompleteLocalBackup(_ data: Data) async throws -> LocalCompleteBackupPreview {
+        guard let portability = localCompleteBackupPortability else { throw LocalDataError.invalidRecord }
+        return try await Task.detached(priority: .userInitiated) {
+            try portability.preview(data)
+        }.value
+    }
+
+    func previewGenericImport(_ data: Data) async throws -> GenericImportPreview {
+        guard let service = genericImportService else { throw LocalDataError.invalidRecord }
+        return try await Task.detached(priority: .userInitiated) { try service.preview(data) }.value
+    }
+
+    func importGenericData(_ data: Data) async -> Bool {
+        guard !isImportingGenericData, let service = genericImportService else { return false }
+        isImportingGenericData = true
+        defer { isImportingGenericData = false }
+        do {
+            let result = try await Task.detached(priority: .userInitiated) { try service.importCSV(data) }.value
+            recordDetailCache.removeAll(); recordMonthDetails.removeAll(); localFactMonths.removeAll()
+            await refreshLocalMonthProjection(monthKey: Self.currentMonthKey)
+            settingsMessage = "å¯¼å…¥å®Œæˆï¼šæ–°å¢ \(result.inserted) æ¡ï¼Œè·³è¿‡ \(result.skipped) æ¡ï¼Œè­¦å‘Š \(result.warnings) æ¡ã€‚"
+            return true
+        } catch {
+            settingsMessage = "å¯¼å…¥å¤±è´¥ï¼š\(error.localizedDescription)"
+            return false
+        }
+    }
+
+    /// Explicit settings action: caches source bytes, never writes business facts or enables sync.
+    func prepareCloudHistoryMigration() async {
+        guard !isPreparingHistoryMigration, !isImportingLocalBackup else { return }
+        loadLatestHistoryMigrationDiagnostic()
+        isPreparingHistoryMigration = true
+        canPauseHistoryMigration = true
+        historyMigrationAttempt += 1
+        let attempt = historyMigrationAttempt
+        let generation = userStateGeneration
+        historyMigrationAttemptID = UUID()
+        historyMigrationArchive = nil
+        historyMigrationPreview = nil
+        historyMigrationMessage = nil
+        historyMigrationCheckpoint = nil
+        historyMigrationProgress = nil
+        historyMigrationBlockers = []
+        historyMigrationBlockerCount = 0
+        historyMigrationUnresolvedCount = 0
+        historyMigrationSkippedImageCount = 0
+        historyMigrationPreservationIssues = []
+        historyMigrationPhase = "éªŒè¯ä¼šè¯"
+        defer {
+            if generation == userStateGeneration, attempt == historyMigrationAttempt {
+                isPreparingHistoryMigration = false
+                canPauseHistoryMigration = false
+            }
+        }
+        do {
+            let session = try await validSession()
+            guard isCurrentUserLoad(generation, userId: session.user.id),
+                  let profile = try await localExpenseUseCase?.prepareProfile(),
+                  let portability = localCompleteBackupPortability,
+                  let cache = localHistoryMigrationCache,
+                  let baseURL = URL(string: AppConfig.supabaseURL) else { throw LocalDataError.invalidRecord }
+            guard profile.cloudUserID == nil || profile.cloudUserID == session.user.id else {
+                throw LocalHistoryMappingError.unsupported("æœ¬æœºå·¥ä½œåŒºä»ç»‘å®šå¦ä¸€ä¸ªäº‘è´¦æˆ·ï¼Œè¯·å…ˆæ ¸å¯¹æ•°æ®å½’å±ã€‚")
+            }
+            historyMigrationProfileID = profile.id
+            let isCurrent = { [weak self] in
+                self?.isCurrentUserLoad(generation, userId: session.user.id) == true
+                    && self?.historyMigrationAttempt == attempt
+            }
+            guard isCurrent(), !Task.isCancelled else { throw CancellationError() }
+            if let existing = try cache.state(profileID: profile.id) {
+                guard existing.cloudUserID == session.user.id else { throw LocalHistoryMigrationError.identityMismatch }
+                if existing.status == .completed {
+                    try? cache.cleanupAfterCompletion(existing)
+                    historyMigrationUnresolvedCount = try historyUnresolvedRepository?.count(profileID: profile.id) ?? 0
+                    historyMigrationPhase = historyMigrationUnresolvedCount > 0 ? "å·²ä¿ç•™å¾…æ ¸å¯¹" : "å·²å…¥è´¦"
+                    historyMigrationMessage = "æ­¤å·¥ä½œåŒºå·²å®Œæˆä¸€æ¬¡å†å²è¿å…¥ï¼Œå†å²å¾…æ ¸å¯¹ \(historyMigrationUnresolvedCount) æ¡ä»ä¸å±äºæ­£å¼å…¥è´¦ã€‚æ™®é€šåŒæ­¥åªæ”¯æŒå…¶å·²å£°æ˜èŒƒå›´ï¼Œä¸ä»£è¡¨å…¨åŸŸäº‘æœ¬ä¸€è‡´ã€‚"
+                    return
+                }
+            }
+            historyMigrationPhase = "è¯»å–äº‘ç«¯æºæ•°æ®ä¸åŸå›¾"
+            let preflightSchema = try LocalDatabase()
+            let prepared = try await LocalHistoryMigrationCoordinator(
+                downloader: LocalHistoryImageDownloader(baseURL: baseURL), cache: cache,
+                validateStructure: { inspection, profileID in
+                    // ç»“æ„é¢„æ£€ï¼šå…ˆåœ¨ä¸å«å›¾ç‰‡çš„å½’æ¡£ä¸Šè·‘ä¸€éçœŸå®å¯¼å…¥ï¼ŒæŠŠå­—æ®µ/å¼•ç”¨/çº¦æŸé—®é¢˜
+                    // åœ¨ä¸‹è½½åŸå›¾ä¹‹å‰æš´éœ²å‡ºæ¥ï¼Œå¹¶ä¸€æ¬¡æŠ¥å…¨ã€‚
+                    let archive = try LocalHistoryMigrationMapper(schema: preflightSchema).buildArchive(
+                        inspection, profileID: profileID, images: [:])
+                    do {
+                        try portability.validateImport(archive, into: profileID)
+                    } catch let error as LocalCompleteBackupError {
+                        // detail å·²å¸¦ã€Œæœ¬æœºè¡¨.åˆ— + è®°å½• #hashã€ã€‚å†åŒ…ä¸€å±‚é•¿å¥ä¼šæŠŠé—®é¢˜æ¸…å•
+                        // ç”¨æ¥å½’ç±»çš„å­—æ®µå½¢çŠ¶å†²æ‰ï¼Œå¤±è´¥è®°å½•å°±é€€åŒ–æˆã€Œå…¶ä»–ã€è€Œçœ‹ä¸è§ã€‚
+                        switch error {
+                        case .invalidRowIssues(let details):
+                            throw LocalHistoryMappingError.rows(details)
+                        case .invalidRows(let detail):
+                            throw LocalHistoryMappingError.rows([detail])
+                        default:
+                            throw error
+                        }
+                    }
+                }
+            ).prepare(profileID: profile.id, cloudUserID: session.user.id,
+                      accessToken: session.accessToken, isCurrent: isCurrent,
+                      onProgress: { [weak self] progress in
+                          guard let self else { return }
+                          self.historyMigrationProgress = progress
+                          switch progress.phase {
+                          case .readingSource:
+                              self.historyMigrationPhase = progress.currentTable.map { "è¯»å– \($0.rawValue)" } ?? "è¯»å–äº‘ç«¯æºæ•°æ®"
+                          case .downloadingImages:
+                              self.historyMigrationPhase = "ä¸‹è½½å†å²åŸå›¾"
+                          }
+                      })
+            guard isCurrent(), !Task.isCancelled else { throw CancellationError() }
+            let inspection = prepared.inspection
+            historyMigrationCheckpoint = prepared.state
+            guard inspection.blockers.isEmpty else {
+                try cache.pause(prepared.state)
+                historyMigrationPhase = "é¢„æ£€é˜»å¡"
+                historyMigrationBlockerCount = inspection.blockers.count
+                historyMigrationBlockers = inspection.blockers
+                historyMigrationMessage = inspection.summary
+                return
+            }
+            historyMigrationBlockers = []
+            historyMigrationBlockerCount = 0
+            guard isCurrent(), !Task.isCancelled else { throw CancellationError() }
+            historyMigrationPhase = "æ ¸å¯¹å†å²å­—æ®µä¸è½¬æ¢"
+            let archive = try LocalHistoryMigrationMapper(schema: LocalDatabase()).buildArchive(
+                inspection, profileID: profile.id, images: prepared.images)
+            let preview = try portability.preview(archive)
+            historyMigrationUnresolvedCount = preview.tableCounts["local_history_unresolved_records", default: 0]
+            historyMigrationSkippedImageCount = max(0, inspection.sourceImagePaths.count - prepared.images.count)
+            historyMigrationPreservationIssues = [LocalHistorySourceTable.records, .staging].flatMap { table in
+                inspection.rows[table, default: []].flatMap {
+                    LocalHistoryMigrationUseCase.preservationIssues(table: table, row: $0, rows: inspection.rows)
+                }
+            }
+            let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
+            historyMigrationSourceDigest = try encoder.encode(Dictionary(uniqueKeysWithValues: inspection.rows.map { ($0.key.rawValue, $0.value) }))
+            historyMigrationArchive = archive
+            historyMigrationOwner = session.user.id
+            historyMigrationGeneration = generation
+            historyMigrationPhase = "ç­‰å¾…ç”¨æˆ·ç¡®è®¤"
+            let imageNote = historyMigrationSkippedImageCount > 0
+                ? "\næœ‰ \(historyMigrationSkippedImageCount) å¼ å†å²åŸå›¾æ— æ³•è¯»å–ï¼›å¯¹åº”å¯æ˜ å°„è®°å½•ä»ä¼šå¯¼å…¥ï¼Œå›¾ç‰‡å­—æ®µç•™ç©ºã€‚"
+                : ""
+            historyMigrationPreview = "äº‘è´¦æˆ·ï¼š\(session.user.email ?? session.user.id)ã€‚å°†åˆå¹¶åˆ°æ­¤ iPhone ç°æœ‰è´¦æœ¬ï¼Œæ¢å·ä¸ä¼šå¦å»ºæœ¬æœºè´¦æœ¬ã€‚\n" + inspection.summary + imageNote + "\n" + preview.confirmationText
+            historyMigrationMessage = "é¢„æ£€é€šè¿‡ï¼Œæºæ•°æ®ä¸å¯è¯»å–å›¾ç‰‡å·²æš‚å­˜åœ¨æœ¬æœºï¼Œå°šæœªæäº¤ã€‚ç¡®è®¤ä¼šä¸€èµ·ä¿å­˜å¯ç­‰ä»·è½¬æ¢çš„æ•°æ®ä¸ \(historyMigrationUnresolvedCount) æ¡å†å²å¾…æ ¸å¯¹åŸæ–‡ã€‚ç¼ºå¤±å›¾ç‰‡çš„è®°å½•ä¿ç•™ç»“æ„åŒ–å­—æ®µä½†ä¸å«åŸå›¾ï¼›åŸæ–‡ä¸ä¼šè®¡å…¥æ—¥ç»Ÿè®¡ã€‚ç¡®è®¤å‰é‡æ–°æ ¸å¯¹æºæ•°æ®ï¼Œå†²çªä»æ•´åŒ…æ‹’ç»ã€‚"
+            if let diagnostic = historyMigrationDiagnostic,
+               diagnostic.operation == "history-migration", !diagnostic.committed, diagnostic.resolution == nil,
+               diagnostic.accountHint == LocalHistoryMigrationDiagnosticStore.identityHint(session.user.id) {
+                try? historyMigrationDiagnosticStore?.resolve(diagnostic.id, outcome: "é‡è¯•é¢„æ£€é€šè¿‡ï¼›æ•°æ®ä»å¾…ç”¨æˆ·ç¡®è®¤å…¥è´¦ã€‚", expectedAccountID: session.user.id)
+                loadLatestHistoryMigrationDiagnostic()
+            }
+        } catch is CancellationError {
+            guard generation == userStateGeneration, attempt == historyMigrationAttempt else { return }
+            historyMigrationPhase = "å·²å–æ¶ˆ"
+            historyMigrationMessage = "é¢„æ£€å·²å–æ¶ˆï¼Œå°šæœªå…¥è´¦ï¼›å·²ç¼“å­˜çš„è¯»å–è¿›åº¦ä¿ç•™ã€‚"
+        } catch {
+            guard generation == userStateGeneration, attempt == historyMigrationAttempt else { return }
+            if let state = historyMigrationCheckpoint { try? localHistoryMigrationCache?.pause(state) }
+            let failedPhase = historyMigrationPhase
+            historyMigrationPhase = "é¢„æ£€æš‚åœ"
+            historyMigrationMessage = recordHistoryMigrationFailure(error, committed: false, phase: failedPhase)
+            // é€è¡Œé—®é¢˜ä¸€æ¬¡åˆ—å…¨ï¼Œç”¨æˆ·ä¸å¿…ã€Œä¿®ä¸€æ¡é‡å¯ä¸€æ¬¡ã€ã€‚
+            if case .rows(let issues)? = error as? LocalHistoryMappingError {
+                historyMigrationPhase = "é¢„æ£€é˜»å¡"
+                historyMigrationBlockers = issues
+                historyMigrationBlockerCount = issues.count
+            }
+        }
+    }
+
+    func loadLocalHistoryUnresolvedRecords() async {
+        guard !isLoadingHistoryUnresolvedRecords else { return }
+        let generation = userStateGeneration
+        isLoadingHistoryUnresolvedRecords = true
+        historyUnresolvedRecordsError = nil
+        defer { if generation == userStateGeneration { isLoadingHistoryUnresolvedRecords = false } }
+        do {
+            guard let repository = historyUnresolvedRepository else { throw LocalDataError.invalidRecord }
+            guard let profileID = try localFactReader?.activeProfileID() else {
+                localHistoryUnresolvedRecords = []
+                return
+            }
+            let records = try await Task.detached(priority: .utility) {
+                try repository.records(profileID: profileID)
+            }.value
+            guard generation == userStateGeneration else { return }
+            localHistoryUnresolvedRecords = records
+        } catch {
+            guard generation == userStateGeneration else { return }
+            localHistoryUnresolvedRecords = []
+            historyUnresolvedRecordsError = "å†å²å¾…æ ¸å¯¹è®°å½•è¯»å–å¤±è´¥ï¼›æœªæŒ‰ç©ºæ¸…å•æ˜¾ç¤ºï¼Œè¯·é‡è¯•æœ¬æœºè¯»å–ã€‚"
+        }
+    }
+
+    func localImageDataForHistoryUnresolvedRecord(id: String) async throws -> Data {
+        let generation = userStateGeneration
+        guard let repository = historyUnresolvedRepository, let store = localImageStore,
+              let profileID = try localFactReader?.activeProfileID(),
+              let record = try repository.record(id: id, profileID: profileID),
+              let path = record.imagePath, let hash = record.imageHash else { throw LocalDataError.recordNotFound }
+        let bytes = try await Task.detached(priority: .utility) { try store.data(at: path) }.value
+        guard generation == userStateGeneration else { throw CancellationError() }
+        guard LocalImageStore.sha256(bytes) == hash else { throw LocalCompleteBackupError.invalidImage("history-image") }
+        return bytes
+    }
+
+    func loadLocalHistoryInventory() async {
+        guard !isLoadingLocalHistoryInventory else { return }
+        guard let historyInventoryReader else {
+            localHistoryInventory = nil
+            localHistoryInventoryError = localStorageInitializationMessage ?? "æœ¬æœºæ•°æ®ä¸å¯è¯»å–ã€‚"
+            return
+        }
+        isLoadingLocalHistoryInventory = true
+        localHistoryInventoryError = nil
+        defer { isLoadingLocalHistoryInventory = false }
+        do {
+            localHistoryInventory = try await Task.detached(priority: .utility) {
+                try historyInventoryReader.readLocal()
+            }.value
+        } catch {
+            localHistoryInventory = nil
+            let entry = historyMigrationDiagnosticStore?.record(error, phase: "æœ¬æœºæ•°æ®ç›˜ç‚¹", operation: "local-inventory", attemptID: historyMigrationAttemptID, committed: false)
+            historyMigrationDiagnostic = entry
+            localHistoryInventoryError = "æœ¬æœºæ•°æ®è¯»å–å¤±è´¥ï¼›æœªæŒ‰ 0 æ¡æ˜¾ç¤ºã€‚\(entry.map { "è¯Šæ–­ç¼–å·ï¼š\($0.id)ã€‚" } ?? "")"
+        }
+    }
+
+    /// Explicit user action. This reads each cloud source table under the current session/RLS and does not download images or write business data.
+    func readCloudHistoryInventory() async {
+        guard !isReadingCloudHistoryInventory else { return }
+        guard isSignedIn else {
+            cloudHistoryInventory = LocalHistoryCloudInventory.notRead
+            cloudHistoryInventory.status = .failed
+            cloudHistoryInventory.message = "è¯·å…ˆç™»å½•è¦ç›˜ç‚¹çš„äº‘è´¦æˆ·ã€‚"
+            return
+        }
+        isReadingCloudHistoryInventory = true
+        historyMigrationAttemptID = UUID()
+        cloudHistoryInventory = LocalHistoryCloudInventory(
+            status: .loading, sampledAt: nil, counts: [:], completedTables: [], currentTable: nil,
+            currentTableRowsRead: 0, totalRowsRead: 0, pagesRead: 0, message: nil
+        )
+        defer { isReadingCloudHistoryInventory = false }
+        let generation = userStateGeneration
+        do {
+            let session = try await validSession()
+            guard isCurrentUserLoad(generation, userId: session.user.id) else { return }
+            let inspection = try await LocalHistoryMigrationUseCase().inspect(
+                cloudUserID: session.user.id,
+                accessToken: session.accessToken,
+                isCurrent: { [weak self] in self?.isCurrentUserLoad(generation, userId: session.user.id) == true },
+                onProgress: { [weak self] progress in
+                    guard let self, self.isCurrentUserLoad(generation, userId: session.user.id) else { return }
+                    self.cloudHistoryInventory = LocalHistoryCloudInventory(
+                        status: .loading, sampledAt: nil, counts: progress.counts,
+                        completedTables: progress.completedTables, currentTable: progress.currentTable,
+                        currentTableRowsRead: progress.currentTableRowsRead, totalRowsRead: progress.totalRowsRead,
+                        pagesRead: progress.pagesRead, message: nil
+                    )
+                }
+            )
+            guard isCurrentUserLoad(generation, userId: session.user.id) else { return }
+            cloudHistoryInventory = LocalHistoryCloudInventory(
+                status: .complete, sampledAt: Date(), counts: LocalHistoryInventoryCatalog.cloudCounts(inspection.rows),
+                completedTables: Set(LocalHistorySourceTable.allCases), currentTable: nil,
+                currentTableRowsRead: 0, totalRowsRead: inspection.rows.values.reduce(0) { $0 + $1.count },
+                pagesRead: cloudHistoryInventory.pagesRead, message: "å·²å®Œæˆæœ¬æ¬¡åˆ†é¡µè¯»å–ï¼›å¤šè¡¨è¯»å–ä¸æ˜¯åŸå­äº‘å¿«ç…§ã€‚å›¾ç‰‡ä»…ç»Ÿè®¡å¼•ç”¨ä¸å»é‡è·¯å¾„ï¼Œæœªä¸‹è½½éªŒè¯ã€‚"
+            )
+        } catch is CancellationError {
+            guard generation == userStateGeneration else { return }
+            cloudHistoryInventory.status = .incomplete
+            cloudHistoryInventory.sampledAt = Date()
+            cloudHistoryInventory.message = "è¯»å–å·²å–æ¶ˆï¼›å·²å®Œæˆè¡¨å¯æŸ¥çœ‹ï¼Œå½“å‰è¡¨çš„æ€»é‡æœªçŸ¥ã€‚"
+        } catch {
+            guard generation == userStateGeneration else { return }
+            cloudHistoryInventory.status = .failed
+            cloudHistoryInventory.sampledAt = Date()
+            let entry = historyMigrationDiagnosticStore?.record(error, phase: "äº‘ç«¯æ•°é‡ç›˜ç‚¹", accountID: currentUserId, operation: "cloud-inventory",
+                progressSummary: "å·²è¯» \(cloudHistoryInventory.totalRowsRead) è¡Œã€\(cloudHistoryInventory.pagesRead) é¡µï¼›å½“å‰è¡¨æ€»é‡æœªçŸ¥ã€‚",
+                attemptID: historyMigrationAttemptID, committed: false)
+            historyMigrationDiagnostic = entry
+            cloudHistoryInventory.message = "äº‘ç«¯è¯»å–å¤±è´¥ï¼›å·²å®Œæˆè¡¨å¯æŸ¥çœ‹ï¼Œå½“å‰è¡¨æ€»é‡æœªçŸ¥ã€‚\(entry.map { "è¯Šæ–­ç¼–å·ï¼š\($0.id)ã€‚" } ?? "")"
+        }
+    }
+
+    func loadLatestHistoryMigrationDiagnostic() {
+        guard let historyMigrationDiagnosticStore else {
+            historyMigrationDiagnostic = nil
+            return
+        }
+        let entries = (try? historyMigrationDiagnosticStore.recent()) ?? []
+        let operations: Set<String> = ["history-migration", "cloud-inventory", "local-inventory"]
+        if currentUserId.isEmpty {
+            historyMigrationDiagnostic = entries.last {
+                operations.contains($0.operation ?? "history-migration") && $0.accountHint == nil
+            }
+        } else {
+            let currentHint = LocalHistoryMigrationDiagnosticStore.identityHint(currentUserId)
+            historyMigrationDiagnostic = entries.last {
+                operations.contains($0.operation ?? "history-migration")
+                    && ($0.accountHint == nil || $0.accountHint == currentHint)
+            }
+        }
+    }
+
+    func loadLatestLocalStorageInitializationDiagnostic() {
+        guard let historyMigrationDiagnosticStore else {
+            localStorageInitializationDiagnostic = nil
+            return
+        }
+        localStorageInitializationDiagnostic = (try? historyMigrationDiagnosticStore.recent())?.last {
+            $0.operation == "local-storage-init" && $0.accountHint == nil
+        }
+    }
+
+    func loadLatestLocalProjectionRefreshDiagnostic() {
+        guard let historyMigrationDiagnosticStore else {
+            localProjectionRefreshDiagnostic = nil
+            return
+        }
+        let accountHint = currentUserId.isEmpty
+            ? nil
+            : LocalHistoryMigrationDiagnosticStore.identityHint(currentUserId)
+        localProjectionRefreshDiagnostic = (try? historyMigrationDiagnosticStore.recent())?.last {
+            $0.operation == "local-write-refresh" && $0.accountHint == accountHint
+        }
+    }
+
+    func pauseCloudHistoryMigration() {
+        guard canPauseHistoryMigration else { return }
+        if let profileID = historyMigrationProfileID,
+           let state = try? localHistoryMigrationCache?.state(profileID: profileID) {
+            try? localHistoryMigrationCache?.pause(state)
+        }
+        historyMigrationAttempt += 1
+        canPauseHistoryMigration = false
+        historyMigrationPhase = "å·²æš‚åœ"
+        isPreparingHistoryMigration = false
+        historyMigrationMessage = "å·²æš‚åœï¼Œå°šæœªå…¥è´¦ã€‚å†æ¬¡é¢„æ£€å°†ä»å·²ç¼“å­˜çš„é¡µå’Œå›¾ç‰‡ç»§ç»­ã€‚"
+    }
+
+    func restartCloudHistoryMigrationPreview() {
+        guard !isPreparingHistoryMigration, !isImportingLocalBackup,
+              let profileID = historyMigrationProfileID, let cache = localHistoryMigrationCache else { return }
+        do {
+            guard let checkpoint = try cache.state(profileID: profileID), checkpoint.cloudUserID == currentUserId else {
+                throw LocalHistoryMigrationError.identityMismatch
+            }
+            try cache.restartSource(checkpoint)
+            historyMigrationCheckpoint = nil
+            historyMigrationArchive = nil
+            historyMigrationPreview = nil
+            historyMigrationSourceDigest = nil
+            historyMigrationSkippedImageCount = 0
+            historyMigrationBlockers = []
+            historyMigrationBlockerCount = 0
+            historyMigrationPhase = "é¢„æ£€å·²ä¸¢å¼ƒ"
+            historyMigrationPreservationIssues = []
+            historyMigrationUnresolvedCount = 0
+            historyMigrationMessage = "å·²ä¸¢å¼ƒé¢„æ£€ç¼“å­˜ã€‚å†æ¬¡é¢„æ£€ä¼šé‡æ–°è¯»å–äº‘ç«¯å†å²ï¼Œæœ¬æœºåŸæœ‰è´¦ç›®å’Œå›¾ç‰‡æœªæ”¹å˜ã€‚"
+        } catch { historyMigrationMessage = "æ— æ³•ä¸¢å¼ƒæ—§é¢„æ£€ï¼š\(error.localizedDescription)" }
+    }
+
+    func confirmCloudHistoryMigration() async -> Bool {
+        guard !isPreparingHistoryMigration, !isImportingLocalBackup,
+              let archive = historyMigrationArchive, let owner = historyMigrationOwner,
+              let checkpoint = historyMigrationCheckpoint, let cache = localHistoryMigrationCache,
+              let generation = historyMigrationGeneration,
+              isCurrentUserLoad(generation, userId: owner) else { return false }
+        let attempt = historyMigrationAttempt
+        isPreparingHistoryMigration = true
+        historyMigrationPhase = "ç¡®è®¤å‰å¤æ ¸äº‘ç«¯æºæ•°æ®"
+        historyMigrationImportError = nil
+        let isCurrentAttempt = { [weak self] in
+            self?.isCurrentUserLoad(generation, userId: owner) == true
+                && self?.historyMigrationAttempt == attempt
+        }
+        defer { if isCurrentAttempt() { isPreparingHistoryMigration = false } }
+        do {
+            let session = try await validSession()
+            guard isCurrentAttempt(), session.user.id == owner else { return false }
+            let inspection = try await LocalHistoryMigrationUseCase().inspect(cloudUserID: owner,
+                accessToken: session.accessToken,
+                isCurrent: isCurrentAttempt)
+            let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
+            let current = try encoder.encode(Dictionary(uniqueKeysWithValues: inspection.rows.map { ($0.key.rawValue, $0.value) }))
+            guard isCurrentAttempt(), !Task.isCancelled else { throw CancellationError() }
+            // æºæ•°æ®éšæ—¶ä¼šå˜ï¼šPWA è®°è´¦ã€æœ¬æœº outbox ä¸Šä¼ éƒ½ä¼šæ”¹äº‘ç«¯ã€‚å†»ç»“å¿«ç…§ä¼šè®©æ¯ä¸€ç¬”
+            // æ–°è®°å½•ä½œåºŸæ•´è½®é¢„æ£€ä¸å·²ä¸‹è½½åŸå›¾ï¼Œè€Œå¯¼å…¥æœ¬èº«æŒ‰åŒæ ‡è¯†è·³è¿‡ã€å¤©ç„¶å¹‚ç­‰ã€‚
+            // æ‰€ä»¥æºå˜åŒ–ä¸å†ä¸­æ–­ï¼Œæ”¹ä¸ºã€ŒæŒ‰æœ€æ–°æ•°æ®é‡å»ºå½’æ¡£ï¼Œå›¾ç‰‡èµ°ç¼“å­˜åªè¡¥æ–°å¢ã€ã€‚
+            guard inspection.blockers.isEmpty else {
+                historyMigrationBlockerCount = inspection.blockers.count
+                historyMigrationBlockers = inspection.blockers
+                historyMigrationMessage = inspection.summary
+                return false
+            }
+            // Rows may omit a source hash; a stable URL alone cannot prove unchanged image bytes.
+            guard let baseURL = URL(string: AppConfig.supabaseURL) else { throw LocalDataError.invalidRecord }
+            let downloader = LocalHistoryImageDownloader(baseURL: baseURL)
+            historyMigrationPhase = "ç¡®è®¤å‰å¤æ ¸åŸå›¾"
+            let imageTotal = inspection.sourceImagePaths.count
+            let sourceRowsRead = inspection.rows.values.reduce(0) { $0 + $1.count }
+            let sourcePagesRead = historyMigrationProgress?.pagesRead ?? 0
+            historyMigrationProgress = LocalHistoryMigrationProgress(phase: .downloadingImages, currentTable: nil,
+                rowsRead: sourceRowsRead, knownRowTotal: sourceRowsRead, pagesRead: sourcePagesRead,
+                imagesProcessed: 0, imagesTotal: imageTotal)
+            let coordinator = LocalHistoryMigrationCoordinator(downloader: downloader, cache: cache)
+            // ä¼  state æ‰ä¼šå‘½ä¸­é¢„æ£€å·²è½ç›˜çš„å­—èŠ‚ï¼›åªæœ‰ç¼“å­˜é‡Œæ²¡æœ‰çš„ï¼ˆæ–°å¢è®°å½•ï¼‰æ‰çœŸæ­£èµ°ç½‘ç»œã€‚
+            let currentImages = try await coordinator.loadImages(inspection: inspection, cloudUserID: owner,
+                accessToken: session.accessToken, state: checkpoint, isCurrent: isCurrentAttempt) { processed in
+                self.historyMigrationProgress = LocalHistoryMigrationProgress(phase: .downloadingImages, currentTable: nil,
+                    rowsRead: sourceRowsRead, knownRowTotal: sourceRowsRead, pagesRead: sourcePagesRead,
+                    imagesProcessed: processed, imagesTotal: imageTotal)
+            }
+            guard isCurrentAttempt(), !Task.isCancelled else { return false }
+            try cache.assertCurrent(checkpoint)
+            // æºæ•°æ®æ²¡å˜å°±ç”¨é¢„æ£€çš„å½’æ¡£ï¼›å˜äº†å°±æŒ‰æœ€æ–°å¿«ç…§é‡å»ºï¼ˆå›¾ç‰‡æ¥è‡ªç¼“å­˜ï¼Œä¸ä¼šé‡ä¸‹ï¼‰ã€‚
+            let importedArchive: Data
+            if current == historyMigrationSourceDigest {
+                importedArchive = archive
+            } else {
+                historyMigrationPhase = "æŒ‰æœ€æ–°æ•°æ®é‡å»ºå½’æ¡£"
+                importedArchive = try LocalHistoryMigrationMapper(schema: LocalDatabase())
+                    .buildArchive(inspection, profileID: checkpoint.profileID, images: currentImages)
+            }
+            historyMigrationPhase = "äº‹åŠ¡å…¥è´¦ä¸æœ¬æœºåˆ·æ–°"
+            let imported = await importCompleteLocalBackup(importedArchive, historyMigration: checkpoint)
+            if !imported, let error = historyMigrationImportError {
+                historyMigrationPhase = "äº‹åŠ¡å…¥è´¦"
+                historyMigrationMessage = recordHistoryMigrationFailure(error, committed: false)
+                return false
+            }
+            if imported { try? cache.cleanupAfterCompletion(checkpoint) }
+            guard isCurrentAttempt() else { return false }
+            if imported {
+                let savedPhase = historyMigrationUnresolvedCount > 0 ? "å·²ä¿ç•™å¾…æ ¸å¯¹" : "å·²å…¥è´¦"
+                historyMigrationPhase = savedPhase
+                historyMigrationPreservationIssues = []
+                historyMigrationBlockers = []
+                historyMigrationBlockerCount = 0
+                historyMigrationArchive = nil
+                historyMigrationPreview = nil
+                historyMigrationCheckpoint = nil
+                if localProjectionRefreshMessage != nil {
+                    historyMigrationPhase = "å…¥è´¦ååˆ·æ–°"
+                    historyMigrationMessage = recordHistoryMigrationFailure(LocalHistoryMigrationPostCommitRefreshError(), committed: true)
+                    historyMigrationPhase = savedPhase
+                } else {
+                    let imageNote = historyMigrationSkippedImageCount > 0
+                        ? "å¦æœ‰ \(historyMigrationSkippedImageCount) å¼ å†å²åŸå›¾æ— æ³•è¯»å–ï¼Œç›¸å…³ç»“æ„åŒ–è®°å½•å·²ä¿ç•™ä½†ä¸å«åŸå›¾ã€‚"
+                        : ""
+                    historyMigrationMessage = [settingsMessage, imageNote].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " ")
+                }
+            } else { historyMigrationMessage = settingsMessage }
+            return imported
+        } catch {
+            guard isCurrentAttempt() else { return false }
+            if error is CancellationError {
+                historyMigrationPhase = "å·²å–æ¶ˆ"
+                historyMigrationMessage = "ç¡®è®¤å‰å¤æ ¸å·²å–æ¶ˆï¼Œå°šæœªå…¥è´¦ï¼›å¯ä»¥é‡æ–°é¢„æ£€ã€‚"
+                return false
+            }
+            if (error as? LocalHistoryMigrationError) == .staleAttempt {
+                historyMigrationPhase = "å·²æš‚åœ"
+                historyMigrationMessage = "è¿ç§»å°è¯•å·²å¤±æ•ˆï¼Œå°šæœªå…¥è´¦ï¼›è¯·é‡æ–°é¢„æ£€ã€‚"
+                return false
+            }
+            historyMigrationMessage = recordHistoryMigrationFailure(error, committed: false)
+            return false
+        }
+    }
+
+    func importCompleteLocalBackup(_ data: Data, historyMigration: LocalHistoryMigrationState? = nil) async -> Bool {
+        guard !isImportingLocalBackup, let portability = localCompleteBackupPortability else { return false }
+        isImportingLocalBackup = true
+        settingsMessage = nil
+        insightsLoadedAt = nil
+        defer { isImportingLocalBackup = false }
+        do {
+            let result = try await Task.detached(priority: .userInitiated) {
+                try portability.importBackupIntoActiveProfile(data, historyMigration: historyMigration)
+            }.value
+            recordDetailCache.removeAll()
+            recordMonthDetails.removeAll()
+            localFactMonths.removeAll()
+            let monthKeys = Set([Self.currentMonthKey, String(selectedDateKey.prefix(7))])
+            if !mayReadRemoteBusinessData {
+                await loadLocalAccounts()
+                await applyLocalStagingProjection()
+            }
+            for monthKey in monthKeys { await refreshLocalMonthProjection(monthKey: monthKey) }
+            let preserved = result.preservedRows > 0
+                ? "åŒ…ä¸­ \(result.preservedRows) æ¡å†å²å¾…æ ¸å¯¹åŸæ–‡å·²ä¿ç•™ï¼Œå°šæœªè½¬ä¸ºæ­£å¼è®°å½•ï¼Œä¸è®¡å…¥æ—¥ç»Ÿè®¡ã€‚" : ""
+            settingsMessage = localWriteMessage("æœ¬åœ°æ¢å¤å®Œæˆï¼šæ–°å¢ \(result.insertedRows) æ¡ï¼Œå·²å­˜åœ¨ \(result.skippedRows) æ¡ï¼Œæ¢å¤ \(result.restoredImages) å¼ å›¾ç‰‡ã€‚" + preserved)
+            await loadLocalHistoryUnresolvedRecords()
+            await loadLocalHistoryInventory()
+            return true
+        } catch {
+            if historyMigration != nil { historyMigrationImportError = error }
+            settingsMessage = "æœ¬åœ°æ¢å¤å¤±è´¥ï¼š\(error.localizedDescription)"
+            return false
+        }
+    }
+
+    func recordHistoryMigrationFailure(_ error: Error, committed: Bool, phase: String? = nil) -> String {
+        let failurePhase = phase ?? historyMigrationPhase
+        guard let store = historyMigrationDiagnosticStore else {
+            let diagnosticID = UUID().uuidString.lowercased()
+            let impact = committed ? "è¿ç§»å†…å®¹å·²ä¿å­˜ï¼ˆå¯èƒ½åŒ…å«å¾…æ ¸å¯¹åŸæ–‡ï¼‰ï¼Œä½†åç»­åˆ·æ–°æœªå®Œæˆã€‚" : "æœ¬æ¬¡å°šæœªå…¥è´¦ã€‚"
+            return "å†å²è¿ç§»åœ¨\(failurePhase)æš‚åœã€‚\(impact)è¯·æŸ¥çœ‹é”™è¯¯é˜¶æ®µåå¤„ç†ã€‚è¯Šæ–­ç¼–å·ï¼š\(diagnosticID)ã€‚"
+        }
+        let progressSummary: String? = historyMigrationProgress.map { progress in
+            "å·²è¯» \(progress.rowsRead) è¡Œã€\(progress.pagesRead) é¡µï¼›åŸå›¾ \(progress.imagesProcessed)/\(progress.imagesTotal) å¼ ã€‚"
+        }
+        let entry = store.record(error, phase: failurePhase, accountID: currentUserId.isEmpty ? nil : currentUserId,
+            operation: "history-migration", progressSummary: progressSummary,
+            attemptID: historyMigrationAttemptID, committed: committed)
+        historyMigrationDiagnostic = entry
+        return entry.userMessage
+    }
+
+    func deleteAccount() async -> Bool {
+        guard !isDeletingAccount else { return false }
+        let generation = userStateGeneration
+        isDeletingAccount = true
+        settingsMessage = nil
+        defer { isDeletingAccount = false }
+
+        do {
+            let session = try await validSession()
+            guard isCurrentUserLoad(generation, userId: session.user.id) else { return false }
+            let deletion = try await settingsRepository.deleteAccount(accessToken: session.accessToken)
+            guard isCurrentUserLoad(generation, userId: session.user.id) else { return false }
+            invalidateSession(message: "")
+            authMessage = deletion.displayMessage
+            authMessageIsError = false
+            return true
+        } catch {
+            guard generation == userStateGeneration else { return false }
+            settingsMessage = "è´¦æˆ·åˆ é™¤å¤±è´¥ï¼š\(error.localizedDescription)"
+            return false
+        }
+    }
+
+    private func updateSettings(
+        _ values: [String: AnyCodable],
+        apply: (inout NativeUserSettings) -> Void
+    ) async {
+        guard !isSavingSettings else { return }
+        let generation = userStateGeneration
+        let previous = userSettings
+        apply(&userSettings)
+        let consentKeys: Set<String> = ["companion_memory_enabled", "ai_logs_enabled", "prompt_optimization_enabled", "expression_improvement_enabled", "keep_source_images", "image_retention_days"]
+        if consentKeys.isDisjoint(with: values.keys) || Set(values.keys).isSubset(of: ["companion_memory_enabled"]) {
+            localUserSettingsStore.save(userSettings)
+            localUserSettingsStore.saveExplicitConsent(userSettings, keys: Set(values.keys))
+            settingsMessage = nil
+            return
+        }
+        isSavingSettings = true
+        settingsMessage = nil
+        defer { isSavingSettings = false }
+        do {
+            let session = try await validSession()
+            guard isCurrentUserLoad(generation, userId: session.user.id) else { return }
+            try await settingsRepository.update(
+                userId: session.user.id,
+                values: values,
+                accessToken: session.accessToken
+            )
+            guard isCurrentUserLoad(generation, userId: session.user.id) else { return }
+            localUserSettingsStore.save(userSettings)
+            localUserSettingsStore.saveExplicitConsent(userSettings, keys: Set(values.keys))
+        } catch {
+            guard generation == userStateGeneration else { return }
+            userSettings = previous
+            settingsMessage = "è®¾ç½®ä¿å­˜å¤±è´¥ï¼š\(error.localizedDescription)"
+        }
+    }
+
+    func requestShortcutNotificationPermission() async {
+        let granted = await ShortcutNotificationService.shared.requestAuthorization()
+        ShortcutFeedbackPreferences.applyNotificationAuthorization(granted: granted)
+        syncShortcutFeedbackPreferences()
+        await refreshNotificationPermissionStatus()
+        notificationPermissionMessage = granted
+            ? "å·²å¼€å¯ã€‚å¿«æ·æŒ‡ä»¤ä¸Šä¼ å®Œæˆåï¼ŒèŠ¥å­ä¼šå¼¹å‡ºç»“æœé€šçŸ¥ï¼Œç‚¹å‡»é€šçŸ¥å¯å›åˆ° Appã€‚"
+            : "æœªå¼€å¯ã€‚è¯·åœ¨ç³»ç»Ÿè®¾ç½®é‡Œå…è®¸èŠ¥å­é€šçŸ¥ï¼Œå¿«æ·æŒ‡ä»¤ä»ä¼šåœ¨â€œæ˜¾ç¤ºç»“æœâ€é‡Œå±•ç¤ºæ‘˜è¦ã€‚"
+    }
+
+    func refreshNotificationPermissionStatus() async {
+        notificationPermissionStatusText = await ShortcutNotificationService.shared.authorizationStatusText()
+    }
+
+    func presentOnboarding() {
+        isOnboardingPresented = true
+    }
+
+    func presentOnboardingIfNeeded() {
+        guard !shouldDeferOnboardingForExternalRoute else { return }
+
+        if isSignedIn, !currentUserId.isEmpty {
+            let deviceCompletion = onboardingProgressStore.completion(for: .device)
+            let deviceAccountID = onboardingProgressStore.linkedAccountIDForDeviceProgress()
+            if let accountCompletion = onboardingProgressStore.completion(for: .account(currentUserId)) {
+                if deviceAccountID == nil || deviceAccountID == currentUserId {
+                    if accountCompletion == .completed || deviceCompletion != .completed {
+                        onboardingProgressStore.mark(accountCompletion, for: .device)
+                    }
+                    onboardingProgressStore.linkDeviceProgress(toAccount: currentUserId)
+                }
+                return
+            }
+
+            if let deviceCompletion,
+               onboardingProgressStore.linkedAccountIDForDeviceProgress() == currentUserId {
+                onboardingProgressStore.mark(deviceCompletion, for: .account(currentUserId))
+                return
+            }
+
+            if let deviceCompletion,
+               onboardingProgressStore.linkedAccountIDForDeviceProgress() == nil {
+                onboardingProgressStore.mark(deviceCompletion, for: .account(currentUserId))
+                onboardingProgressStore.linkDeviceProgress(toAccount: currentUserId)
+                return
+            }
+
+            isOnboardingPresented = true
+            return
+        }
+
+        guard onboardingProgressStore.shouldPresent(for: .device) else { return }
+        isOnboardingPresented = true
+    }
+
+    func finishOnboarding(skipped: Bool) {
+        let completion: NativeOnboardingCompletion = skipped ? .skipped : .completed
+        guard isSignedIn, !currentUserId.isEmpty else {
+            let deviceExisting = onboardingProgressStore.completion(for: .device)
+            if !skipped || deviceExisting != .completed {
+                onboardingProgressStore.mark(completion, for: .device)
+            }
+            isOnboardingPresented = false
+            return
+        }
+
+        let existing = onboardingProgressStore.completion(for: .account(currentUserId))
+        if !skipped || existing != .completed {
+            onboardingProgressStore.mark(completion, for: .account(currentUserId))
+        }
+
+        let deviceAccountID = onboardingProgressStore.linkedAccountIDForDeviceProgress()
+        if deviceAccountID == nil || deviceAccountID == currentUserId {
+            let deviceExisting = onboardingProgressStore.completion(for: .device)
+            let deviceCompletion = existing == .completed || deviceExisting == .completed
+                ? NativeOnboardingCompletion.completed
+                : completion
+            onboardingProgressStore.mark(deviceCompletion, for: .device)
+            onboardingProgressStore.linkDeviceProgress(toAccount: currentUserId)
+        }
+        isOnboardingPresented = false
+    }
+
+    var onboardingScope: OnboardingProgressScope {
+        isSignedIn && !currentUserId.isEmpty
+            ? .account(currentUserId)
+            : .device
+    }
+
+    var onboardingStatusText: String {
+        onboardingProgressStore.completion(for: onboardingScope)?.statusText ?? "å°šæœªå®Œæˆ"
+    }
+
+    func sendTestShortcutNotification() async {
+        await ShortcutNotificationService.shared.sendTestNotification()
+        await refreshNotificationPermissionStatus()
+        notificationPermissionMessage = "å·²å‘é€æµ‹è¯•é€šçŸ¥ã€‚å¦‚æœæ²¡æœ‰å£°éŸ³ï¼Œè¯·æ£€æŸ¥é™éŸ³é”®ã€ä¸“æ³¨æ¨¡å¼ï¼Œä»¥åŠç³»ç»Ÿè®¾ç½®é‡Œçš„â€œå£°éŸ³â€å¼€å…³ã€‚"
+    }
+
+    func setShortcutNotificationsEnabled(_ enabled: Bool) {
+        ShortcutFeedbackPreferences.notificationsEnabled = enabled
+        syncShortcutFeedbackPreferences()
+    }
+
+    func setShortcutResultCardEnabled(_ enabled: Bool) {
+        ShortcutFeedbackPreferences.resultCardEnabled = enabled
+        syncShortcutFeedbackPreferences()
+    }
+
+    func syncShortcutFeedbackPreferences() {
+        shortcutNotificationsEnabled = ShortcutFeedbackPreferences.notificationsEnabled
+        shortcutResultCardEnabled = ShortcutFeedbackPreferences.resultCardEnabled
+    }
+
+    private func apply(session: SupabaseAuthSession) {
+        if !currentUserId.isEmpty, currentUserId != session.user.id {
+            resetUserScopedState()
+            Task { await RemoteImageRepository.shared.clear() }
+        }
+        isSignedIn = true
+        currentUserId = session.user.id
+        ShortcutTrialStore.shared.synchronize(scope: onboardingScope)
+        currentUserEmail = session.user.email ?? ""
+        refreshLocalSyncState()
+    }
+
+    private func updateShortcutCredentialMessage() {
+        shortcutCredentialMessage = hasUploadToken
+            ? "å·²åŒæ­¥ã€‚å¿«æ·æŒ‡ä»¤ä¼šè‡ªåŠ¨è¯»å– Keychainï¼Œä¸éœ€è¦æ‰‹åŠ¨å¡«å†™ upload_tokenã€‚"
+            : "æœªåŒæ­¥ã€‚è¯·å…ˆç™»å½•èŠ¥å­ã€‚"
+    }
+
+    private func save(session: SupabaseAuthSession, uploadToken: String) throws {
+        let data = try JSONEncoder().encode(session)
+        guard let json = String(data: data, encoding: .utf8) else { return }
+        try keychain.setString(json, for: KeychainKeys.authSession)
+        try keychain.setString(uploadToken, for: KeychainKeys.uploadToken)
+    }
+
+    private func save(session: SupabaseAuthSession) throws {
+        let data = try JSONEncoder().encode(session)
+        guard let json = String(data: data, encoding: .utf8) else { return }
+        try keychain.setString(json, for: KeychainKeys.authSession)
+    }
+
+    private func validSession(forceRefresh: Bool = false) async throws -> SupabaseAuthSession {
+        if let sessionProvider {
+            let session = try await sessionProvider(forceRefresh)
+            apply(session: session)
+            return session
+        }
+        if forceRefresh {
+            let refreshed = try await authService.refreshSession()
+            try save(session: refreshed)
+            apply(session: refreshed)
+            return refreshed
+        }
+        let session = try await authService.currentSession()
+        try save(session: session)
+        apply(session: session)
+        return session
+    }
+
+    private func isCurrentUserLoad(_ generation: Int, userId: String) -> Bool {
+        isSignedIn && generation == userStateGeneration && currentUserId == userId
+    }
+
+    private func isExpiredJWTError(_ error: Error) -> Bool {
+        let message = error.localizedDescription.lowercased()
+        return message.contains("pgrst303") || message.contains("jwt expired")
+    }
+
+    private func isInvalidRefreshSessionError(_ error: Error) -> Bool {
+        let message = error.localizedDescription.lowercased()
+        return message.contains("invalid refresh token")
+            || message.contains("refresh token not found")
+            || message.contains("refresh_token_not_found")
+            || message.contains("already used")
+            || message.contains("session_not_found")
+    }
+
+    private func invalidateSession(message: String) {
+        disableLocalSync()
+        try? keychain.remove(KeychainKeys.authSession)
+        try? keychain.remove(KeychainKeys.uploadToken)
+        isSignedIn = false
+        currentUserId = ""
+        ShortcutTrialStore.shared.synchronize(scope: onboardingScope)
+        currentUserEmail = ""
+        hasUploadToken = false
+        shortcutCredentialMessage = nil
+        resetUserScopedState()
+        refreshLocalSyncState()
+        presentedOverlay = .records
+        Task { await RemoteImageRepository.shared.clear() }
+        authMessage = message
+        authMessageIsError = !message.isEmpty
+    }
+
+    func resetUserScopedState() {
+        localHistoryUnresolvedRecords = []
+        isLoadingHistoryUnresolvedRecords = false
+        historyUnresolvedRecordsError = nil
+        historyMigrationUnresolvedCount = 0
+        historyMigrationSkippedImageCount = 0
+        historyMigrationPreservationIssues = []
+        cloudHistoryInventory = .notRead
+        isReadingCloudHistoryInventory = false
+        localSyncFailureDiagnostic = nil
+        localProjectionRefreshDiagnostic = nil
+        if let profileID = historyMigrationProfileID,
+           let state = try? localHistoryMigrationCache?.state(profileID: profileID), state.status == .running {
+            try? localHistoryMigrationCache?.pause(state)
+        }
+        historyMigrationProfileID = nil
+        historyMigrationProgress = nil
+        historyMigrationBlockers = []
+        historyMigrationBlockerCount = 0
+        historyMigrationArchive = nil
+        historyMigrationPreview = nil
+        historyMigrationOwner = nil
+        historyMigrationGeneration = nil
+        historyMigrationSourceDigest = nil
+        historyMigrationCheckpoint = nil
+        historyMigrationAttempt += 1
+        historyMigrationAttemptID = UUID()
+        canPauseHistoryMigration = false
+        historyMigrationMessage = nil
+        isPreparingHistoryMigration = false
+        historyMigrationPhase = ""
+        historyMigrationDiagnostic = nil
+        homePath = NavigationPath()
+        dashboardRefreshGeneration += 1
+        userStateGeneration += 1
+        stagingReadVersion += 1
+        localMonthReadVersions.removeAll()
+        loadingLocalReadKeys.removeAll()
+        walletSnapshotActionUseCase?.reset()
+        repaymentActionUseCase?.reset()
+        accountManagementActionUseCase?.reset()
+        accountReadPreparationUseCase?.reset()
+        screenshotRepaymentUseCase?.reset()
+        accountBindingUseCase?.reset()
+        stagingLifecycleUseCase?.reset()
+        pendingConfirmationUseCase?.reset()
+        feedbackSubmissionUseCase?.reset()
+        recordDetailImageUseCase?.reset()
+        thumbnailImageUseCase?.reset()
+        dashboardSupplementTask?.cancel()
+        dashboardSupplementTask = nil
+        dashboardCoreTask?.cancel()
+        dashboardCoreTask = nil
+        isLoadingDashboard = false
+        dashboard = DashboardSnapshot()
+        todayPath = NavigationPath()
+        inboxPath = NavigationPath()
+        recordsPath = NavigationPath()
+        selectedRecordDetail = nil
+        recordMonthGroups = [:]
+        remoteRecordMonthGroups = [:]
+        localExpenseMonthGroups = [:]
+        localIncomeMonthGroups = [:]
+        localRecordMonthGroups = [:]
+        localRecordMonthDetails = [:]
+        localFactMonths = [:]
+        recordMonthDetails = [:]
+        recordMonthMessages = [:]
+        loadingRecordMonthKey = nil
+        loadingLocalExpenseMonthKey = nil
+        loadingLocalRecordMonthKey = nil
+        for task in remoteRecordMonthTasks.values { task.cancel() }
+        remoteRecordMonthTasks.removeAll()
+        loadingRemoteRecordMonthKeys.removeAll()
+        recordDetailCache.removeAll()
+        activeRecordReference = nil
+        prefetchingRecordReferences.removeAll()
+        expressionPlanDeliveryTokens.removeAll()
+        pendingRecordExpressionPlans.removeAll()
+        expressionPlanAcknowledgementTokens.removeAll()
+        visibleRecordExpressionPlanCards.removeAll()
+        recordDetailMessage = nil
+        isSavingRecordDetail = false
+        isDeletingRecordDetail = false
+        recordFeedbackState = .idle
+        recordExpressionPlanExposureState = .idle
+        manualRecordMessage = nil
+        accounts = []
+        financeVocabulary = []
+        isLoadingFinanceVocabulary = false
+        selectedAccountDetail = nil
+        selectedAccountSourceSnapshot = nil
+        accountMessage = nil
+        localSyncState = nil
+        localSyncDiagnostic = nil
+        localBindingPreview = nil
+        isLoadingLocalBindingPreview = false
+        isSynchronizingLocalData = false
+        localSyncMessage = nil
+        isLoadingAccounts = false
+        isSavingAccount = false
+        isSubmittingRepayment = false
+        repaymentMessage = nil
+        repaymentCandidates = [:]
+        stagingRepaymentId = nil
+        inboxFinanceMessage = nil
+        inboxActionRecordId = nil
+        inboxActionMessage = nil
+        inboxActionMessageIsError = false
+        unboundRecords = []
+        unboundRecordsMessage = nil
+        unboundBindingMessage = nil
+        walletSnapshots = []
+        localWalletSnapshots = []
+        localWalletSnapshotHistory = []
+        isLoadingWalletSnapshots = false
+        walletSnapshotActionId = nil
+        walletSnapshotMessage = nil
+        insightsSnapshot = nil
+        insightsLoadedLocally = false
+        isLoadingInsights = false
+        insightsMessage = nil
+        insightsLoadedAt = nil
+        aiInsight = nil
+        isLoadingAIInsight = false
+        aiInsightMessage = nil
+        aiInsightIsCached = false
+        userSettings = localUserSettingsStore.load()
+        settingsMessage = nil
+        isLoadingSettings = false
+        isSavingSettings = false
+        isCleaningSourceImages = false
+        isExportingData = false
+        isDeletingAccount = false
+        isOnboardingPresented = false
+        dashboardMessage = nil
+        isShowingCachedDashboard = false
+        presentedOverlay = .none
+        selectedDomain = .expense
+        lastDashboardRefreshAt = nil
+    }
+
+    private func requireSession() throws -> SupabaseAuthSession {
+        guard let sessionJSON = try keychain.string(for: KeychainKeys.authSession),
+              let data = sessionJSON.data(using: .utf8),
+              let session = try? JSONDecoder().decode(SupabaseAuthSession.self, from: data) else {
+            throw SupabaseRemoteError.missingSession
+        }
+        return session
+    }
+
+    func createManualRecord(_ draft: NativeManualRecordDraft, domain: NativeDomainDefinition?) async -> Bool {
+        guard !isCreatingManualRecord else { return false }
+        guard localStorageInitializationMessage == nil else {
+            manualRecordMessage = localStorageInitializationMessage
+            return false
+        }
+        isCreatingManualRecord = true
+        manualRecordMessage = nil
+        defer { isCreatingManualRecord = false }
+
+        do {
+            return try await createUnifiedManualRecord(draft, domain: domain)
+        } catch {
+            manualRecordMessage = error.localizedDescription
+            return false
+        }
+    }
+
+    func prepareLocalWorkspace() async -> LocalExpenseWorkspace? {
+        guard let localExpenseUseCase else { return nil }
+        do {
+            let workspace = try await localExpenseUseCase.prepareWorkspace()
+            localAccounts = workspace.accounts
+            var balances: [UUID: Int64] = [:]
+            for account in workspace.accounts {
+                balances[account.id] = try await localExpenseUseCase.accountBalanceMinor(account.id)
+            }
+            localAccountBalances = balances
+            localAccountMessage = nil
+            return workspace
+        } catch {
+            localAccountMessage = error.localizedDescription
+            return nil
+        }
+    }
+
+    func createLocalAccount(_ command: LocalAccountSetupCommand) async -> LocalAccount? {
+        guard let localExpenseUseCase else { return nil }
+        do {
+            let account = try await localExpenseUseCase.createAccount(command)
+            await loadLocalAccounts()
+            localAccountMessage = nil
+            return account
+        } catch {
+            localAccountMessage = error.localizedDescription
+            return nil
+        }
+    }
+
+    func createLocalExpense(
+        amountText: String,
+        accountID: UUID,
+        merchantName: String,
+        platform: String,
+        category: String,
+        paymentMethod: String,
+        date: Date,
+        note: String
+    ) async -> Bool {
+        let draft = NativeManualRecordDraft(
+            kind: .expense,
+            accountID: accountID,
+            amountText: amountText,
+            title: merchantName,
+            platform: platform,
+            category: category,
+            paymentMethod: paymentMethod,
+            date: date,
+            note: note
+        )
+        return await createManualRecord(draft, domain: nil)
+    }
+
+    private func createLocalExpense(_ draft: NativeManualRecordDraft) async throws -> Bool {
+        guard draft.existingRawId == nil else { throw LocalDataError.invalidRecord }
+        guard let localExpenseUseCase else {
+            throw LocalDataError.invalidIdentifier
+        }
+        let accountText = draft.accountId
+        let accountID = accountText.flatMap(UUID.init(uuidString:))
+        // A user can open the form while the background account refresh is
+        // still running. Ensure a cloud account selected by the unified form
+        // exists in the local projection before validating the expense.
+        if let accountID, !localAccounts.contains(where: { $0.id == accountID }),
+           let cloudAccount = accounts.first(where: { $0.id == accountText }) {
+            let mirror = LocalAccount(
+                id: accountID,
+                profileID: UUID(),
+                name: cloudAccount.name,
+                kind: cloudAccount.type.rawValue,
+                currency: cloudAccount.currency,
+                openingBalanceMinor: Int64((cloudAccount.initialBalance * 100).rounded()),
+                createdAt: Date(),
+                institution: cloudAccount.institution,
+                last4: cloudAccount.last4,
+                billDay: cloudAccount.billDay,
+                paymentDueDay: cloudAccount.paymentDueDay,
+                autoDebitAccountID: cloudAccount.autoDebitAccountId.flatMap(UUID.init(uuidString:)),
+                autoConfirmRepayment: cloudAccount.autoConfirmRepayment,
+                gracePeriodDays: cloudAccount.gracePeriodDays,
+                lastReconciledAt: Self.parseISO8601(cloudAccount.lastReconciledAt),
+                isDefaultExpense: cloudAccount.isDefaultExpense,
+                isDefaultIncome: cloudAccount.isDefaultIncome,
+                isArchived: cloudAccount.isArchived,
+                sortOrder: cloudAccount.sortOrder
+            )
+            try await localExpenseUseCase.importRemoteAccounts([mirror])
+            _ = await prepareLocalWorkspace()
+        }
+        let command = LocalExpenseCommand(
+            id: UUID(),
+            accountID: accountID,
+            amountText: draft.amountText,
+            currency: "CNY",
+            merchantName: draft.title,
+            platform: draft.platform,
+            category: draft.category,
+            paymentMethod: draft.paymentMethod,
+            transactionDate: NativeLocalDate.dateKey(draft.date),
+            transactionTime: draft.includesTime ? NativeLocalDate.timeKey(draft.time) : nil,
+            note: draft.note.isEmpty ? nil : draft.note,
+            createdAt: Date(), imageData: draft.imageData
+        )
+        let outcome = try await localExpenseUseCase.create(command)
+        if let expense = outcome.expense {
+            scheduleLocalCompanion(for: LocalExpenseReadModel.detail(from: expense, imageStore: localImageStore))
+        }
+        _ = await prepareLocalWorkspace()
+        let monthKey = String(command.transactionDate.prefix(7))
+        await refreshLocalMonthProjection(monthKey: monthKey)
+        manualRecordMessage = outcome.expense == nil ? "æœ¬åœ°è®°å½•æœªä¿å­˜" : localWriteMessage(accountID == nil ? "è®°å½•å·²ä¿å­˜ï¼ˆä»…æœ¬æœºï¼Œè¡¥ç»‘åå¯åŒæ­¥ï¼‰" : "è®°å½•å·²ä¿å­˜ï¼ˆæœ¬æœºï¼‰")
+        return outcome.expense != nil
+    }
+
+    private func createLocalIncome(
+        _ draft: NativeManualRecordDraft,
+        domain: NativeDomainDefinition?
+    ) async throws -> Bool {
+        guard draft.existingRawId == nil, let localExpenseUseCase else { throw LocalDataError.invalidRecord }
+        guard draft.validationMessage(domain: domain) == nil else { throw LocalDataError.invalidRecord }
+        let accountID = draft.accountId.flatMap(UUID.init(uuidString:))
+        if let accountID, !localAccounts.contains(where: { $0.id == accountID }),
+           let cloudAccount = accounts.first(where: { $0.id == accountID.uuidString }) {
+            let mirror = LocalAccount(
+                id: accountID, profileID: UUID(), name: cloudAccount.name,
+                kind: cloudAccount.type.rawValue, currency: cloudAccount.currency,
+                openingBalanceMinor: Int64((cloudAccount.initialBalance * 100).rounded()), createdAt: Date(),
+                institution: cloudAccount.institution, last4: cloudAccount.last4,
+                billDay: cloudAccount.billDay, paymentDueDay: cloudAccount.paymentDueDay,
+                autoDebitAccountID: cloudAccount.autoDebitAccountId.flatMap(UUID.init(uuidString:)),
+                autoConfirmRepayment: cloudAccount.autoConfirmRepayment, gracePeriodDays: cloudAccount.gracePeriodDays,
+                lastReconciledAt: Self.parseISO8601(cloudAccount.lastReconciledAt),
+                isDefaultExpense: cloudAccount.isDefaultExpense, isDefaultIncome: cloudAccount.isDefaultIncome,
+                isArchived: cloudAccount.isArchived, sortOrder: cloudAccount.sortOrder
+            )
+            try await localExpenseUseCase.importRemoteAccounts([mirror])
+            _ = await prepareLocalWorkspace()
+        }
+        let occurredAt: Date?
+        if let timestamp = draft.occurredAt {
+            guard let parsed = ISO8601DateFormatter().date(from: timestamp),
+                  NativeLocalDate.dateKey(parsed) == draft.dateKey else {
+                throw LocalDataError.invalidRecord
+            }
+            occurredAt = parsed
+        } else {
+            occurredAt = nil
+        }
+        let saved = try await localExpenseUseCase.createIncome(LocalIncomeCommand(
+            id: UUID(), accountID: accountID, amountText: draft.amountText, currency: "CNY",
+            sourceName: draft.title, category: draft.category, incomeDate: draft.dateKey,
+            occurredAt: occurredAt,
+            note: draft.note.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : draft.note,
+            createdAt: Date(), imageData: draft.imageData
+        ))
+        scheduleLocalCompanion(for: LocalIncomeReadModel.detail(from: saved, imageStore: localImageStore))
+        _ = await prepareLocalWorkspace()
+        await refreshLocalMonthProjection(monthKey: String(saved.incomeDate.prefix(7)))
+        manualRecordMessage = localWriteMessage("æ”¶å…¥å·²è®°å½•ï¼ˆæœ¬æœºï¼‰")
+        return true
+    }
+
+    private func createLocalDomainRecord(
+        _ draft: NativeManualRecordDraft,
+        domain: NativeDomainDefinition?
+    ) async throws -> Bool {
+        guard let localRecordUseCase,
+              LocalRecordValidation.supportedDomainKeys.contains(draft.domainKey) else {
+            throw LocalDataError.invalidRecord
+        }
+        guard draft.validationMessage(domain: domain) == nil else {
+            throw LocalDataError.invalidRecord
+        }
+        let payload = draft.universalPayload(domain: domain)
+        let title = draft.resolvedTitle(domain: domain)
+        let summary = draft.resolvedSummary(domain: domain)
+        let record: LocalRecord
+        var previousMonthKey: String?
+        if let existingRawId = draft.existingRawId {
+            guard let existingID = UUID(uuidString: existingRawId) else {
+                throw LocalDataError.invalidIdentifier
+            }
+            guard let current = try await localRecordUseCase.record(id: existingID) else {
+                throw LocalDataError.recordNotFound
+            }
+            previousMonthKey = String(current.businessDate.prefix(7))
+            let updated = try await localRecordUseCase.update(LocalRecordUpdateCommand(
+                id: existingID,
+                expectedVersion: current.localVersion,
+                title: title,
+                summary: summary,
+                payload: payload,
+                recordDate: draft.dateKey,
+                recordTime: draft.timeKey,
+                note: draft.note.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : draft.note,
+                updatedAt: Date(),
+                imageData: draft.imageData,
+                removeImage: draft.removeImage
+            ))
+            record = updated.record
+        } else {
+            let created = try await localRecordUseCase.create(LocalRecordCommand(
+                id: UUID(),
+                domainKey: draft.domainKey,
+                title: title,
+                summary: summary,
+                payload: payload,
+                recordDate: draft.dateKey,
+                recordTime: draft.timeKey,
+                note: draft.note.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : draft.note,
+                imageData: draft.imageData,
+                createdAt: Date()
+            ))
+            record = created.record
+        }
+        scheduleLocalCompanion(for: LocalRecordReadModel.detail(from: record, imageStore: localImageStore))
+        let monthKey = String(record.recordDate.prefix(7))
+        if let previousMonthKey, previousMonthKey != monthKey {
+            await refreshLocalMonthProjection(monthKey: previousMonthKey)
+        }
+        await refreshLocalMonthProjection(monthKey: monthKey)
+        if let existingRawId = draft.existingRawId {
+            let oldReference = "local-data/\(existingRawId)"
+            invalidateRecordExpressionPlanState(afterChanging: [oldReference])
+            recordDetailCache.removeValue(forKey: NativeRecordReference(oldReference).canonicalValue)
+            await loadRecordDetail(reference: "local-data/\(record.id.uuidString)", force: true)
+        }
+        manualRecordMessage = localWriteMessage(draft.existingRawId == nil ? "è®°å½•å·²ä¿å­˜ï¼ˆæœ¬æœºï¼‰" : "è®°å½•å·²æ›´æ–°ï¼ˆæœ¬æœºï¼‰")
+        return true
+    }
+
+    private func createUnifiedManualRecord(
+        _ draft: NativeManualRecordDraft,
+        domain: NativeDomainDefinition?
+    ) async throws -> Bool {
+        if draft.kind != .universal, let existingID = draft.existingRawId,
+           let id = UUID(uuidString: existingID), let localExpenseUseCase {
+            let oldDate: String
+            if draft.kind == .expense {
+                guard let current = try await localExpenseUseCase.expense(id: id) else { throw LocalDataError.recordNotFound }
+                oldDate = current.transactionDate
+                _ = try await localExpenseUseCase.update(LocalExpenseUpdateCommand(id: id,
+                    expectedVersion: draft.localVersion ?? current.localVersion,
+                    accountID: draft.accountId.flatMap(UUID.init(uuidString:)), amountText: draft.amountText,
+                    currency: current.currency, merchantName: draft.title, platform: draft.platform,
+                    category: draft.category, paymentMethod: draft.paymentMethod,
+                    transactionDate: draft.dateKey, transactionTime: draft.timeKey, note: draft.note,
+                    updatedAt: Date(), imageData: draft.imageData, removeImage: draft.removeImage))
+                if let updated = try await localExpenseUseCase.expense(id: id) {
+                    scheduleLocalCompanion(for: LocalExpenseReadModel.detail(from: updated, imageStore: localImageStore))
+                }
+            } else {
+                guard let current = try await localExpenseUseCase.income(id: id) else { throw LocalDataError.recordNotFound }
+                oldDate = current.incomeDate
+                _ = try await localExpenseUseCase.updateIncome(LocalIncomeUpdate(id: id, profileID: current.profileID,
+                    expectedVersion: draft.localVersion ?? current.localVersion,
+                    accountID: draft.accountId.flatMap(UUID.init(uuidString:)),
+                    amountMinor: try LocalExpenseMapper.amountMinor(draft.amountText), currency: current.currency,
+                    sourceName: draft.title, category: draft.category, incomeDate: draft.dateKey,
+                    occurredAt: draft.occurredAt.flatMap { ISO8601DateFormatter().date(from: $0) }, note: draft.note,
+                    updatedAt: Date(), imageData: draft.imageData, removeImage: draft.removeImage))
+                if let updated = try await localExpenseUseCase.income(id: id) {
+                    scheduleLocalCompanion(for: LocalIncomeReadModel.detail(from: updated, imageStore: localImageStore))
+                }
+            }
+            _ = await prepareLocalWorkspace()
+            await refreshLocalMonthProjection(monthKey: String(oldDate.prefix(7)))
+            if String(oldDate.prefix(7)) != String(draft.dateKey.prefix(7)) {
+                await refreshLocalMonthProjection(monthKey: String(draft.dateKey.prefix(7)))
+            }
+            let reference = "\(draft.kind == .expense ? "expense" : "income")/\(id.uuidString)"
+            recordDetailCache.removeValue(forKey: NativeRecordReference(reference).canonicalValue)
+            await loadRecordDetail(reference: reference, force: true)
+            await retryLocalImageCleanups()
+            manualRecordMessage = localWriteMessage("è®°å½•å·²æ›´æ–°ï¼ˆæœ¬æœºï¼‰")
+            return true
+        }
+        if draft.kind == .universal, draft.domainKey == "wallet",
+           draft.existingRawId == nil, localWalletSnapshotUseCase != nil {
+            return try await createLocalWalletSnapshot(draft, domain: domain)
+        }
+        if draft.kind == .expense, localExpenseUseCase != nil {
+            return try await createLocalExpense(draft)
+        }
+        if draft.kind == .income, localExpenseUseCase != nil {
+            return try await createLocalIncome(draft, domain: domain)
+        }
+        if draft.kind == .universal,
+           localRecordUseCase != nil,
+           LocalRecordValidation.supportedDomainKeys.contains(draft.domainKey),
+           await shouldCreateLocalDomainRecord(for: draft) {
+            return try await createLocalDomainRecord(draft, domain: domain)
+        }
+        return try await createRemoteManualRecord(draft, domain: domain)
+    }
+
+    private func createLocalWalletSnapshot(
+        _ draft: NativeManualRecordDraft,
+        domain: NativeDomainDefinition?
+    ) async throws -> Bool {
+        guard let localWalletSnapshotUseCase, draft.existingRawId == nil,
+              draft.validationMessage(domain: domain) == nil else {
+            throw LocalDataError.invalidRecord
+        }
+        let amountMinor = try LocalExpenseMapper.amountMinor(draft.primaryValueText)
+        let payload = draft.universalPayload(domain: domain)
+        let snapshot = try await localWalletSnapshotUseCase.create(LocalWalletSnapshotCommand(
+            id: UUID(),
+            title: draft.resolvedTitle(domain: domain),
+            summary: draft.resolvedSummary(domain: domain),
+            payload: payload,
+            recordDate: draft.dateKey,
+            recordTime: draft.timeKey,
+            occurredAt: draft.occurredAt,
+            balanceMinor: amountMinor,
+            currency: "CNY",
+            kind: draft.walletRecordKind == "liability_snapshot" ? .liability : .asset,
+            imageData: draft.imageData,
+            createdAt: Date()
+        ))
+        let snapshotPayload = (try? LocalRecordCodec.decode(snapshot.payloadJSON)) ?? [:]
+        scheduleLocalCompanion(for: NativeRecordDetail(
+            id: "local-wallet/\(snapshot.id.uuidString)",
+            rawId: snapshot.id.uuidString,
+            kind: "wallet",
+            title: snapshot.title,
+            subtitle: snapshot.recordDate,
+            value: String(format: "Â¥%.2f", snapshot.balance),
+            detailRows: [],
+            imageURL: nil,
+            imageLoadError: false,
+            imagePath: snapshot.imagePath,
+            imageHash: snapshot.imageHash,
+            amount: snapshot.balance,
+            merchantName: nil,
+            platform: nil,
+            category: nil,
+            paymentMethod: nil,
+            recordDate: snapshot.recordDate,
+            note: nil,
+            companionMessage: snapshotPayload.string("companion_message"),
+            accountId: snapshot.linkedAccountID?.uuidString,
+            systemImage: "wallet.pass",
+            payload: snapshotPayload,
+            transactionTime: snapshot.recordTime,
+            domainKey: "wallet",
+            source: "local",
+            status: "local",
+            aiFeedback: NativeAIFeedback(payload: snapshotPayload.dictionary("ai_feedback")),
+            plannerAiFeedback: NativeAIFeedback(payload: snapshotPayload.dictionary("planner_ai_feedback"))
+        ))
+        do {
+            try await loadLocalWalletSnapshots()
+        } catch {
+            manualRecordMessage = "å¿«ç…§å·²ä¿å­˜åœ¨æœ¬æœºï¼Œä½†åˆ—è¡¨åˆ·æ–°å¤±è´¥ï¼š\(error.localizedDescription)"
+            return true
+        }
+        manualRecordMessage = "é’±åŒ…å¿«ç…§å·²ä¿å­˜ï¼ˆæœ¬æœºï¼‰"
+        return true
+    }
+
+    private func shouldCreateLocalDomainRecord(for draft: NativeManualRecordDraft) async -> Bool {
+        guard let localRecordUseCase else { return false }
+        guard let existingRawId = draft.existingRawId else { return true }
+        guard let existingID = UUID(uuidString: existingRawId) else { return false }
+        return (try? await localRecordUseCase.record(id: existingID)) != nil
+    }
+
+    private func createRemoteManualRecord(_ draft: NativeManualRecordDraft, domain: NativeDomainDefinition?) async throws -> Bool {
+        let session = try await validSession()
+        let reference = try await recordRepository.create(
+            draft,
+            domain: domain,
+            userId: session.user.id,
+            accessToken: session.accessToken
+        )
+        let savedReference = NativeRecordReference(reference).canonicalValue
+        if let existingRawId = draft.existingRawId {
+            let originalReference = NativeRecordReference(
+                kind: "data",
+                rawId: existingRawId
+            ).canonicalValue
+            invalidateRecordExpressionPlanState(afterChanging: [originalReference, savedReference])
+        }
+        if draft.kind == .expense {
+            scheduleConfirmedExpenseVocabulary(
+                platform: draft.platform,
+                category: draft.category,
+                paymentMethod: draft.paymentMethod,
+                accountId: draft.accountId,
+                userId: session.user.id,
+                accessToken: session.accessToken
+            )
+        }
+        await refreshAfterRecordWrite(affectedDateKeys: [draft.dateKey])
+        if draft.kind != .universal || draft.domainKey == "wallet" {
+            await loadAccounts()
+        }
+        if draft.existingRawId != nil {
+            recordDetailCache.removeValue(forKey: savedReference)
+            await loadRecordDetail(reference: savedReference, force: true)
+        }
+        manualRecordMessage = draft.existingRawId == nil ? "è®°å½•å·²ä¿å­˜" : "è®°å½•å·²æ›´æ–°"
+        return true
+    }
+
+    private static func makeDefaultLocalStorage() throws -> AppDefaultLocalStorage {
+        let database = try LocalDatabase()
+        let imageStore = try LocalImageStore()
+        let profileStore = LocalProfileStore(database: database)
+        let expenseRepository = try LocalExpenseRepository(database: database)
+        let recordRepository = try LocalRecordRepository(database: database)
+        let walletSnapshotRepository = try LocalWalletSnapshotRepository(database: database)
+        let factReader = try LocalFactReader(database: database)
+        let companionMemoryRepository = LocalCompanionMemoryRepository(database: database)
+        let expressionPersistence = LocalExpressionPersistence(
+            database: database,
+            memoryRepository: companionMemoryRepository
+        )
+        return AppDefaultLocalStorage(
+            expenseUseCase: LocalExpenseUseCase(
+                profileStore: profileStore,
+                repository: expenseRepository,
+                imageStore: imageStore,
+                expressionPersistence: expressionPersistence
+            ),
+            recordUseCase: LocalRecordUseCase(
+                profileStore: profileStore,
+                repository: recordRepository,
+                imageStore: imageStore,
+                expressionPersistence: expressionPersistence
+            ),
+            walletSnapshotUseCase: LocalWalletSnapshotUseCase(
+                profileStore: profileStore,
+                repository: walletSnapshotRepository,
+                imageStore: imageStore,
+                expressionPersistence: expressionPersistence
+            ),
+            factReader: factReader,
+            companionMemoryRepository: companionMemoryRepository,
+            expressionPersistence: expressionPersistence,
+            imageStore: imageStore,
+            pendingFinancialRepository: LocalPendingFinancialRepository(database: database),
+            financialBindingRepository: try LocalFinancialBindingRepository(database: database),
+            historyMigrationCache: LocalHistoryMigrationCache(database: database, imageStore: imageStore),
+            historyMigrationDiagnosticStore: try? LocalHistoryMigrationDiagnosticStore(),
+            historyInventoryReader: LocalHistoryInventoryReader(database: database, imageStore: imageStore),
+            historyUnresolvedRepository: LocalHistoryUnresolvedRepository(database: database)
+        )
+    }
+
+    private static func defaultLocalExpenseUseCase() -> LocalExpenseUseCaseProtocol? {
+        guard let database = try? LocalDatabase(),
+              let repository = try? LocalExpenseRepository(database: database),
+              let imageStore = try? LocalImageStore() else { return nil }
+        return LocalExpenseUseCase(
+            profileStore: LocalProfileStore(database: database),
+            repository: repository,
+            imageStore: imageStore,
+            expressionPersistence: LocalExpressionPersistence(database: database)
+        )
+    }
+
+    private static func defaultLocalRecordUseCase() -> LocalRecordUseCaseProtocol? {
+        guard let database = try? LocalDatabase(),
+              let repository = try? LocalRecordRepository(database: database),
+              let imageStore = try? LocalImageStore() else { return nil }
+        return LocalRecordUseCase(
+            profileStore: LocalProfileStore(database: database),
+            repository: repository,
+            imageStore: imageStore
+        )
+    }
+
+    private static func defaultLocalImageStore() -> LocalImageStore? {
+        try? LocalImageStore()
+    }
+
+    private static func defaultLocalImageIntakeRepository() -> LocalImageIntakeRepository? {
+        guard let database = try? LocalDatabase() else { return nil }
+        return LocalImageIntakeRepository(database: database)
+    }
+
+    /// åˆ¤é‡å€™é€‰æŸ¥è¯¢ä¾èµ–è¿™ä¸ªä»“åº“ï¼›æ¼æ³¨å…¥ä¼šè®©ä¸¤é“åˆ¤é‡éƒ½æ‹¿åˆ°ç©ºå€™é€‰ã€é™é»˜å¤±æ•ˆã€‚
+    private static func defaultFinancialDuplicateReviewRepository() -> LocalFinancialDuplicateReviewRepository? {
+        guard let database = try? LocalDatabase() else { return nil }
+        return LocalFinancialDuplicateReviewRepository(database: database)
+    }
+
+    /// é€šçŸ¥æ–‡æ¡ˆé‡Œçš„ã€Œä»Šå¤©å·²èŠ± / æœ¬æœˆæ”¶å…¥ã€é å®ƒç®—ï¼›æ¼æ³¨å…¥æ—¶è¿™ä¸¤ä¸ªæ•°å­—æ’ä¸º 0ã€‚
+    private static func defaultRecognitionExpenseRepository() -> LocalExpenseRepositoryProtocol? {
+        guard let database = try? LocalDatabase(),
+              let repository = try? LocalExpenseRepository(database: database) else { return nil }
+        return repository
+    }
+
+    private static func defaultLocalRecordPortability() -> LocalRecordPortability? {
+        guard let database = try? LocalDatabase(),
+              let imageStore = try? LocalImageStore() else { return nil }
+        return LocalRecordPortability(database: database, imageStore: imageStore)
+    }
+
+    private static func defaultLocalFactPortability() -> LocalFactPortability? {
+        guard let database = try? LocalDatabase(),
+              let imageStore = try? LocalImageStore() else { return nil }
+        return LocalFactPortability(database: database, imageStore: imageStore)
+    }
+
+    private static func defaultLocalCompleteBackupPortability() -> LocalCompleteBackupPortability? {
+        guard let database = try? LocalDatabase(),
+              let imageStore = try? LocalImageStore() else { return nil }
+        return LocalCompleteBackupPortability(database: database, imageStore: imageStore)
+    }
+
+    private static func defaultGenericImportService() -> GenericImportService? {
+        guard let database = try? LocalDatabase() else { return nil }
+        return GenericImportService(database: database)
+    }
+
+    private static func defaultLocalBindingRepository() -> LocalBindingRepository? {
+        guard let database = try? LocalDatabase() else { return nil }
+        return LocalProfileStore(database: database)
+    }
+
+    private static func defaultLocalSyncRunner() -> LocalSyncRunner? {
+        guard let database = try? LocalDatabase(),
+              let repository = try? LocalExpenseRepository(database: database) else { return nil }
+        let profileStore = LocalProfileStore(database: database)
+        let transport = SupabaseSyncTransport(
+            remoteClient: SupabaseRemoteClient(),
+            accessToken: {
+                try await SupabaseAuthService().currentSession().accessToken
+            }
+        )
+        return LocalSyncCoordinator(
+            stateStore: profileStore,
+            repository: repository,
+            portability: LocalExpensePortability(database: database),
+            transport: transport
+        )
+    }
+
+    private static let monthKeyFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyy-MM"
+        return formatter
+    }()
+
+    private static var currentMonthKey: String {
+        monthKeyFormatter.string(from: Date())
+    }
+}
+
+/// äº”åŸŸä¸»åœºæ™¯çš„æ¨ªæ»‘åŸŸï¼ˆIOS-V2-SHELL-001ï¼‰ã€‚
+enum AppDomain: String, CaseIterable, Identifiable {
+    case expense
+    case sleep
+    case food
+    case sport
+    case reading
+
+    var id: String { rawValue }
+
+    static func pagerDomain(at x: CGFloat) -> AppDomain? {
+        let width = JieziPrototypeLayout.page_dot_hit_width
+        guard x.isFinite, width > 0 else { return nil }
+        if x <= 0 { return allCases.first }
+        if x >= CGFloat(allCases.count) * width { return allCases.last }
+        return allCases[Int(x / width)]
+    }
+
+    var title: String {
+        switch self {
+        case .expense: return "è®°è´¦"
+        case .sleep: return "ç¡çœ "
+        case .food: return "é¥®é£Ÿ"
+        case .sport: return "è¿åŠ¨"
+        case .reading: return "é˜…è¯»"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .expense: return "creditcard"
+        case .sleep: return "moon.zzz"
+        case .food: return "fork.knife"
+        case .sport: return "figure.run"
+        case .reading: return "book"
+        }
+    }
+
+    /// æ–°å£³äº”åŸŸä¸ dashboard.domains ä¸­æ—§åŸŸ key çš„å¯¹åº”å…³ç³»ï¼ˆç”¨äºç©ºæ€åˆ¤å®šä¸åç»­å†…å®¹æ¥çº¿ï¼‰ã€‚
+    var legacyDomainKey: String {
+        switch self {
+        case .expense: return "expense"
+        case .sleep, .food, .sport, .reading: return rawValue
+        }
+    }
+}
+
+/// ä¸»åœºæ™¯ä¹‹ä¸Šçš„å…¨å±è¦†ç›–å±‚ï¼ˆIOS-V2-SHELL-004ï¼‰ï¼›`.none` è¡¨ç¤ºæ— è¦†ç›–å±‚ã€åœç•™åœ¨äº”åŸŸæ¨ªæ»‘ã€‚
+enum AppOverlay: String, CaseIterable, Identifiable {
+    case none
+    case inbox
+    case records
+    case insights
+    case wallet
+    case settings
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .none: return ""
+        case .inbox: return "æ”¶ä»¶ç®±"
+        case .records: return "è®°å½•"
+        case .insights: return "è§‚å¯Ÿ"
+        case .wallet: return "é’±åŒ…"
+        case .settings: return "è®¾ç½®"
+        }
+    }
+}
