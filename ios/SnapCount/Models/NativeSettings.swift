@@ -1,5 +1,14 @@
 import Foundation
 
+/// Capabilities intentionally exposed in the 1.0 release. Keeping this list
+/// centralized lets us hide unfinished entry points without deleting the
+/// underlying local, Hosted, or sync implementations.
+enum JieziReleaseCapabilities {
+    static let monthlyAIQuestions = false
+    static let cloudSync = false
+    static let byok = false
+}
+
 struct NativeUserSettings: Equatable {
     var plan = "free"
     var screenshotVisionPrimary = "auto"

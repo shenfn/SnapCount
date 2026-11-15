@@ -25,10 +25,16 @@ struct LocalVisionModeStore {
     }
 
     var mode: LocalVisionMode {
-        LocalVisionMode(rawValue: defaults.string(forKey: key) ?? "") ?? .disabled
+        let persisted = LocalVisionMode(rawValue: defaults.string(forKey: key) ?? "") ?? .disabled
+        guard persisted != .byok || JieziReleaseCapabilities.byok else {
+            defaults.set(LocalVisionMode.disabled.rawValue, forKey: key)
+            return .disabled
+        }
+        return persisted
     }
 
     func save(_ mode: LocalVisionMode) {
-        defaults.set(mode.rawValue, forKey: key)
+        let safeMode = mode == .byok && !JieziReleaseCapabilities.byok ? .disabled : mode
+        defaults.set(safeMode.rawValue, forKey: key)
     }
 }

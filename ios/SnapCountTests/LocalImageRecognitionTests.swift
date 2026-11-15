@@ -348,6 +348,22 @@ final class LocalImageRecognitionTests: XCTestCase {
         XCTAssertEqual(LocalVisionModeStore(defaults: defaults).mode, .disabled)
     }
 
+    func testUnreleasedBYOKPreferenceFallsBackToDisabled() {
+        let suite = "local-vision-mode-byok-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+
+        defaults.set(LocalVisionMode.byok.rawValue, forKey: "local_vision_mode")
+
+        let store = LocalVisionModeStore(defaults: defaults)
+        XCTAssertEqual(store.mode, .disabled)
+        XCTAssertEqual(defaults.string(forKey: "local_vision_mode"), LocalVisionMode.disabled.rawValue)
+
+        store.save(.byok)
+        XCTAssertEqual(store.mode, .disabled)
+        XCTAssertEqual(defaults.string(forKey: "local_vision_mode"), LocalVisionMode.disabled.rawValue)
+    }
+
     func testLOCALP1SPORT001JHighConfidenceCompleteImageBecomesLocalFormalFact() async throws {
         let context = try makeContext()
         defer { cleanup(context) }

@@ -25,53 +25,63 @@ struct SettingsView: View {
                         Text(appState.isSignedIn ? "已登录" : "未登录")
                             .foregroundStyle(.secondary)
                     }
-                    LabeledContent("云同步") {
-                        Text(syncStatusTitle)
+                    if JieziReleaseCapabilities.cloudSync {
+                        LabeledContent("云同步") {
+                            Text(syncStatusTitle)
+                                .foregroundStyle(.secondary)
+                        }
+                        Text("普通同步范围：账户与消费；账户流水由本机消费投影维护。收入、四域记录、钱包快照、候选和还款不在此同步范围。‘已同步’不代表历史全量迁入或云本完全一致。")
+                            .font(.caption)
                             .foregroundStyle(.secondary)
-                    }
-                    Text("普通同步范围：账户与消费；账户流水由本机消费投影维护。收入、四域记录、钱包快照、候选和还款不在此同步范围。‘已同步’不代表历史全量迁入或云本完全一致。")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                    if canPreviewLocalBinding {
-                        Button {
-                            Task {
-                                await appState.prepareLocalBindingPreview()
-                                if appState.localBindingPreview != nil {
-                                    showBindingPreview = true
+                            .fixedSize(horizontal: false, vertical: true)
+                        if canPreviewLocalBinding {
+                            Button {
+                                Task {
+                                    await appState.prepareLocalBindingPreview()
+                                    if appState.localBindingPreview != nil {
+                                        showBindingPreview = true
+                                    }
                                 }
+                            } label: {
+                                Label(
+                                    appState.isLoadingLocalBindingPreview ? "正在读取同步范围" : "查看同步预览",
+                                    systemImage: "arrow.triangle.2.circlepath"
+                                )
                             }
-                        } label: {
-                            Label(
-                                appState.isLoadingLocalBindingPreview ? "正在读取同步范围" : "查看同步预览",
-                                systemImage: "arrow.triangle.2.circlepath"
-                            )
+                            .disabled(appState.isLoadingLocalBindingPreview)
                         }
-                        .disabled(appState.isLoadingLocalBindingPreview)
-                    }
-                    if canManuallySynchronizeLocalData {
-                        Button {
-                            Task { await appState.synchronizeLocalData() }
-                        } label: {
-                            Label(
-                                appState.isSynchronizingLocalData ? "正在同步" : syncActionTitle,
-                                systemImage: "arrow.triangle.2.circlepath"
-                            )
+                        if canManuallySynchronizeLocalData {
+                            Button {
+                                Task { await appState.synchronizeLocalData() }
+                            } label: {
+                                Label(
+                                    appState.isSynchronizingLocalData ? "正在同步" : syncActionTitle,
+                                    systemImage: "arrow.triangle.2.circlepath"
+                                )
+                            }
+                            .disabled(appState.isSynchronizingLocalData)
                         }
-                        .disabled(appState.isSynchronizingLocalData)
-                    }
-                    if canDisableLocalSync {
-                        Button(role: .destructive) {
-                            appState.disableLocalSync()
-                        } label: {
-                            Label("关闭云同步", systemImage: "icloud.slash")
+                        if canDisableLocalSync {
+                            Button(role: .destructive) {
+                                appState.disableLocalSync()
+                            } label: {
+                                Label("关闭云同步", systemImage: "icloud.slash")
+                            }
                         }
+                    } else {
+                        Text("云同步暂未在 1.0 开放。本机记录和导出仍可用；登录仅用于 Hosted AI 等需要云端身份的功能。")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                     if !appState.isSignedIn {
                         Button {
                             showLogin = true
                         } label: {
-                            Label("登录并管理云同步", systemImage: "person.crop.circle.badge.plus")
+                            Label(
+                                JieziReleaseCapabilities.cloudSync ? "登录并管理云同步" : "登录使用 Hosted AI",
+                                systemImage: "person.crop.circle.badge.plus"
+                            )
                         }
                     }
                 }
@@ -134,14 +144,16 @@ struct SettingsView: View {
                             systemImage: "quote.bubble"
                         )
                     }
-                    NavigationLink {
-                        InsightSettingsView()
-                    } label: {
-                        settingsRow(
-                            "AI 联动分析",
-                            detail: optionTitle(NativeSettingsOptions.insightProviders, appState.userSettings.aiInsightProvider),
-                            systemImage: "chart.line.uptrend.xyaxis"
-                        )
+                    if JieziReleaseCapabilities.monthlyAIQuestions {
+                        NavigationLink {
+                            InsightSettingsView()
+                        } label: {
+                            settingsRow(
+                                "AI 联动分析",
+                                detail: optionTitle(NativeSettingsOptions.insightProviders, appState.userSettings.aiInsightProvider),
+                                systemImage: "chart.line.uptrend.xyaxis"
+                            )
+                        }
                     }
                 }
 
@@ -434,7 +446,7 @@ struct VisionSettingsView: View {
                     get: { appState.localVisionMode },
                     set: { appState.setLocalVisionMode($0) }
                 )) {
-                    ForEach(LocalVisionMode.allCases) { mode in
+                    ForEach(LocalVisionMode.allCases.filter { $0 != .byok || JieziReleaseCapabilities.byok }) { mode in
                         Text(mode.title).tag(mode)
                     }
                 }
@@ -446,28 +458,30 @@ struct VisionSettingsView: View {
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             }
-            Section("单模型 BYOK") {
-                Text("固定模型：Qwen 3.6 Flash · 北京地域。只需 API Key，不会自动验证或发送图片。Key 使用本机 Keychain，删除本机副本不会撤销供应商账户中的 Key。")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                SecureField("粘贴 API Key", text: $byokAPIKeyInput)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-                Button("保存并启用 BYOK") {
-                    if appState.saveBYOKAPIKey(byokAPIKeyInput) { byokAPIKeyInput = "" }
-                }
-                .disabled(byokAPIKeyInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                LabeledContent("本机 Key") {
-                    Text(appState.hasBYOKAPIKey ? "已保存（不显示）" : "未保存")
+            if JieziReleaseCapabilities.byok {
+                Section("单模型 BYOK") {
+                    Text("固定模型：Qwen 3.6 Flash · 北京地域。只需 API Key，不会自动验证或发送图片。Key 使用本机 Keychain，删除本机副本不会撤销供应商账户中的 Key。")
+                        .font(.footnote)
                         .foregroundStyle(.secondary)
-                }
-                if appState.hasBYOKAPIKey {
-                    Button("删除本机 Key…", role: .destructive) {
-                        showDeleteBYOKConfirmation = true
+                    SecureField("粘贴 API Key", text: $byokAPIKeyInput)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                    Button("保存并启用 BYOK") {
+                        if appState.saveBYOKAPIKey(byokAPIKeyInput) { byokAPIKeyInput = "" }
                     }
-                }
-                if let message = appState.settingsMessage {
-                    Text(message).font(.footnote).foregroundStyle(.secondary)
+                    .disabled(byokAPIKeyInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    LabeledContent("本机 Key") {
+                        Text(appState.hasBYOKAPIKey ? "已保存（不显示）" : "未保存")
+                            .foregroundStyle(.secondary)
+                    }
+                    if appState.hasBYOKAPIKey {
+                        Button("删除本机 Key…", role: .destructive) {
+                            showDeleteBYOKConfirmation = true
+                        }
+                    }
+                    if let message = appState.settingsMessage {
+                        Text(message).font(.footnote).foregroundStyle(.secondary)
+                    }
                 }
             }
             Section("当前链路") {

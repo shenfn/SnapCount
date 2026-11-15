@@ -38,13 +38,13 @@ struct InsightsView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
                     Picker("报告视图", selection: $mode) {
-                        ForEach(Mode.allCases) { item in
+                        ForEach(availableModes) { item in
                             Text(item.title).tag(item)
                         }
                     }
                     .pickerStyle(.segmented)
 
-                    if mode == .report {
+                    if mode == .report || !JieziReleaseCapabilities.monthlyAIQuestions {
                         MonthlyReportContent(initialMonthKey: initialMonthKey, initialDomainKey: initialDomainKey)
                     } else {
                         Picker("分析范围", selection: $range) {
@@ -85,7 +85,7 @@ struct InsightsView: View {
                 .padding(16)
             }
             .refreshable {
-                if mode == .report {
+                if mode == .report || !JieziReleaseCapabilities.monthlyAIQuestions {
                     await appState.refreshDashboard()
                 } else {
                     await appState.loadInsights(range: range, force: true)
@@ -95,8 +95,14 @@ struct InsightsView: View {
         .navigationTitle("报告")
         .toolbarBackground(JieziScene.expense.surface, for: .navigationBar)
         .task(id: "\(mode.rawValue)-\(range.rawValue)") {
-            if mode == .linkage { await appState.loadInsights(range: range) }
+            if mode == .linkage, JieziReleaseCapabilities.monthlyAIQuestions {
+                await appState.loadInsights(range: range)
+            }
         }
+    }
+
+    private var availableModes: [Mode] {
+        Mode.allCases.filter { $0 != .linkage || JieziReleaseCapabilities.monthlyAIQuestions }
     }
 
     @ViewBuilder

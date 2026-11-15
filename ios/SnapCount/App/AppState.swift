@@ -1526,6 +1526,10 @@ final class AppState: ObservableObject {
     }
 
     func setLocalVisionMode(_ mode: LocalVisionMode) {
+        if mode == .byok, !JieziReleaseCapabilities.byok {
+            settingsMessage = "BYOK 将在后续版本开放。"
+            return
+        }
         if mode == .byok, !hasBYOKAPIKey {
             settingsMessage = "先保存 BYOK API Key，再启用 BYOK。"
             return
@@ -1535,6 +1539,10 @@ final class AppState: ObservableObject {
     }
 
     func saveBYOKAPIKey(_ apiKey: String) -> Bool {
+        guard JieziReleaseCapabilities.byok else {
+            settingsMessage = "BYOK 将在后续版本开放。"
+            return false
+        }
         let normalized = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !normalized.isEmpty else {
             settingsMessage = "API Key 不能为空。"
@@ -3542,7 +3550,9 @@ final class AppState: ObservableObject {
             insightsSnapshot = snapshot
             insightsLoadedAt = Date()
             insightsLoadedLocally = false
-            Task { await loadLatestAIInsight(range: range, generation: generation, userId: session.user.id) }
+            if JieziReleaseCapabilities.monthlyAIQuestions {
+                Task { await loadLatestAIInsight(range: range, generation: generation, userId: session.user.id) }
+            }
         } catch {
             guard generation == userStateGeneration else { return }
             insightsMessage = error.localizedDescription
@@ -3554,6 +3564,12 @@ final class AppState: ObservableObject {
         generation: Int? = nil,
         userId: String? = nil
     ) async {
+        guard JieziReleaseCapabilities.monthlyAIQuestions else {
+            aiInsight = nil
+            aiInsightIsCached = false
+            aiInsightMessage = nil
+            return
+        }
         let expectedGeneration = generation ?? userStateGeneration
         do {
             let session = try await validSession()
@@ -3581,6 +3597,10 @@ final class AppState: ObservableObject {
         question: String,
         force: Bool = false
     ) async -> Bool {
+        guard JieziReleaseCapabilities.monthlyAIQuestions else {
+            aiInsightMessage = "AI 联动提问将在后续版本开放。"
+            return false
+        }
         guard !isLoadingAIInsight else { return false }
         let generation = userStateGeneration
         let question = question.trimmingCharacters(in: .whitespacesAndNewlines)
