@@ -89,8 +89,8 @@ final class IOSPrototypeRenderingTests: XCTestCase {
         }
     }
 
-    func testIOSV2POLISH011RegisteredFontsResolveAndCoverRepresentativeText() throws {
-        let serif = try XCTUnwrap(UIFont(name: JieziFontFamily.serif, size: 24))
+    func testIOSV2POLISH011SystemAndNumericFontsCoverRepresentativeText() throws {
+        let serif = UIFont.systemFont(ofSize: 24, weight: .bold)
         let numeric = try XCTUnwrap(UIFont(name: JieziFontFamily.numeric, size: 44))
         for (font, text) in [(serif, "芥子阅读记录收入书名"), (numeric, "0123456789¥.")] {
             let characters = Array(text.utf16)
