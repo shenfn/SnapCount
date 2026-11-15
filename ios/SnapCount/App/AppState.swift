@@ -1,6 +1,3 @@
-Warning: truncated output (original token count: 87486)
-Total output lines: 7381
-
 import SwiftUI
 import os
 
@@ -2034,7 +2031,3331 @@ final class AppState: ObservableObject {
         let mergedGroups = recordGroups(monthKey: Self.currentMonthKey)
         let todayKey = NativeLocalDate.dateKey(Date())
         dashboard.dayRecordGroups = mergedGroups
-        dashboard.todayCount = merge…37486 tokens truncated…lse { throw LocalDataError.invalidRecord }
+        dashboard.todayCount = mergedGroups
+            .first(where: { $0.dateKey == todayKey })?
+            .records.filter { $0.kind != .staging }.count ?? 0
+        dashboard.monthCount = mergedGroups.flatMap(\.records).filter { $0.kind != .staging }.count
+        dashboard.recordDetails = dashboard.recordDetails.merging(
+            localRecordMonthDetails[Self.currentMonthKey] ?? [:],
+            uniquingKeysWith: { _, local in local }
+        )
+        let previousSummaries = Dictionary(uniqueKeysWithValues: dashboard.dailySummaries.map { ($0.dateKey, $0) })
+        dashboard.dailySummaries = mergedGroups.map { group in
+            let previous = previousSummaries[group.dateKey]
+            return NativeDailySummary(
+                dateKey: group.dateKey,
+                expense: previous?.expense ?? 0,
+                income: previous?.income ?? 0,
+                pendingCount: group.records.filter { $0.kind == .staging }.count,
+                recordCount: group.records.count
+            )
+        }
+    }
+
+    private func applyLocalExpenseMonth(
+        _ month: LocalExpenseMonth,
+        incomeMonth: LocalIncomeMonth,
+        groups: [NativeDayRecordGroup]
+    ) {
+        let todayKey = NativeLocalDate.dateKey(Date())
+        let todayExpenses = month.expenses.filter { $0.transactionDate == todayKey }
+        let todayIncomes = incomeMonth.incomes.filter { $0.incomeDate == todayKey }
+        dashboard.dayRecordGroups = groups
+        dashboard.dailySummaries = groups.map { group in
+            let expense = group.records.reduce(0.0) { total, record in
+                guard let local = month.expenses.first(where: { $0.id.uuidString == record.id }) else { return total }
+                return total + Double(local.amountMinor) / 100
+            }
+            return NativeDailySummary(
+                dateKey: group.dateKey,
+                expense: expense,
+                income: group.records.filter { $0.kind == .income }.reduce(0) { total, record in
+                    total + (incomeMonth.incomes.first(where: { $0.id.uuidString == record.id }).map { Double($0.amountMinor) / 100 } ?? 0)
+                },
+                pendingCount: 0,
+                recordCount: group.records.count
+            )
+        }
+        dashboard.todayCount = todayExpenses.count + todayIncomes.count
+        dashboard.monthCount = month.expenses.count + incomeMonth.incomes.count
+        dashboard.todayExpense = todayExpenses.reduce(0) { $0 + Double($1.amountMinor) / 100 }
+        dashboard.monthExpense = month.expenses.reduce(0) { $0 + Double($1.amountMinor) / 100 }
+        dashboard.todayIncome = todayIncomes.reduce(0) { $0 + Double($1.amountMinor) / 100 }
+        dashboard.monthIncome = incomeMonth.incomes.reduce(0) { $0 + Double($1.amountMinor) / 100 }
+        dashboard.pendingCount = 0
+        dashboard.recordDetails = localRecordMonthDetails[Self.currentMonthKey] ?? [:]
+        dashboard.recentRecords = []
+        dashboard.stagingRecords = []
+        dashboard.pendingExpenses = []
+    }
+
+    func reportSnapshot(monthKey: String) -> DashboardSnapshot {
+        var snapshot = monthKey == Self.currentMonthKey ? dashboard : DashboardSnapshot()
+        let groups = recordGroups(monthKey: monthKey)
+        let details = (recordMonthDetails[monthKey] ?? [:]).merging(
+            localRecordMonthDetails[monthKey] ?? [:],
+            uniquingKeysWith: { _, local in local }
+        )
+        let records = groups.flatMap(\.records).filter { $0.kind != .staging }
+        snapshot.dayRecordGroups = groups
+        snapshot.recordDetails = details
+        snapshot.monthCount = records.count
+        snapshot.monthExpense = NativeHomeInsightAnalytics.confirmedExpenseTotal(from: snapshot)
+        snapshot.monthIncome = records
+            .filter { $0.kind == .income }
+            .reduce(0) { total, record in
+                total + (details[record.reference]?.amount ?? details[record.id]?.amount ?? record.amount ?? 0)
+            }
+        let definitions = dashboard.domains.isEmpty ? Self.fallbackDomains : dashboard.domains
+        snapshot.domains = domainsWithUpdatedCounts(definitions, snapshot: snapshot)
+        return snapshot
+    }
+
+    private func loadRemoteRecordMonth(_ monthKey: String, force: Bool = false) async {
+        guard monthKey != Self.currentMonthKey else {
+            if force || dashboard.dayRecordGroups.isEmpty || dashboardCoreTask != nil {
+                await refreshDashboard()
+                await refreshLocalMonthProjection(monthKey: monthKey)
+            }
+            return
+        }
+        guard force || remoteRecordMonthGroups[monthKey] == nil else { return }
+        if let task = remoteRecordMonthTasks[monthKey] {
+            await task.value
+            return
+        }
+        let generation = userStateGeneration
+        // 月读取属于账号会话；页面取消不取消共享请求，账号重置时集中取消。
+        let task = Task { @MainActor in
+            await self.performRemoteRecordMonthLoad(monthKey, generation: generation)
+        }
+        remoteRecordMonthTasks[monthKey] = task
+        loadingRemoteRecordMonthKeys.insert(monthKey)
+        await task.value
+    }
+
+    private func performRemoteRecordMonthLoad(_ monthKey: String, generation: Int) async {
+        guard generation == userStateGeneration else { return }
+        loadingRecordMonthKey = monthKey
+        recordMonthMessages.removeValue(forKey: monthKey)
+        defer {
+            // 旧身份请求结束时不能移除新身份的同月任务或加载状态。
+            if generation == userStateGeneration {
+                remoteRecordMonthTasks.removeValue(forKey: monthKey)
+                loadingRemoteRecordMonthKeys.remove(monthKey)
+                if loadingRecordMonthKey == monthKey,
+                   !loadingLocalReadKeys.contains(where: { $0.hasSuffix(":\(monthKey)") }),
+                   loadingLocalExpenseMonthKey != monthKey,
+                   loadingLocalRecordMonthKey != monthKey {
+                    loadingRecordMonthKey = nil
+                }
+            }
+        }
+        do {
+            let session = try await validSession()
+            guard isCurrentUserLoad(generation, userId: session.user.id) else { return }
+            let month = try await recordRepository.fetchMonth(
+                monthKey: monthKey,
+                accessToken: session.accessToken
+            )
+            guard isCurrentUserLoad(generation, userId: session.user.id) else { return }
+            recordMonthDetails[monthKey] = month.details
+            for (reference, detail) in month.details {
+                let canonicalReference = NativeRecordReference(reference).canonicalValue
+                recordDetailCache[canonicalReference] = detailPreservingExpressionFeedback(detail)
+            }
+            remoteRecordMonthGroups[monthKey] = month.groups
+            await importRemoteExpenseDetails(month.details.values)
+            guard isCurrentUserLoad(generation, userId: session.user.id) else { return }
+            await refreshLocalMonthProjection(monthKey: monthKey)
+        } catch {
+            guard generation == userStateGeneration else { return }
+            guard !(error is CancellationError), (error as? URLError)?.code != .cancelled else { return }
+            recordMonthMessages[monthKey] = error.localizedDescription
+        }
+    }
+
+    func loadAccounts() async {
+        guard !isLoadingAccounts else { return }
+        let generation = userStateGeneration
+        isLoadingAccounts = true
+        accountMessage = nil
+        defer { isLoadingAccounts = false }
+        if localExpenseUseCase != nil, !mayReadRemoteBusinessData {
+            await loadLocalAccounts()
+            if accounts.isEmpty, let localAccountMessage {
+                accountMessage = localAccountMessage
+            }
+            return
+        }
+        do {
+            let session = try await validSession()
+            guard isCurrentUserLoad(generation, userId: session.user.id) else { return }
+            let loadedAccounts = try await accountRepository.fetchAccounts(accessToken: session.accessToken)
+            guard isCurrentUserLoad(generation, userId: session.user.id) else { return }
+            accounts = loadedAccounts
+            if shouldProjectRemoteData, let localExpenseUseCase {
+                let localAccounts = loadedAccounts.compactMap { account -> LocalAccount? in
+                    guard let id = UUID(uuidString: account.id) else { return nil }
+                    return LocalAccount(
+                        id: id,
+                        profileID: UUID(),
+                        name: account.name,
+                        kind: account.type.rawValue,
+                        currency: account.currency,
+                        openingBalanceMinor: Int64((account.initialBalance * 100).rounded()),
+                        createdAt: Date(),
+                        institution: account.institution,
+                        last4: account.last4,
+                        billDay: account.billDay,
+                        paymentDueDay: account.paymentDueDay,
+                        autoDebitAccountID: account.autoDebitAccountId.flatMap(UUID.init(uuidString:)),
+                        autoConfirmRepayment: account.autoConfirmRepayment,
+                        gracePeriodDays: account.gracePeriodDays,
+                        lastReconciledAt: Self.parseISO8601(account.lastReconciledAt),
+                        isDefaultExpense: account.isDefaultExpense,
+                        isDefaultIncome: account.isDefaultIncome,
+                        isArchived: account.isArchived,
+                        sortOrder: account.sortOrder
+                    )
+                }
+                try await localExpenseUseCase.importRemoteAccounts(localAccounts)
+                _ = await prepareLocalWorkspace()
+            }
+        } catch {
+            guard generation == userStateGeneration else { return }
+            if !isSignedIn {
+                await loadLocalAccounts()
+                accountMessage = nil
+            } else {
+                accountMessage = error.localizedDescription
+            }
+        }
+    }
+
+    private func importRemoteExpenseDetails(_ details: Dictionary<String, NativeRecordDetail>.Values) async {
+        guard shouldProjectRemoteData, let localExpenseUseCase else { return }
+        let referencedAccountIDs = Set(details.compactMap { $0.accountId })
+        let missingAccounts = accounts.compactMap { account -> LocalAccount? in
+            guard referencedAccountIDs.contains(account.id),
+                  let id = UUID(uuidString: account.id),
+                  !localAccounts.contains(where: { $0.id == id }) else { return nil }
+            return LocalAccount(
+                id: id,
+                profileID: UUID(),
+                name: account.name,
+                kind: account.type.rawValue,
+                currency: account.currency,
+                openingBalanceMinor: Int64((account.initialBalance * 100).rounded()),
+                createdAt: Date(),
+                institution: account.institution,
+                last4: account.last4,
+                billDay: account.billDay,
+                paymentDueDay: account.paymentDueDay,
+                autoDebitAccountID: account.autoDebitAccountId.flatMap(UUID.init(uuidString:)),
+                autoConfirmRepayment: account.autoConfirmRepayment,
+                gracePeriodDays: account.gracePeriodDays,
+                lastReconciledAt: Self.parseISO8601(account.lastReconciledAt),
+                isDefaultExpense: account.isDefaultExpense,
+                isDefaultIncome: account.isDefaultIncome,
+                isArchived: account.isArchived,
+                sortOrder: account.sortOrder
+            )
+        }
+        if !missingAccounts.isEmpty {
+            try? await localExpenseUseCase.importRemoteAccounts(missingAccounts)
+            _ = await prepareLocalWorkspace()
+        }
+        let drafts = details.compactMap { detail -> LocalExpenseDraft? in
+            guard detail.kind == "expense",
+                  let id = UUID(uuidString: detail.rawId),
+                  let accountID = detail.accountId.flatMap(UUID.init(uuidString:)),
+                  let amount = detail.amount, amount > 0,
+                  let date = NativeLocalDate.financeDateKey(
+                      occurredAt: detail.occurredAt,
+                      legacyDate: detail.recordDate,
+                      createdAt: detail.createdAt
+                  ),
+                  let merchant = detail.merchantName else { return nil }
+            return LocalExpenseDraft(
+                id: id,
+                profileID: UUID(),
+                accountID: accountID,
+                amountMinor: Int64((amount * 100).rounded()),
+                currency: "CNY",
+                merchantName: merchant,
+                platform: detail.platform ?? "",
+                category: detail.category ?? "other",
+                paymentMethod: detail.paymentMethod ?? "",
+                transactionDate: date,
+                transactionTime: detail.transactionTime,
+                note: detail.note,
+                createdAt: detail.createdAt.flatMap { NativeLocalDate.dateValue($0) } ?? Date()
+            )
+        }
+        guard !drafts.isEmpty else { return }
+        try? await localExpenseUseCase.importRemoteExpenses(drafts)
+        _ = await prepareLocalWorkspace()
+    }
+
+    private var shouldProjectRemoteData: Bool {
+        guard isSignedIn,
+              let state = localSyncState,
+              case .bound(let userID) = state.binding else { return false }
+        return userID == currentUserId
+    }
+
+    private func loadLocalAccounts() async {
+        guard let workspace = await prepareLocalWorkspace() else {
+            accounts = []
+            return
+        }
+        var projected: [NativeAccount] = []
+        for account in workspace.accounts {
+            let balance: Int64
+            if let useCase = localExpenseUseCase,
+               let value = try? await useCase.accountBalanceMinor(account.id) {
+                balance = value
+            } else {
+                balance = account.openingBalanceMinor
+            }
+            projected.append(Self.nativeAccount(from: account, balanceMinor: balance))
+        }
+        accounts = projected
+    }
+
+    private static func nativeAccount(from account: LocalAccount, balanceMinor: Int64) -> NativeAccount {
+        NativeAccount(
+            id: account.id.uuidString,
+            name: account.name,
+            type: NativeAccountType.normalized(account.kind),
+            institution: account.institution,
+            last4: account.last4,
+            currency: account.currency,
+            initialBalance: Double(account.openingBalanceMinor) / 100,
+            currentBalance: Double(balanceMinor) / 100,
+            snapshotBalance: nil,
+            snapshotAt: nil,
+            sourceRecordTable: "",
+            sourceRecordId: "",
+            billDay: account.billDay,
+            paymentDueDay: account.paymentDueDay,
+            autoDebitAccountId: account.autoDebitAccountID?.uuidString,
+            autoConfirmRepayment: account.autoConfirmRepayment,
+            gracePeriodDays: account.gracePeriodDays,
+            lastReconciledAt: account.lastReconciledAt.map { ISO8601DateFormatter().string(from: $0) },
+            isDefaultExpense: account.isDefaultExpense,
+            isDefaultIncome: account.isDefaultIncome,
+            isArchived: account.isArchived,
+            sortOrder: account.sortOrder
+        )
+    }
+
+    private static func nativeRepaymentCycle(from cycle: LocalRepaymentCycle) throws -> NativeRepaymentCycle {
+        guard let status = NativeRepaymentStatus(rawValue: cycle.status) else { throw LocalDataError.invalidRecord }
+        return NativeRepaymentCycle(
+            id: cycle.id.uuidString, accountId: cycle.accountID.uuidString, cycleMonth: cycle.cycleMonth,
+            statementStartDate: cycle.statementStartDate, statementEndDate: cycle.statementEndDate,
+            dueDate: cycle.dueDate, statementAmount: Double(cycle.statementAmountMinor) / 100,
+            paidAmount: Double(cycle.paidAmountMinor) / 100, remainingAmount: Double(cycle.remainingAmountMinor) / 100,
+            carriedOverAmount: Double(cycle.carriedOverAmountMinor) / 100,
+            originalStatementAmount: cycle.originalStatementAmountMinor.map { Double($0) / 100 },
+            minPaymentAmount: cycle.minPaymentAmountMinor.map { Double($0) / 100 },
+            refundAppliedAmount: Double(cycle.refundAppliedAmountMinor) / 100, status: status,
+            autoDebitAccountId: cycle.autoDebitAccountID?.uuidString,
+            autoConfirmRepayment: cycle.autoConfirmRepayment, source: cycle.source,
+            evidenceRecordId: cycle.evidenceRecordID?.uuidString, confidence: cycle.confidence,
+            note: cycle.note, confirmedAt: cycle.confirmedAt.map { ISO8601DateFormatter().string(from: $0) }
+        )
+    }
+
+    private static func parseISO8601(_ value: String?) -> Date? {
+        guard let value else { return nil }
+        return ISO8601DateFormatter().date(from: value)
+    }
+
+    private static func nativeLiabilityPayment(from payment: LocalLiabilityPayment) -> NativeLiabilityPayment {
+        NativeLiabilityPayment(
+            id: payment.id.uuidString, accountId: payment.accountID.uuidString,
+            statementId: payment.statementID?.uuidString, debitAccountId: payment.debitAccountID?.uuidString,
+            amount: Double(payment.amountMinor) / 100,
+            overpaymentAmount: Double(payment.overpaymentAmountMinor) / 100,
+            paidAt: ISO8601DateFormatter().string(from: payment.paidAt), source: payment.source,
+            evidenceRecordId: payment.evidenceRecordID?.uuidString, status: payment.status,
+            note: payment.note ?? ""
+        )
+    }
+
+    func loadFinanceVocabulary() async {
+        guard mayReadRemoteBusinessData else { financeVocabulary = []; return }
+        guard !isLoadingFinanceVocabulary else { return }
+        let generation = userStateGeneration
+        isLoadingFinanceVocabulary = true
+        defer { isLoadingFinanceVocabulary = false }
+        do {
+            let session = try await validSession()
+            guard isCurrentUserLoad(generation, userId: session.user.id) else { return }
+            let entries = try await financeVocabularyRepository.fetch(accessToken: session.accessToken)
+            guard isCurrentUserLoad(generation, userId: session.user.id) else { return }
+            financeVocabulary = entries
+        } catch {
+            guard generation == userStateGeneration else { return }
+        }
+    }
+
+    private func scheduleConfirmedExpenseVocabulary(
+        platform: String,
+        category: String,
+        paymentMethod: String,
+        accountId: String?,
+        userId: String,
+        accessToken: String
+    ) {
+        let generation = userStateGeneration
+        Task { [weak self] in
+            await self?.recordConfirmedExpenseVocabulary(
+                platform: platform,
+                category: category,
+                paymentMethod: paymentMethod,
+                accountId: accountId,
+                userId: userId,
+                generation: generation,
+                accessToken: accessToken
+            )
+        }
+    }
+
+    private func recordConfirmedExpenseVocabulary(
+        platform: String,
+        category: String,
+        paymentMethod: String,
+        accountId: String?,
+        userId: String,
+        generation: Int,
+        accessToken: String
+    ) async {
+        guard mayReadRemoteBusinessData else { return }
+        let categoryTitle = NativeFinanceOptionCatalog.categoryTitle(for: category)
+        let requests: [(NativeFinanceVocabularyKind, String, String?, String?)] = [
+            (.platform, platform, nil, nil),
+            (.payment, paymentMethod, nil, accountId),
+            (.category, categoryTitle ?? "", categoryTitle, nil)
+        ]
+
+        for (kind, rawDisplayName, primaryCategory, linkedAccountId) in requests {
+            guard isCurrentUserLoad(generation, userId: userId) else { return }
+            let displayName = rawDisplayName.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !displayName.isEmpty else { continue }
+            do {
+                let entry = try await financeVocabularyRepository.record(
+                    kind: kind,
+                    displayName: displayName,
+                    primaryCategory: primaryCategory,
+                    linkedAccountId: linkedAccountId,
+                    accessToken: accessToken
+                )
+                guard isCurrentUserLoad(generation, userId: userId) else { return }
+                if let index = financeVocabulary.firstIndex(where: { $0.id == entry.id }) {
+                    financeVocabulary[index] = entry
+                } else {
+                    financeVocabulary.append(entry)
+                }
+            } catch {
+                continue
+            }
+        }
+    }
+
+    func loadAccountDetail(_ account: NativeAccount) async {
+        let generation = userStateGeneration
+        selectedAccountDetail = nil
+        selectedAccountSourceSnapshot = nil
+        accountMessage = nil
+        if !mayReadRemoteBusinessData {
+            await loadLocalAccountDetail(account)
+            return
+        }
+        let session = try? await validSession()
+        guard let session else {
+            await loadLocalAccountDetail(account)
+            return
+        }
+        guard isCurrentUserLoad(generation, userId: session.user.id) else { return }
+        if account.type.isLiability {
+            let preparation = await resolvedAccountReadPreparationUseCase().prepare(monthKey: Self.currentMonthKey)
+            guard projectAccountReadPreparationResult(preparation, onFailure: { [weak self] message in
+                self?.accountMessage = message
+            }) else { return }
+        }
+        let loadedDetail = await accountRepository.fetchDetail(account: account, accessToken: session.accessToken)
+        guard isCurrentUserLoad(generation, userId: session.user.id) else { return }
+        selectedAccountDetail = loadedDetail
+        if account.sourceRecordTable == "data_records", !account.sourceRecordId.isEmpty {
+            let sourceSnapshot = try? await walletSnapshotRepository.fetch(
+                id: account.sourceRecordId,
+                accessToken: session.accessToken
+            )
+            guard isCurrentUserLoad(generation, userId: session.user.id) else { return }
+            selectedAccountSourceSnapshot = sourceSnapshot
+            let reference = "data/\(account.sourceRecordId)"
+            if recordDetailCache[reference] == nil,
+               let detail = try? await recordRepository.fetchDetail(
+                   reference: reference,
+                   accessToken: session.accessToken
+               ) {
+                guard isCurrentUserLoad(generation, userId: session.user.id) else { return }
+                recordDetailCache[reference] = detail
+                if let imageURL = detail.imageURL {
+                    Task { await RemoteImageRepository.shared.prefetch([imageURL]) }
+                }
+            }
+        }
+    }
+
+    private func loadLocalAccountDetail(_ account: NativeAccount) async {
+        guard let accountID = UUID(uuidString: account.id),
+              let localExpenseUseCase else {
+            accountMessage = "本机账户标识无效。"
+            return
+        }
+        do {
+            await loadLocalAccounts()
+            let currentAccount = accounts.first(where: { $0.id == account.id }) ?? account
+            let entries = try await localExpenseUseCase.accountEntries(accountID: accountID)
+            let nativeEntries = entries.map { entry in
+                NativeAccountEntry(
+                    id: entry.id.uuidString,
+                    accountId: entry.accountID.uuidString,
+                    direction: entry.direction,
+                    amount: Double(entry.amountMinor) / 100,
+                    entryType: entry.entryKind,
+                    sourceTable: entry.sourceKind,
+                    sourceId: entry.sourceID.uuidString,
+                    occurredAt: entry.occurredAt.map { ISO8601DateFormatter().string(from: $0) } ?? "",
+                    note: "",
+                    isVoided: entry.voidedAt != nil || entry.isVoided,
+                    voidedReason: entry.voidedAt == nil && !entry.isVoided ? "" : "已作废"
+                )
+            }
+            var cycles: [NativeRepaymentCycle] = []
+            var payments: [NativeLiabilityPayment] = []
+            if currentAccount.type.isLiability {
+                _ = try await localExpenseUseCase.ensureRepaymentCycles(Self.currentMonthKey, now: Date())
+                cycles = try await localExpenseUseCase.repaymentCycles(accountID: accountID).map(Self.nativeRepaymentCycle(from:))
+                payments = try await localExpenseUseCase.liabilityPayments(accountID: accountID).map(Self.nativeLiabilityPayment(from:))
+            }
+            selectedAccountDetail = NativeAccountDetail(
+                account: currentAccount,
+                entries: nativeEntries,
+                repaymentCycles: cycles,
+                payments: payments,
+                loadErrors: [:]
+            )
+            accountMessage = nil
+        } catch {
+            accountMessage = error.localizedDescription
+        }
+    }
+
+    func confirmRepayment(
+        cycle: NativeRepaymentCycle,
+        paidAmount: Double,
+        debitAccountId: String?,
+        status: NativeRepaymentStatus,
+        note: String
+    ) async -> Bool {
+        if !mayReadRemoteBusinessData {
+            return await confirmLocalRepayment(
+                cycle: cycle, paidAmount: paidAmount, debitAccountId: debitAccountId,
+                status: status, note: note
+            )
+        }
+        return await performRepaymentAction(.confirm(
+            cycleId: cycle.id,
+            accountId: cycle.accountId,
+            paidAmount: paidAmount,
+            debitAccountId: debitAccountId,
+            status: status,
+            note: note
+        ))
+    }
+
+    func revokeLiabilityPayment(
+        payment: NativeLiabilityPayment,
+        accountId: String
+    ) async -> Bool {
+        if !mayReadRemoteBusinessData {
+            guard !isSubmittingRepayment,
+                  let localExpenseUseCase,
+                  let paymentID = UUID(uuidString: payment.id) else { return false }
+            isSubmittingRepayment = true
+            repaymentMessage = nil
+            defer { isSubmittingRepayment = false }
+            do {
+                _ = try await localExpenseUseCase.revokeLiabilityPayment(
+                    id: paymentID, reason: "用户撤销还款", now: Date()
+                )
+                await loadLocalAccounts()
+                if let refreshed = accounts.first(where: { $0.id == accountId }) {
+                    await loadLocalAccountDetail(refreshed)
+                }
+                repaymentMessage = "还款已在此设备撤销"
+                return true
+            } catch {
+                repaymentMessage = error.localizedDescription
+                return false
+            }
+        }
+        return await performRepaymentAction(.revoke(
+            paymentId: payment.id,
+            cycleId: payment.statementId ?? "",
+            accountId: accountId
+        ))
+    }
+
+    private func confirmLocalRepayment(
+        cycle: NativeRepaymentCycle,
+        paidAmount: Double,
+        debitAccountId: String?,
+        status: NativeRepaymentStatus,
+        note: String
+    ) async -> Bool {
+        guard !isSubmittingRepayment, paidAmount.isFinite, paidAmount >= 0,
+              let localExpenseUseCase,
+              let cycleID = UUID(uuidString: cycle.id) else { return false }
+        let debitID: UUID?
+        if let debitAccountId {
+            guard let parsed = UUID(uuidString: debitAccountId) else {
+                repaymentMessage = "扣款账户无效。"
+                return false
+            }
+            debitID = parsed
+        } else {
+            debitID = nil
+        }
+        let paidAmountMinor: Int64
+        do {
+            paidAmountMinor = try LocalExpenseMapper.nonnegativeAmountMinor(String(paidAmount))
+        } catch {
+            repaymentMessage = error.localizedDescription
+            return false
+        }
+        isSubmittingRepayment = true
+        repaymentMessage = nil
+        defer { isSubmittingRepayment = false }
+        do {
+            _ = try await localExpenseUseCase.confirmRepayment(
+                cycleID: cycleID, paidAmountMinor: paidAmountMinor, debitAccountID: debitID,
+                status: status.rawValue, note: note, paidAt: Date()
+            )
+            await loadLocalAccounts()
+            if let refreshed = accounts.first(where: { $0.id == cycle.accountId }) {
+                await loadLocalAccountDetail(refreshed)
+            }
+            repaymentMessage = "还款已保存在此设备"
+            return true
+        } catch {
+            repaymentMessage = error.localizedDescription
+            return false
+        }
+    }
+
+    private func performRepaymentAction(_ command: RepaymentActionCommand) async -> Bool {
+        let ownsBusyState = !isSubmittingRepayment
+        if ownsBusyState {
+            isSubmittingRepayment = true
+            repaymentMessage = nil
+        }
+        defer {
+            if ownsBusyState { isSubmittingRepayment = false }
+        }
+
+        let result = await resolvedRepaymentActionUseCase().perform(command)
+        return projectRepaymentActionResult(result)
+    }
+
+    private func resolvedRepaymentActionUseCase() -> RepaymentActionUseCase {
+        if let repaymentActionUseCase { return repaymentActionUseCase }
+        let useCase = RepaymentActionUseCase(
+            repository: accountRepository,
+            sessionProvider: { [weak self] forceRefresh in
+                guard let self else {
+                    throw SupabaseRemoteError.requestFailed("app_state_unavailable")
+                }
+                return try await self.validSession(forceRefresh: forceRefresh)
+            },
+            contextProvider: { [weak self] in
+                guard let self else {
+                    return RepaymentActionUserContext(userId: "", generation: -1, isSignedIn: false)
+                }
+                return RepaymentActionUserContext(
+                    userId: self.currentUserId,
+                    generation: self.userStateGeneration,
+                    isSignedIn: self.isSignedIn
+                )
+            },
+            applyAccepted: { [weak self] cycle in
+                self?.applyCanonicalRepaymentCycle(cycle)
+            },
+            refresh: { [weak self] accountId in
+                guard let self else {
+                    throw SupabaseRemoteError.requestFailed("app_state_unavailable")
+                }
+                try await self.refreshAfterRepayment(accountId: accountId)
+            }
+        )
+        repaymentActionUseCase = useCase
+        return useCase
+    }
+
+    private func resolvedAccountReadPreparationUseCase() -> AccountReadPreparationUseCase {
+        if let accountReadPreparationUseCase { return accountReadPreparationUseCase }
+        let useCase = AccountReadPreparationUseCase(
+            repository: accountReadPreparationRepository,
+            sessionProvider: { [weak self] forceRefresh in
+                guard let self else {
+                    throw SupabaseRemoteError.requestFailed("app_state_unavailable")
+                }
+                return try await self.validSession(forceRefresh: forceRefresh)
+            },
+            contextProvider: { [weak self] in
+                guard let self else {
+                    return AccountReadPreparationUserContext(userId: "", generation: -1, isSignedIn: false)
+                }
+                return AccountReadPreparationUserContext(
+                    userId: self.currentUserId,
+                    generation: self.userStateGeneration,
+                    isSignedIn: self.isSignedIn
+                )
+            }
+        )
+        accountReadPreparationUseCase = useCase
+        return useCase
+    }
+
+    private func projectAccountReadPreparationResult(
+        _ result: AccountReadPreparationResult,
+        onFailure: (String) -> Void
+    ) -> Bool {
+        switch result.transaction {
+        case .accepted:
+            return true
+        case .failed(let message):
+            onFailure("还款计划准备失败：\(message)")
+            return true
+        case .rejected(.unauthenticated):
+            onFailure("登录状态已失效，请重新登录。")
+            return false
+        case .rejected(.invalidInput):
+            onFailure("还款计划月份无效")
+            return false
+        case .stale:
+            return false
+        }
+    }
+
+    private func resolvedScreenshotRepaymentUseCase() -> ScreenshotRepaymentUseCase {
+        if let screenshotRepaymentUseCase { return screenshotRepaymentUseCase }
+        let useCase = ScreenshotRepaymentUseCase(
+            repository: inboxRepository,
+            sessionProvider: { [weak self] forceRefresh in
+                guard let self else {
+                    throw SupabaseRemoteError.requestFailed("app_state_unavailable")
+                }
+                return try await self.validSession(forceRefresh: forceRefresh)
+            },
+            contextProvider: { [weak self] in
+                guard let self else {
+                    return ScreenshotRepaymentUserContext(userId: "", generation: -1, isSignedIn: false)
+                }
+                return ScreenshotRepaymentUserContext(
+                    userId: self.currentUserId,
+                    generation: self.userStateGeneration,
+                    isSignedIn: self.isSignedIn
+                )
+            }
+        )
+        screenshotRepaymentUseCase = useCase
+        return useCase
+    }
+
+    private func projectScreenshotRepaymentResult(_ result: ScreenshotRepaymentResult) -> Bool {
+        switch result.transaction {
+        case .accepted:
+            if case .failed(let message) = result.refresh {
+                inboxFinanceMessage = "已根据截图确认还款，但刷新失败：\(message)"
+            } else {
+                inboxFinanceMessage = "已根据截图确认还款"
+            }
+            return true
+        case .rejected(.unauthenticated):
+            inboxFinanceMessage = "登录状态已失效，请重新登录。"
+        case .rejected(.invalidInput):
+            inboxFinanceMessage = "还款参数无效"
+        case .conflict(.screenshotRepaymentConflict):
+            inboxFinanceMessage = "还款截图正在以另一种方式处理，请稍后重试"
+        case .failed(let message):
+            inboxFinanceMessage = message
+        case .stale:
+            return false
+        }
+        return false
+    }
+
+    private func projectRepaymentActionResult(_ result: RepaymentActionResult) -> Bool {
+        switch result.transaction {
+        case .accepted(let accepted):
+            let successMessage: String
+            switch accepted.operation {
+            case .confirm:
+                successMessage = accepted.recordedDebit ? "已确认还款并记录扣款" : "已确认还款"
+            case .revoke:
+                successMessage = "已撤销还款"
+            }
+            if case .failed(let message) = result.refresh {
+                repaymentMessage = "\(successMessage)，但刷新失败：\(message)"
+            } else {
+                repaymentMessage = successMessage
+            }
+            return true
+        case .rejected(.unauthenticated):
+            repaymentMessage = "登录状态已失效，请重新登录。"
+        case .rejected(.invalidInput):
+            repaymentMessage = "还款参数无效"
+        case .conflict(.repaymentConflict):
+            repaymentMessage = "当前账单正在执行另一项还款操作"
+        case .failed(let message):
+            repaymentMessage = message
+        case .stale:
+            return false
+        }
+        return false
+    }
+
+    private func applyCanonicalRepaymentCycle(_ cycle: NativeRepaymentCycle) {
+        guard let detail = selectedAccountDetail, detail.account.id == cycle.accountId else { return }
+        var cycles = detail.repaymentCycles
+        if let index = cycles.firstIndex(where: { $0.id == cycle.id }) {
+            cycles[index] = cycle
+        } else {
+            cycles.insert(cycle, at: 0)
+        }
+        selectedAccountDetail = NativeAccountDetail(
+            account: detail.account,
+            entries: detail.entries,
+            repaymentCycles: cycles,
+            payments: detail.payments,
+            loadErrors: detail.loadErrors
+        )
+    }
+
+    func loadInboxRepaymentCandidates() async {
+        if !mayReadRemoteBusinessData, localExpenseUseCase != nil {
+            await loadLocalInboxRepaymentCandidates()
+            return
+        }
+        guard isSignedIn else {
+            repaymentCandidates = [:]
+            inboxFinanceMessage = nil
+            return
+        }
+        let generation = userStateGeneration
+        let stagingRecords = dashboard.stagingRecords
+        guard !stagingRecords.isEmpty else {
+            repaymentCandidates = [:]
+            return
+        }
+
+        do {
+            let session = try await validSession()
+            let preparation = await resolvedAccountReadPreparationUseCase().prepare(monthKey: Self.currentMonthKey)
+            guard projectAccountReadPreparationResult(preparation, onFailure: { [weak self] message in
+                self?.inboxFinanceMessage = message
+            }) else { return }
+            async let accountRows = accountRepository.fetchAccounts(accessToken: session.accessToken)
+            async let cycleRows = accountRepository.fetchOpenRepaymentCycles(accessToken: session.accessToken)
+            let (loadedAccounts, cycles) = try await (accountRows, cycleRows)
+            guard isCurrentUserLoad(generation, userId: session.user.id) else { return }
+            accounts = loadedAccounts
+            repaymentCandidates = Dictionary(
+                uniqueKeysWithValues: stagingRecords.compactMap { record in
+                    NativeRepaymentCandidateEngine.candidate(
+                        for: record,
+                        accounts: loadedAccounts,
+                        cycles: cycles
+                    ).map { (record.id, $0) }
+                }
+            )
+            inboxFinanceMessage = nil
+        } catch {
+            guard generation == userStateGeneration else { return }
+            repaymentCandidates = [:]
+            inboxFinanceMessage = "还款候选暂时无法匹配：\(error.localizedDescription)"
+        }
+    }
+
+    func confirmStagingRepayment(_ record: NativeStagingRecord) async -> Bool {
+        guard stagingRepaymentId == nil,
+              let candidate = repaymentCandidates[record.id] else {
+            return false
+        }
+        if let localStagingID = LocalStagingReadModel.localID(from: record.id) {
+            guard let localExpenseUseCase,
+                  let cycleID = UUID(uuidString: candidate.cycle.id) else { return false }
+            let debitIDText = candidate.cycle.autoDebitAccountId ?? candidate.account.autoDebitAccountId
+            let debitID = debitIDText.flatMap(UUID.init(uuidString:))
+            guard debitIDText == nil || debitID != nil else { return false }
+            stagingRepaymentId = record.id
+            inboxFinanceMessage = nil
+            defer { stagingRepaymentId = nil }
+            do {
+                let paidAmountMinor = try LocalExpenseMapper.amountMinor(String(candidate.amount))
+                _ = try await localExpenseUseCase.confirmScreenshotRepayment(
+                    stagingID: localStagingID,
+                    cycleID: cycleID,
+                    paidAmountMinor: paidAmountMinor,
+                    debitAccountID: debitID,
+                    note: "根据还款截图确认",
+                    paidAt: Date()
+                )
+                repaymentCandidates.removeValue(forKey: record.id)
+                removeStagingRecordLocally(record.id)
+                await loadLocalAccounts()
+                if selectedAccountDetail?.account.id == candidate.account.id,
+                   let refreshed = accounts.first(where: { $0.id == candidate.account.id }) {
+                    await loadLocalAccountDetail(refreshed)
+                }
+                await refreshDashboard()
+                inboxFinanceMessage = "截图还款已保存在此设备"
+                return true
+            } catch {
+                inboxFinanceMessage = "本地截图还款未确认：\(error.localizedDescription)"
+                return false
+            }
+        }
+        stagingRepaymentId = record.id
+        inboxFinanceMessage = nil
+        defer { stagingRepaymentId = nil }
+
+        let result = await resolvedScreenshotRepaymentUseCase().confirm(
+            ScreenshotRepaymentCommand(
+                stagingId: record.id,
+                cycleId: candidate.cycle.id,
+                paidAmount: candidate.amount,
+                debitAccountId: candidate.cycle.autoDebitAccountId ?? candidate.account.autoDebitAccountId,
+                note: "根据还款截图确认"
+            ),
+            onAccepted: { [weak self] cycle in
+                guard let self else { return }
+                self.applyCanonicalRepaymentCycle(cycle)
+                self.repaymentCandidates.removeValue(forKey: record.id)
+                self.inboxPath = NavigationPath()
+            },
+            refresh: { [weak self] _ in
+                guard let self else {
+                    throw SupabaseRemoteError.requestFailed("app_state_unavailable")
+                }
+                await self.loadAccounts()
+                if let message = self.accountMessage, !message.isEmpty {
+                    throw WalletSnapshotReadModelRefreshError(message: message)
+                }
+                await self.refreshDashboard()
+                if let message = self.dashboardMessage, !message.isEmpty {
+                    throw WalletSnapshotReadModelRefreshError(message: message)
+                }
+            }
+        )
+        return projectScreenshotRepaymentResult(result)
+    }
+
+    private func loadLocalInboxRepaymentCandidates() async {
+        guard let localExpenseUseCase, let localRecordUseCase else {
+            repaymentCandidates = [:]
+            return
+        }
+        let generation = userStateGeneration
+        do {
+            let staging = try await localRecordUseCase.stagingRecords()
+            let candidates = staging.map { record in
+                LocalStagingReadModel.native(
+                    from: record,
+                    imageStore: localImageStore,
+                    plannerEnabled: userSettings.companionEnabled
+                )
+            }
+            await loadLocalAccounts()
+            guard generation == userStateGeneration else { return }
+            _ = try await localExpenseUseCase.ensureRepaymentCycles(Self.currentMonthKey, now: Date())
+            var cycles: [NativeRepaymentCycle] = []
+            for account in accounts where account.type.isLiability && !account.isArchived {
+                guard let id = UUID(uuidString: account.id) else { continue }
+                let localCycles = try await localExpenseUseCase.repaymentCycles(accountID: id)
+                cycles += try localCycles.map(Self.nativeRepaymentCycle(from:))
+            }
+            guard generation == userStateGeneration else { return }
+            repaymentCandidates = Dictionary(
+                uniqueKeysWithValues: candidates.compactMap { record in
+                    NativeRepaymentCandidateEngine.candidate(
+                        for: record,
+                        accounts: accounts,
+                        cycles: cycles
+                    ).map { (record.id, $0) }
+                }
+            )
+            inboxFinanceMessage = nil
+        } catch {
+            guard generation == userStateGeneration else { return }
+            repaymentCandidates = [:]
+            inboxFinanceMessage = "本地还款候选暂时无法匹配：\(error.localizedDescription)"
+        }
+    }
+
+    private func refreshAfterRepayment(accountId: String) async throws {
+        await loadAccounts()
+        if let accountMessage, !accountMessage.isEmpty {
+            throw WalletSnapshotReadModelRefreshError(message: accountMessage)
+        }
+        if let account = accounts.first(where: { $0.id == accountId }) {
+            let generation = userStateGeneration
+            let session = try await validSession()
+            guard isCurrentUserLoad(generation, userId: session.user.id) else { return }
+            let refreshedDetail = await accountRepository.fetchDetail(
+                account: account,
+                accessToken: session.accessToken
+            )
+            guard isCurrentUserLoad(generation, userId: session.user.id) else { return }
+
+            let canonicalCycles = selectedAccountDetail?.account.id == accountId
+                ? selectedAccountDetail?.repaymentCycles ?? []
+                : []
+            if refreshedDetail.loadError(for: .repaymentCycles) != nil, !canonicalCycles.isEmpty {
+                selectedAccountDetail = NativeAccountDetail(
+                    account: refreshedDetail.account,
+                    entries: refreshedDetail.entries,
+                    repaymentCycles: canonicalCycles,
+                    payments: refreshedDetail.payments,
+                    loadErrors: refreshedDetail.loadErrors
+                )
+            } else {
+                selectedAccountDetail = refreshedDetail
+            }
+            if let message = refreshedDetail.loadErrors.values.first {
+                throw WalletSnapshotReadModelRefreshError(message: message)
+            }
+        }
+        await refreshDashboard()
+        if let dashboardMessage, !dashboardMessage.isEmpty {
+            throw WalletSnapshotReadModelRefreshError(message: dashboardMessage)
+        }
+    }
+
+    func saveAccount(_ draft: NativeAccountDraft) async -> Bool {
+        if !mayReadRemoteBusinessData {
+            return await saveLocalManagedAccount(draft)
+        }
+        guard let initialBalance = Double(draft.initialBalanceText.isEmpty ? "0" : draft.initialBalanceText) else {
+            accountMessage = "初始余额必须是数字"
+            return false
+        }
+        let command = AccountManagementActionCommand.save(
+            AccountManagementSaveCommand(
+                accountId: draft.accountId,
+                name: draft.name,
+                type: draft.type,
+                institution: draft.institution,
+                last4: draft.last4,
+                initialBalance: initialBalance,
+                billDay: Int(draft.billDayText),
+                paymentDueDay: Int(draft.paymentDueDayText),
+                autoDebitAccountId: draft.autoDebitAccountId,
+                autoConfirmRepayment: draft.autoConfirmRepayment,
+                isDefaultExpense: draft.isDefaultExpense,
+                isDefaultIncome: draft.isDefaultIncome
+            )
+        )
+        return await performAccountManagementAction(command)
+    }
+
+    func setAccountArchived(_ account: NativeAccount, archived: Bool) async -> Bool {
+        if !mayReadRemoteBusinessData {
+            _ = await prepareLocalWorkspace()
+            guard let id = UUID(uuidString: account.id), let local = localAccounts.first(where: { $0.id == id }) else {
+                accountMessage = "本地账户不可用，请刷新后重试。"
+                return false
+            }
+            guard let localExpenseUseCase else {
+                accountMessage = "本地账户存储暂不可用。"
+                return false
+            }
+            do {
+                _ = try await localExpenseUseCase.updateAccount(LocalAccountEditCommand(
+                    id: local.id, expectedVersion: local.localVersion, name: local.name,
+                    kind: local.kind, institution: local.institution, last4: local.last4,
+                    billDay: local.billDay, paymentDueDay: local.paymentDueDay,
+                    autoDebitAccountID: archived ? nil : local.autoDebitAccountID,
+                    autoConfirmRepayment: archived ? false : local.autoConfirmRepayment,
+                    gracePeriodDays: local.gracePeriodDays,
+                    isDefaultExpense: archived ? false : local.isDefaultExpense,
+                    isDefaultIncome: archived ? false : local.isDefaultIncome,
+                    isArchived: archived, sortOrder: local.sortOrder
+                ))
+                await loadLocalAccounts()
+                accountMessage = archived ? "账户已归档" : "账户已恢复"
+                return true
+            } catch {
+                accountMessage = error.localizedDescription
+                return false
+            }
+        }
+        return await performAccountManagementAction(
+            .setArchived(accountId: account.id, archived: archived)
+        )
+    }
+
+    private func saveLocalManagedAccount(_ draft: NativeAccountDraft) async -> Bool {
+        guard !isSavingAccount else { return false }
+        isSavingAccount = true
+        accountMessage = nil
+        defer { isSavingAccount = false }
+        if let validation = draft.validationMessage {
+            accountMessage = validation
+            return false
+        }
+        _ = await prepareLocalWorkspace()
+        return await persistLocalManagedAccount(draft)
+    }
+
+    private func persistLocalManagedAccount(_ draft: NativeAccountDraft) async -> Bool {
+        guard let localExpenseUseCase else {
+            accountMessage = "本地账户存储暂不可用。"
+            return false
+        }
+        let autoDebitID: UUID?
+        if let value = draft.autoDebitAccountId {
+            guard let parsed = UUID(uuidString: value) else {
+                accountMessage = "自动扣款账户无效。"
+                return false
+            }
+            autoDebitID = parsed
+        } else {
+            autoDebitID = nil
+        }
+        do {
+            if let accountIDText = draft.accountId {
+                guard let accountID = UUID(uuidString: accountIDText),
+                      let local = localAccounts.first(where: { $0.id == accountID }) else {
+                    accountMessage = "本地账户不可用，请刷新后重试。"
+                    return false
+                }
+                _ = try await localExpenseUseCase.updateAccount(LocalAccountEditCommand(
+                    id: local.id, expectedVersion: local.localVersion,
+                    name: draft.name, kind: draft.type.rawValue, institution: draft.institution,
+                    last4: draft.last4, billDay: Int(draft.billDayText),
+                    paymentDueDay: Int(draft.paymentDueDayText), autoDebitAccountID: autoDebitID,
+                    autoConfirmRepayment: draft.autoConfirmRepayment,
+                    gracePeriodDays: Int(draft.gracePeriodDaysText) ?? 0,
+                    isDefaultExpense: draft.isDefaultExpense, isDefaultIncome: draft.isDefaultIncome,
+                    isArchived: local.isArchived, sortOrder: local.sortOrder
+                ))
+            } else {
+                let command = LocalAccountSetupCommand(
+                    id: UUID(), name: draft.name, kind: draft.type.rawValue,
+                    openingBalanceText: draft.initialBalanceText.isEmpty ? "0" : draft.initialBalanceText,
+                    createdAt: Date(), institution: draft.institution, last4: draft.last4,
+                    billDay: Int(draft.billDayText), paymentDueDay: Int(draft.paymentDueDayText),
+                    autoDebitAccountID: autoDebitID, autoConfirmRepayment: draft.autoConfirmRepayment,
+                    gracePeriodDays: Int(draft.gracePeriodDaysText) ?? 0,
+                    isDefaultExpense: draft.isDefaultExpense, isDefaultIncome: draft.isDefaultIncome
+                )
+                _ = try await localExpenseUseCase.createAccount(command)
+            }
+            await loadLocalAccounts()
+            accountMessage = "账户已保存在此设备"
+            return true
+        } catch {
+            accountMessage = error.localizedDescription
+            return false
+        }
+    }
+
+    private func performAccountManagementAction(_ command: AccountManagementActionCommand) async -> Bool {
+        guard !isSavingAccount else { return false }
+        isSavingAccount = true
+        accountMessage = nil
+        defer { isSavingAccount = false }
+
+        let result = await resolvedAccountManagementActionUseCase().perform(command)
+        switch result.transaction {
+        case .accepted:
+            switch result.refresh {
+            case .notStarted, .succeeded:
+                accountMessage = "账户已保存"
+            case .failed(let message):
+                accountMessage = "账户已保存，但刷新失败：\(message)"
+            }
+            return true
+        case .rejected(.unauthenticated):
+            accountMessage = "登录状态已失效，请重新登录。"
+        case .rejected(.invalidInput):
+            accountMessage = "账户信息不完整，请检查后重试。"
+        case .conflict:
+            accountMessage = "账户正在保存，请稍后重试。"
+        case .failed(let message):
+            accountMessage = message
+        case .stale:
+            return false
+        }
+        return false
+    }
+
+    private func resolvedAccountManagementActionUseCase() -> AccountManagementActionUseCase {
+        if let accountManagementActionUseCase { return accountManagementActionUseCase }
+        let useCase = AccountManagementActionUseCase(
+            repository: accountManagementRepository,
+            sessionProvider: { [weak self] forceRefresh in
+                guard let self else {
+                    throw SupabaseRemoteError.requestFailed("app_state_unavailable")
+                }
+                return try await self.validSession(forceRefresh: forceRefresh)
+            },
+            contextProvider: { [weak self] in
+                guard let self else {
+                    return AccountManagementUserContext(userId: "", generation: -1, isSignedIn: false)
+                }
+                return AccountManagementUserContext(
+                    userId: self.currentUserId,
+                    generation: self.userStateGeneration,
+                    isSignedIn: self.isSignedIn
+                )
+            },
+            applyAccepted: { [weak self] account in
+                self?.applyCanonicalAccount(account)
+            },
+            refresh: { [weak self] accountId in
+                guard let self else {
+                    throw SupabaseRemoteError.requestFailed("app_state_unavailable")
+                }
+                try await self.refreshAfterAccountManagement(accountId: accountId)
+            }
+        )
+        accountManagementActionUseCase = useCase
+        return useCase
+    }
+
+    private func applyCanonicalAccount(_ account: NativeAccount) {
+        if let index = accounts.firstIndex(where: { $0.id == account.id }) {
+            accounts[index] = account
+        } else {
+            accounts.append(account)
+        }
+        guard selectedAccountDetail?.account.id == account.id,
+              let detail = selectedAccountDetail else { return }
+        selectedAccountDetail = NativeAccountDetail(
+            account: account,
+            entries: detail.entries,
+            repaymentCycles: detail.repaymentCycles,
+            payments: detail.payments,
+            loadErrors: detail.loadErrors
+        )
+    }
+
+    private func refreshAfterAccountManagement(accountId: String) async throws {
+        await loadAccounts()
+        if let accountMessage, !accountMessage.isEmpty {
+            throw WalletSnapshotReadModelRefreshError(message: accountMessage)
+        }
+        guard let account = accounts.first(where: { $0.id == accountId }) else {
+            throw WalletSnapshotReadModelRefreshError(message: "账户刷新后未找到")
+        }
+        let generation = userStateGeneration
+        let session = try await validSession()
+        guard isCurrentUserLoad(generation, userId: session.user.id) else { return }
+        let detail = await accountRepository.fetchDetail(account: account, accessToken: session.accessToken)
+        guard isCurrentUserLoad(generation, userId: session.user.id) else { return }
+        selectedAccountDetail = detail
+        if let message = detail.loadErrors.values.first {
+            throw WalletSnapshotReadModelRefreshError(message: message)
+        }
+        await refreshDashboard()
+        if let dashboardMessage, !dashboardMessage.isEmpty {
+            throw WalletSnapshotReadModelRefreshError(message: dashboardMessage)
+        }
+    }
+
+    func loadUnboundRecords(monthKey: String) async {
+        guard !isLoadingUnboundRecords else { return }
+        let generation = userStateGeneration
+        isLoadingUnboundRecords = true
+        unboundRecordsMessage = nil
+        defer { isLoadingUnboundRecords = false }
+
+        if !mayReadRemoteBusinessData {
+            do {
+                guard let repository = localFinancialBindingRepository,
+                      let profile = try await localExpenseUseCase?.prepareProfile() else {
+                    unboundRecords = []
+                    return
+                }
+                guard generation == userStateGeneration else { return }
+                unboundRecords = try repository.unboundRecords(profileID: profile.id)
+            } catch { unboundRecordsMessage = "本机未绑定记录读取失败：\(error.localizedDescription)" }
+            return
+        }
+
+        do {
+            let session = try await validSession()
+            guard isCurrentUserLoad(generation, userId: session.user.id) else { return }
+            let records = try await unboundRecordRepository.fetch(
+                monthKey: monthKey,
+                accessToken: session.accessToken
+            )
+            guard isCurrentUserLoad(generation, userId: session.user.id) else { return }
+            unboundRecords = records
+        } catch {
+            guard generation == userStateGeneration else { return }
+            unboundRecordsMessage = error.localizedDescription
+        }
+    }
+
+    private func resolvedAccountBindingUseCase(monthKey: String) -> AccountBindingUseCase {
+        if let accountBindingUseCase {
+            if accountBindingUseCaseMonthKey == nil || accountBindingUseCaseMonthKey == monthKey {
+                return accountBindingUseCase
+            }
+        }
+        let useCase = AccountBindingUseCase(
+            repository: unboundRecordRepository,
+            sessionProvider: { [weak self] forceRefresh in
+                guard let self else { throw SupabaseRemoteError.requestFailed("会话已失效") }
+                return try await self.validSession(forceRefresh: forceRefresh)
+            },
+            contextProvider: { [weak self] in
+                guard let self else {
+                    return AccountBindingUserContext(userId: "", generation: -1, isSignedIn: false)
+                }
+                return AccountBindingUserContext(
+                    userId: self.currentUserId,
+                    generation: self.userStateGeneration,
+                    isSignedIn: self.isSignedIn
+                )
+            },
+            applyAccepted: { [weak self] accepted in
+                self?.unboundRecords.removeAll { $0.id == accepted.recordId && $0.kind == accepted.kind }
+            },
+            refresh: { [weak self] in
+                guard let self else { return }
+                try await self.refreshAfterAccountBinding(monthKey: monthKey)
+            }
+        )
+        accountBindingUseCase = useCase
+        accountBindingUseCaseMonthKey = monthKey
+        return useCase
+    }
+
+    func bindUnboundRecord(
+        _ record: NativeUnboundRecord,
+        accountId: String,
+        monthKey: String
+    ) async -> Bool {
+        guard !isBindingUnboundRecords else { return false }
+        isBindingUnboundRecords = true
+        unboundBindingMessage = nil
+        defer { isBindingUnboundRecords = false }
+        let generation = userStateGeneration
+        if !mayReadRemoteBusinessData {
+            do {
+                try await bindLocalFinancialRecord(record, accountId: accountId)
+                guard generation == userStateGeneration else { return true }
+                await loadUnboundRecords(monthKey: monthKey)
+                await loadLocalAccounts()
+                await refreshLocalMonthProjection(monthKey: String(record.date.prefix(7)))
+                guard generation == userStateGeneration else { return true }
+                unboundBindingMessage = localWriteMessage("已补绑本机账户并生成流水")
+                return true
+            } catch {
+                guard generation == userStateGeneration else { return false }
+                unboundBindingMessage = "本机补绑失败：\(error.localizedDescription)"
+                return false
+            }
+        }
+        let result = await resolvedAccountBindingUseCase(monthKey: monthKey).bind(record, accountId: accountId)
+        switch result.transaction {
+        case .accepted(let accepted):
+            unboundRecords.removeAll { $0.id == accepted.recordId && $0.kind == accepted.kind }
+            unboundBindingMessage = result.refresh.failureMessage.map { "已补绑账户并生成流水；刷新失败：\($0)" }
+                ?? "已补绑账户并生成流水"
+            return true
+        case .rejected(.unauthenticated):
+            unboundBindingMessage = "登录状态已失效，请重新登录"
+        case .rejected(.invalidInput):
+            unboundBindingMessage = "补绑记录或账户无效"
+        case .conflict:
+            unboundBindingMessage = "该记录正在使用其他账户补绑"
+        case .failed(let message):
+            unboundBindingMessage = message
+        case .stale:
+            return false
+        }
+        return false
+    }
+
+    func batchBindUnboundRecords(
+        _ candidates: [NativeUnboundBindingCandidate],
+        monthKey: String
+    ) async -> Bool {
+        guard !isBindingUnboundRecords, !candidates.isEmpty else { return false }
+        isBindingUnboundRecords = true
+        unboundBindingMessage = nil
+        defer { isBindingUnboundRecords = false }
+        if !mayReadRemoteBusinessData {
+            let generation = userStateGeneration
+            var succeeded = 0
+            var failures: [String] = []
+            var months: Set<String> = []
+            for candidate in candidates {
+                guard generation == userStateGeneration else { return succeeded > 0 }
+                do {
+                    try await bindLocalFinancialRecord(candidate.record, accountId: candidate.recommendation.account.id)
+                    succeeded += 1
+                    months.insert(String(candidate.record.date.prefix(7)))
+                } catch { failures.append("\(candidate.record.title)：\(error.localizedDescription)") }
+            }
+            guard generation == userStateGeneration else { return succeeded > 0 }
+            await loadUnboundRecords(monthKey: monthKey)
+            await loadLocalAccounts()
+            for month in months { await refreshLocalMonthProjection(monthKey: month) }
+            guard generation == userStateGeneration else { return succeeded > 0 }
+            unboundBindingMessage = localWriteMessage("已补绑 \(succeeded) 条，失败 \(failures.count) 条" + (failures.isEmpty ? "" : "：" + failures.joined(separator: "；")))
+            return succeeded > 0
+        }
+        let result = await resolvedAccountBindingUseCase(monthKey: monthKey).bindBatch(candidates)
+        for item in result.items {
+            if case .accepted = item.transaction {
+                unboundRecords.removeAll { $0.id == item.recordId && $0.kind == item.kind }
+            }
+        }
+        switch result.status {
+        case .allSucceeded:
+            unboundBindingMessage = "已批量补绑 \(result.successCount) 条记录"
+        case .partial:
+            unboundBindingMessage = "已补绑 \(result.successCount) 条，\(result.failedCount) 条失败"
+        case .failed:
+            unboundBindingMessage = "批量补绑失败"
+        case .stale:
+            return false
+        }
+        if let message = result.refresh.failureMessage {
+            unboundBindingMessage = "\(unboundBindingMessage ?? "已补绑")；刷新失败：\(message)"
+        }
+        return result.successCount > 0
+    }
+
+    private func bindLocalFinancialRecord(_ record: NativeUnboundRecord, accountId: String) async throws {
+        let generation = userStateGeneration
+        guard let repository = localFinancialBindingRepository,
+              let profile = try await localExpenseUseCase?.prepareProfile(),
+              let id = UUID(uuidString: record.id), let accountID = UUID(uuidString: accountId) else {
+            throw LocalDataError.invalidIdentifier
+        }
+        guard generation == userStateGeneration else { throw CancellationError() }
+        switch record.kind {
+        case .expense: try repository.bindExpense(profileID: profile.id, id: id, accountID: accountID)
+        case .income: try repository.bindIncome(profileID: profile.id, id: id, accountID: accountID)
+        }
+    }
+
+    func loadWalletSnapshots() async {
+        guard !isLoadingWalletSnapshots else { return }
+        let generation = userStateGeneration
+        isLoadingWalletSnapshots = true
+        walletSnapshotMessage = nil
+        defer { isLoadingWalletSnapshots = false }
+
+        if let localWalletSnapshotUseCase {
+            do {
+                let loaded = try await localWalletSnapshotUseCase.history()
+                guard generation == userStateGeneration else { return }
+                localWalletSnapshotHistory = loaded
+                localWalletSnapshots = loaded.filter { $0.linkedAccountID == nil && $0.deletedAt == nil }
+            } catch {
+                guard generation == userStateGeneration else { return }
+                walletSnapshotMessage = error.localizedDescription
+            }
+        }
+        guard mayReadRemoteBusinessData else {
+            walletSnapshots = []
+            return
+        }
+        do {
+            let session = try await validSession()
+            async let snapshotRows = walletSnapshotRepository.fetchUnlinked(accessToken: session.accessToken)
+            async let accountRows = accountRepository.fetchAccounts(accessToken: session.accessToken)
+            let (loadedSnapshots, loadedAccounts) = try await (snapshotRows, accountRows)
+            guard isCurrentUserLoad(generation, userId: session.user.id) else { return }
+            walletSnapshots = loadedSnapshots
+            accounts = loadedAccounts
+        } catch {
+            guard generation == userStateGeneration else { return }
+            walletSnapshotMessage = error.localizedDescription
+        }
+    }
+
+    func loadInsights(range: NativeInsightRange, force: Bool = false) async {
+        let shouldLoadLocally = !mayReadRemoteBusinessData && localFactReader != nil
+        if !force,
+           insightsLoadedLocally == shouldLoadLocally,
+           insightsSnapshot?.range == range,
+           let insightsLoadedAt,
+           Date().timeIntervalSince(insightsLoadedAt) < 60 {
+            return
+        }
+        guard !isLoadingInsights else { return }
+        let generation = userStateGeneration
+        isLoadingInsights = true
+        insightsMessage = nil
+        defer { isLoadingInsights = false }
+
+        do {
+            if !mayReadRemoteBusinessData, let localFactReader {
+                let todayKey = NativeLocalDate.dateKey(Date())
+                let startKey = NativeLocalDate.shiftedDateKey(todayKey, byDays: -(range.rawValue - 1)) ?? todayKey
+                let facts = try await localFactReader.activeRange(from: startKey, to: todayKey)?.facts ?? []
+                guard generation == userStateGeneration else { return }
+                insightsSnapshot = NativeInsightSnapshot(
+                    range: range,
+                    rows: LocalInsightAggregator.rows(from: facts)
+                )
+                aiInsight = nil
+                aiInsightIsCached = false
+                aiInsightMessage = nil
+                insightsLoadedAt = Date()
+                insightsLoadedLocally = true
+                return
+            }
+            let session = try await validSession()
+            guard isCurrentUserLoad(generation, userId: session.user.id) else { return }
+            let snapshot = try await insightsRepository.fetchDailySummary(
+                range: range,
+                accessToken: session.accessToken
+            )
+            guard isCurrentUserLoad(generation, userId: session.user.id) else { return }
+            insightsSnapshot = snapshot
+            insightsLoadedAt = Date()
+            insightsLoadedLocally = false
+            Task { await loadLatestAIInsight(range: range, generation: generation, userId: session.user.id) }
+        } catch {
+            guard generation == userStateGeneration else { return }
+            insightsMessage = error.localizedDescription
+        }
+    }
+
+    func loadLatestAIInsight(
+        range: NativeInsightRange,
+        generation: Int? = nil,
+        userId: String? = nil
+    ) async {
+        let expectedGeneration = generation ?? userStateGeneration
+        do {
+            let session = try await validSession()
+            let expectedUserId = userId ?? session.user.id
+            guard isCurrentUserLoad(expectedGeneration, userId: expectedUserId),
+                  session.user.id == expectedUserId else { return }
+            let latest = try await insightsRepository.fetchLatestAIInsight(
+                range: range,
+                accessToken: session.accessToken
+            )
+            guard isCurrentUserLoad(expectedGeneration, userId: expectedUserId),
+                  insightsSnapshot?.range == range else { return }
+            aiInsight = latest
+            aiInsightIsCached = latest != nil
+            aiInsightMessage = nil
+        } catch {
+            guard expectedGeneration == userStateGeneration,
+                  insightsSnapshot?.range == range else { return }
+            aiInsightMessage = nil
+        }
+    }
+
+    func generateAIInsight(
+        range: NativeInsightRange,
+        question: String,
+        force: Bool = false
+    ) async -> Bool {
+        guard !isLoadingAIInsight else { return false }
+        let generation = userStateGeneration
+        let question = question.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !question.isEmpty else {
+            aiInsightMessage = "请输入你想分析的问题"
+            return false
+        }
+        guard insightsSnapshot?.range == range, insightsSnapshot?.rows.isEmpty == false else {
+            aiInsightMessage = "当前范围没有可分析的数据"
+            return false
+        }
+
+        isLoadingAIInsight = true
+        aiInsightMessage = nil
+        defer { if generation == userStateGeneration { isLoadingAIInsight = false } }
+
+        do {
+            let session = try await validSession()
+            let response = try await insightsRepository.generateAIInsight(
+                range: range,
+                force: force,
+                question: question,
+                accessToken: session.accessToken
+            )
+            guard isCurrentUserLoad(generation, userId: session.user.id),
+                  insightsSnapshot?.range == range else { return false }
+            aiInsight = response.insight.scoped(to: range)
+            aiInsightIsCached = response.cached
+            return true
+        } catch {
+            guard generation == userStateGeneration else { return false }
+            aiInsightMessage = error.localizedDescription
+            return false
+        }
+    }
+
+    func createAccountFromWalletSnapshot(_ snapshot: NativeWalletSnapshot) async -> Bool {
+        await performWalletSnapshotAction(
+            .create(recordId: snapshot.id),
+            snapshot: snapshot
+        )
+    }
+
+    func linkWalletSnapshot(
+        _ snapshot: NativeWalletSnapshot,
+        to account: NativeAccount
+    ) async -> Bool {
+        await performWalletSnapshotAction(
+            .link(recordId: snapshot.id, accountId: account.id),
+            snapshot: snapshot,
+            account: account
+        )
+    }
+
+    func createLocalAccountFromWalletSnapshot(_ snapshot: LocalWalletSnapshot) async -> Bool {
+        await performLocalWalletSnapshotAction(snapshot) {
+            try await $0.createAccount(from: snapshot)
+        }
+    }
+
+    func linkLocalWalletSnapshot(_ snapshot: LocalWalletSnapshot, to accountID: UUID) async -> Bool {
+        await performLocalWalletSnapshotAction(snapshot) {
+            try await $0.link(snapshot, to: accountID)
+        }
+    }
+
+    func updateLocalWalletSnapshot(
+        _ snapshot: LocalWalletSnapshot,
+        title: String,
+        summary: String,
+        balanceMinor: Int64
+    ) async -> Bool {
+        await performLocalWalletSnapshotMutation(snapshot, successMessage: "本机快照已更新") {
+            try await $0.update(snapshot, title: title, summary: summary, balanceMinor: balanceMinor)
+        }
+    }
+
+    func deleteLocalWalletSnapshot(_ snapshot: LocalWalletSnapshot) async -> Bool {
+        await performLocalWalletSnapshotMutation(snapshot, successMessage: "本机快照已移入删除历史") {
+            try await $0.delete(snapshot)
+        }
+    }
+
+    private func performLocalWalletSnapshotMutation(
+        _ snapshot: LocalWalletSnapshot,
+        successMessage: String,
+        mutation: (LocalWalletSnapshotUseCaseProtocol) async throws -> LocalWalletSnapshot
+    ) async -> Bool {
+        guard walletSnapshotActionId == nil,
+              let localWalletSnapshotUseCase else { return false }
+        let actionID = snapshot.id.uuidString
+        walletSnapshotActionId = actionID
+        walletSnapshotMessage = nil
+        defer {
+            if walletSnapshotActionId == actionID { walletSnapshotActionId = nil }
+        }
+        do {
+            _ = try await mutation(localWalletSnapshotUseCase)
+        } catch {
+            walletSnapshotMessage = error.localizedDescription
+            return false
+        }
+        do {
+            try await loadLocalWalletSnapshots()
+            walletSnapshotMessage = successMessage
+        } catch {
+            walletSnapshotMessage = "\(successMessage)，但历史刷新失败：\(error.localizedDescription)"
+        }
+        return true
+    }
+
+    private func performLocalWalletSnapshotAction(
+        _ snapshot: LocalWalletSnapshot,
+        action: (LocalWalletSnapshotUseCaseProtocol) async throws -> LocalWalletSnapshotActionResult
+    ) async -> Bool {
+        guard walletSnapshotActionId == nil,
+              let localWalletSnapshotUseCase else { return false }
+        let actionID = snapshot.id.uuidString
+        walletSnapshotActionId = actionID
+        walletSnapshotMessage = nil
+        defer {
+            if walletSnapshotActionId == actionID { walletSnapshotActionId = nil }
+        }
+        do {
+            let result = try await action(localWalletSnapshotUseCase)
+            let outcomeText: String
+            switch result.kind {
+            case .created: outcomeText = "已从本机快照创建账户"
+            case .linked: outcomeText = "本机快照已关联账户"
+            case .replayed: outcomeText = "本机快照关联已存在"
+            }
+            let confirmationText = result.reviewRequired ? "；账户已关联，账期/还款需要确认" : ""
+            var refreshErrors: [String] = []
+            do {
+                try await loadLocalWalletSnapshots()
+            } catch {
+                refreshErrors.append("列表刷新失败：\(error.localizedDescription)")
+            }
+            if mayReadRemoteBusinessData {
+                _ = await prepareLocalWorkspace()
+            } else {
+                await loadLocalAccounts()
+            }
+            if let localAccountMessage, !localAccountMessage.isEmpty {
+                refreshErrors.append("账户刷新失败：\(localAccountMessage)")
+            }
+            walletSnapshotMessage = ([outcomeText + confirmationText] + refreshErrors).joined(separator: "；")
+            return true
+        } catch {
+            walletSnapshotMessage = error.localizedDescription
+            return false
+        }
+    }
+
+    private func loadLocalWalletSnapshots() async throws {
+        guard let localWalletSnapshotUseCase else { return }
+        let history = try await localWalletSnapshotUseCase.history()
+        localWalletSnapshotHistory = history
+        localWalletSnapshots = history.filter { $0.linkedAccountID == nil && $0.deletedAt == nil }
+    }
+
+    private func performWalletSnapshotAction(
+        _ command: WalletSnapshotActionCommand,
+        snapshot: NativeWalletSnapshot,
+        account: NativeAccount? = nil
+    ) async -> Bool {
+        let ownsBusyState = walletSnapshotActionId == nil
+        if ownsBusyState {
+            walletSnapshotActionId = snapshot.id
+            walletSnapshotMessage = nil
+        }
+        defer {
+            if ownsBusyState, walletSnapshotActionId == snapshot.id {
+                walletSnapshotActionId = nil
+            }
+        }
+
+        let result = await resolvedWalletSnapshotActionUseCase().perform(
+            command,
+            snapshot: snapshot,
+            account: account
+        )
+        return projectWalletSnapshotActionResult(result)
+    }
+
+    private func resolvedWalletSnapshotActionUseCase() -> WalletSnapshotActionUseCase {
+        if let walletSnapshotActionUseCase { return walletSnapshotActionUseCase }
+        let useCase = WalletSnapshotActionUseCase(
+            repository: walletSnapshotRepository,
+            sessionProvider: { [weak self] forceRefresh in
+                guard let self else {
+                    throw SupabaseRemoteError.requestFailed("app_state_unavailable")
+                }
+                return try await self.validSession(forceRefresh: forceRefresh)
+            },
+            contextProvider: { [weak self] in
+                guard let self else {
+                    return WalletSnapshotActionUserContext(
+                        userId: "",
+                        generation: -1,
+                        isSignedIn: false
+                    )
+                }
+                return WalletSnapshotActionUserContext(
+                    userId: self.currentUserId,
+                    generation: self.userStateGeneration,
+                    isSignedIn: self.isSignedIn
+                )
+            },
+            refresh: { [weak self] in
+                guard let self else {
+                    throw SupabaseRemoteError.requestFailed("app_state_unavailable")
+                }
+                try await self.refreshAfterWalletSnapshotLink()
+            }
+        )
+        walletSnapshotActionUseCase = useCase
+        return useCase
+    }
+
+    private func projectWalletSnapshotActionResult(_ result: WalletSnapshotActionResult) -> Bool {
+        switch result.transaction {
+        case .accepted(let outcome):
+            let successMessage = walletSnapshotSuccessMessage(outcome)
+            switch result.refresh {
+            case .failed(let message):
+                walletSnapshotMessage = "\(successMessage)，但刷新失败：\(message)"
+            case .notStarted, .succeeded:
+                walletSnapshotMessage = successMessage
+            }
+            return true
+        case .rejected(.unauthenticated):
+            walletSnapshotMessage = "登录状态已失效，请重新登录。"
+        case .rejected(.invalidInput):
+            walletSnapshotMessage = "钱包快照参数无效"
+        case .conflict(.walletSnapshotBusy):
+            walletSnapshotMessage = "钱包快照正在处理中"
+        case .conflict(.walletSnapshotConflict):
+            walletSnapshotMessage = "该快照正在执行另一项关联操作"
+        case .failed(let message):
+            walletSnapshotMessage = message
+        case .stale:
+            return false
+        }
+        return false
+    }
+
+    private func walletSnapshotSuccessMessage(_ outcome: NativeWalletSnapshotOutcome) -> String {
+        switch outcome {
+        case .created: return "已从快照创建账户"
+        case .linked: return "已关联账户"
+        case .replayed: return "快照关联已存在"
+        case .needsConfirmation: return "账户已关联，账期/还款需要确认"
+        }
+    }
+
+    private func refreshAfterWalletSnapshotLink() async throws {
+        await loadAccounts()
+        if let accountMessage, !accountMessage.isEmpty {
+            throw WalletSnapshotReadModelRefreshError(message: accountMessage)
+        }
+        await loadWalletSnapshots()
+        if let walletSnapshotMessage, !walletSnapshotMessage.isEmpty {
+            throw WalletSnapshotReadModelRefreshError(message: walletSnapshotMessage)
+        }
+        await refreshDashboard()
+        if let dashboardMessage, !dashboardMessage.isEmpty {
+            throw WalletSnapshotReadModelRefreshError(message: dashboardMessage)
+        }
+    }
+
+    func openUnboundRecord(_ record: NativeUnboundRecord) {
+        presentedOverlay = .records
+        recordsPath = NavigationPath([NativeRecordRoute(reference: record.reference)])
+    }
+
+    func openWalletSnapshot(_ snapshot: NativeWalletSnapshot) {
+        presentedOverlay = .records
+        let reference = "data/\(snapshot.id)"
+        recordsPath = NavigationPath([NativeRecordRoute(reference: reference)])
+    }
+
+    private func refreshAfterAccountBinding(monthKey: String) async throws {
+        await loadAccounts()
+        await loadUnboundRecords(monthKey: monthKey)
+        await refreshDashboard()
+        if let message = accountMessage, !message.isEmpty { throw WalletSnapshotReadModelRefreshError(message: message) }
+        if let message = unboundRecordsMessage, !message.isEmpty { throw WalletSnapshotReadModelRefreshError(message: message) }
+        if let message = dashboardMessage, !message.isEmpty { throw WalletSnapshotReadModelRefreshError(message: message) }
+    }
+
+    func prefetchRecordDetails(_ references: [String]) {
+        let missing = references
+            .map { NativeRecordReference($0).canonicalValue }
+            .filter { reference in
+                guard !prefetchingRecordReferences.contains(reference) else { return false }
+                guard let cached = recordDetailCache[reference] else { return true }
+                return cached.imagePath != nil && cached.imageURL == nil && !cached.imageLoadError
+            }
+            .prefix(4)
+        for reference in missing {
+            Task { await prefetchRecordDetail(reference: reference) }
+        }
+    }
+
+    private func prefetchRecordDetail(reference: String) async {
+        if let cached = recordDetailCache[reference],
+           cached.imagePath == nil || cached.imageURL != nil || cached.imageLoadError {
+            return
+        }
+        guard !prefetchingRecordReferences.contains(reference) else { return }
+        let generation = userStateGeneration
+        prefetchingRecordReferences.insert(reference)
+        defer { prefetchingRecordReferences.remove(reference) }
+        do {
+            let session = try await validSession()
+            let detail = try await recordRepository.fetchDetail(reference: reference, accessToken: session.accessToken)
+            guard generation == userStateGeneration,
+                  isSignedIn,
+                  currentUserId == session.user.id else { return }
+            recordDetailCache[reference] = detailPreservingExpressionFeedback(detail)
+        } catch {
+            return
+        }
+    }
+
+    func openDayRecord(_ record: NativeDayRecord) {
+        if record.reference.hasPrefix("staging-") {
+            presentedOverlay = .inbox
+            inboxPath = NavigationPath([NativeInboxRoute.staging(recordId: String(record.reference.dropFirst("staging-".count)))])
+        } else {
+            homePath.append(NativeRecordRoute(reference: record.reference))
+        }
+    }
+
+    func openDomainDrill(_ domain: AppDomain, dateKey: String) {
+        homePath.append(NativeDomainDrillRoute(domain: domain, dateKey: dateKey))
+    }
+
+    func openPendingExpense(_ pending: NativePendingExpense) {
+        presentedOverlay = .inbox
+        // Keep completion inside the inbox queue. The card opens the inline
+        // editor, while the queue remains responsible for next-item routing.
+        inboxPath = NavigationPath([NativeInboxRoute.category(filter: .pendingExpense)])
+    }
+
+    func openInbox(filter: NativeInboxFilter) {
+        presentedOverlay = .inbox
+        inboxPath = NavigationPath([NativeInboxRoute.category(filter: filter)])
+    }
+
+    func handleDeepLink(_ url: URL) {
+        guard url.scheme == "jiezi" else { return }
+        shouldDeferOnboardingForExternalRoute = true
+        isOnboardingPresented = false
+
+        switch url.host {
+        case "inbox":
+            presentedOverlay = .inbox
+        case "records", "record":
+            presentedOverlay = .records
+        case "settings":
+            presentedOverlay = .settings
+        default:
+            presentedOverlay = .none
+        }
+
+        guard isSignedIn else { return }
+        Task {
+            await refreshDashboard()
+        }
+    }
+
+    func handleShortcutNotificationRoute(_ route: String?) {
+        shouldDeferOnboardingForExternalRoute = true
+        isOnboardingPresented = false
+        let parts = (route ?? "")
+            .split(separator: "/")
+            .map(String.init)
+        let target = parts.first
+        let detailPath = parts.dropFirst().joined(separator: "/")
+
+        switch target {
+        case "inbox":
+            presentedOverlay = .inbox
+            if !detailPath.isEmpty {
+                inboxPath = NavigationPath([NativeInboxRoute.staging(recordId: detailPath)])
+            }
+        case "records":
+            presentedOverlay = .records
+            if !detailPath.isEmpty {
+                recordsPath = NavigationPath([NativeRecordRoute(reference: detailPath)])
+            }
+        case "settings":
+            presentedOverlay = .settings
+        default:
+            presentedOverlay = .none
+        }
+
+        guard isSignedIn else { return }
+        Task {
+            await refreshDashboard()
+        }
+    }
+
+    @discardableResult
+    func discardStagingRecord(
+        _ record: NativeStagingRecord,
+        preserveInboxNavigation: Bool = false
+    ) async -> Bool {
+        guard inboxActionRecordId == nil else { return false }
+        if let localID = LocalStagingReadModel.localID(from: record.id) {
+            return await discardLocalStagingRecord(
+                localID,
+                record: record,
+                preserveInboxNavigation: preserveInboxNavigation
+            )
+        }
+        inboxActionRecordId = record.id
+        inboxActionMessage = "正在销毁截图…"
+        inboxActionMessageIsError = false
+        defer { inboxActionRecordId = nil }
+        let result = await resolvedStagingLifecycleUseCase().perform(.discard(recordId: record.id))
+        switch result.transaction {
+        case .accepted:
+            if !preserveInboxNavigation { inboxPath = NavigationPath() }
+            inboxActionMessage = result.refresh.failureMessage.map {
+                "已销毁这条待处理截图，原图将在后台安全清理；刷新失败：\($0)"
+            } ?? "已销毁这条待处理截图，原图将在后台安全清理"
+            return true
+        case .rejected(.unauthenticated):
+            inboxActionMessage = "登录状态已失效，请重新登录"
+        case .rejected(.invalidInput):
+            inboxActionMessage = "待处理截图无效"
+        case .conflict:
+            inboxActionMessage = "这条待处理截图正在执行其他操作"
+        case .failed(let message):
+            inboxActionMessage = "销毁失败：\(message)"
+        case .stale:
+            return false
+        }
+        inboxActionMessageIsError = true
+        return false
+    }
+
+    @discardableResult
+    func retryStagingRecord(
+        _ record: NativeStagingRecord,
+        preserveInboxNavigation: Bool = false
+    ) async -> Bool {
+        guard inboxActionRecordId == nil else { return false }
+        if LocalStagingReadModel.localID(from: record.id) != nil {
+            inboxActionMessage = "本地候选需重新发起识别"
+            inboxActionMessageIsError = true
+            return false
+        }
+        inboxActionRecordId = record.id
+        inboxActionMessage = "正在重新识别…"
+        inboxActionMessageIsError = false
+        defer { inboxActionRecordId = nil }
+        let result = await resolvedStagingLifecycleUseCase().perform(.retry(recordId: record.id))
+        switch result.transaction {
+        case .accepted(let accepted):
+            let remainsInInbox = dashboard.stagingRecords.contains { $0.id == record.id }
+            if !remainsInInbox, !preserveInboxNavigation {
+                inboxPath = NavigationPath()
+            }
+            let actionMessage = remainsInInbox
+                ? "重新识别完成，仍需确认或选择归档域"
+                : "重新识别成功，记录已自动归档"
+            inboxActionMessage = accepted.route?.hasPrefix("inbox") == true
+                ? "重新识别完成，仍需确认或选择归档域"
+                : actionMessage
+            if case .failed(let message) = result.refresh {
+                inboxActionMessage = "\(inboxActionMessage ?? actionMessage)；刷新失败：\(message)"
+            }
+            return true
+        case .rejected(.unauthenticated):
+            inboxActionMessage = "登录状态已失效，请重新登录"
+        case .rejected(.invalidInput):
+            inboxActionMessage = "待处理截图无效"
+        case .conflict:
+            inboxActionMessage = "这条待处理截图正在执行其他操作"
+        case .failed(let message):
+            inboxActionMessage = "重新识别失败：\(message)"
+        case .stale:
+            return false
+        }
+        inboxActionMessageIsError = true
+        return false
+    }
+
+    @discardableResult
+    func archiveStagingRecord(
+        _ record: NativeStagingRecord,
+        domainKey: String,
+        preserveInboxNavigation: Bool = false
+    ) async -> String? {
+        guard inboxActionRecordId == nil else { return nil }
+        if let localID = LocalStagingReadModel.localID(from: record.id) {
+            return await archiveLocalStagingRecord(
+                localID,
+                record: record,
+                preserveInboxNavigation: preserveInboxNavigation
+            )
+        }
+        inboxActionRecordId = record.id
+        let domainTitle = dashboard.domains.first(where: { $0.id == domainKey })?.shortName
+            ?? InboxArchiveDomains.all.first(where: { $0.id == domainKey })?.title
+            ?? domainKey
+        inboxActionMessage = "正在归档到\(domainTitle)…"
+        inboxActionMessageIsError = false
+        defer { inboxActionRecordId = nil }
+        let result = await resolvedStagingLifecycleUseCase().perform(
+            .archive(record: record, domainKey: domainKey)
+        )
+        switch result.transaction {
+        case .accepted(let accepted):
+            if !preserveInboxNavigation { inboxPath = NavigationPath() }
+            inboxActionMessage = result.refresh.failureMessage.map {
+                "已归档到\(domainTitle)；刷新失败：\($0)"
+            } ?? "已归档到\(domainTitle)"
+            return accepted.targetReference
+        case .rejected(.unauthenticated):
+            inboxActionMessage = "登录状态已失效，请重新登录"
+        case .rejected(.invalidInput):
+            inboxActionMessage = "待处理截图或归档域无效"
+        case .conflict:
+            inboxActionMessage = "这条待处理截图正在执行其他操作"
+        case .failed(let message):
+            inboxActionMessage = "归档失败：\(message)"
+        case .stale:
+            return nil
+        }
+        inboxActionMessageIsError = true
+        return nil
+    }
+
+    @discardableResult
+    func archiveStagingRecord(
+        _ record: NativeStagingRecord,
+        draft: NativeManualRecordDraft,
+        domain: NativeDomainDefinition?,
+        preserveInboxNavigation: Bool = false
+    ) async -> String? {
+        let adjustedRecord = record.applyingArchiveDraft(draft, domain: domain)
+        if let localID = LocalStagingReadModel.localID(from: record.id) {
+            guard inboxActionRecordId == nil else { return nil }
+            let changes = LocalStagingConfirmation(
+                domainKey: draft.domainKey, title: draft.resolvedTitle(domain: domain),
+                summary: draft.resolvedSummary(domain: domain), payload: draft.universalPayload(domain: domain),
+                recordDate: draft.dateKey, recordTime: draft.timeKey,
+                note: draft.note.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : draft.note
+            )
+            return await archiveLocalStagingRecord(
+                localID, record: adjustedRecord, preserveInboxNavigation: preserveInboxNavigation, changes: changes
+            )
+        }
+        return await archiveStagingRecord(
+            adjustedRecord,
+            domainKey: draft.domainKey,
+            preserveInboxNavigation: preserveInboxNavigation
+        )
+    }
+
+    private func discardLocalStagingRecord(
+        _ localID: String,
+        record: NativeStagingRecord,
+        preserveInboxNavigation: Bool
+    ) async -> Bool {
+        guard let localRecordUseCase else { return false }
+        inboxActionRecordId = record.id
+        inboxActionMessage = "正在销毁本地候选…"
+        inboxActionMessageIsError = false
+        defer { inboxActionRecordId = nil }
+        do {
+            try await localRecordUseCase.discardStaging(id: localID)
+            removeStagingRecordLocally(record.id)
+            if !preserveInboxNavigation { inboxPath = NavigationPath() }
+            inboxActionMessage = "已销毁本地候选，原图已清理"
+            return true
+        } catch {
+            inboxActionMessage = "销毁失败：\(error.localizedDescription)"
+            inboxActionMessageIsError = true
+            return false
+        }
+    }
+
+    private func archiveLocalStagingRecord(
+        _ localID: String,
+        record: NativeStagingRecord,
+        preserveInboxNavigation: Bool,
+        changes: LocalStagingConfirmation? = nil
+    ) async -> String? {
+        guard let localRecordUseCase else { return nil }
+        inboxActionRecordId = record.id
+        inboxActionMessage = "正在归档本地候选…"
+        inboxActionMessageIsError = false
+        defer { inboxActionRecordId = nil }
+        do {
+            let outcome = try await localRecordUseCase.confirmStaging(
+                id: localID,
+                recordID: UUID(),
+                changes: changes
+            )
+            removeStagingRecordLocally(record.id)
+            let monthKey = String(outcome.record.recordDate.prefix(7))
+            await refreshLocalMonthProjection(monthKey: monthKey)
+            if !preserveInboxNavigation { inboxPath = NavigationPath() }
+            inboxActionMessage = "已归档到\(record.domainName ?? "本地记录")"
+            return "local-data/\(outcome.record.id.uuidString)"
+        } catch {
+            inboxActionMessage = "归档失败：\(error.localizedDescription)"
+            inboxActionMessageIsError = true
+            return nil
+        }
+    }
+
+    private func removeStagingRecordLocally(_ recordId: String) {
+        stagingReadVersion += 1
+        dashboard.stagingRecords.removeAll { $0.id == recordId }
+        dashboard.pendingCount = dashboard.pendingExpenses.count + dashboard.stagingRecords.count
+    }
+
+    private func resolvedStagingLifecycleUseCase() -> StagingLifecycleUseCase {
+        if let stagingLifecycleUseCase { return stagingLifecycleUseCase }
+        let useCase = StagingLifecycleUseCase(
+            repository: inboxRepository,
+            sessionProvider: { [weak self] forceRefresh in
+                guard let self else { throw SupabaseRemoteError.requestFailed("会话已失效") }
+                return try await self.validSession(forceRefresh: forceRefresh)
+            },
+            contextProvider: { [weak self] in
+                guard let self else {
+                    return StagingLifecycleUserContext(userId: "", generation: -1, isSignedIn: false)
+                }
+                return StagingLifecycleUserContext(
+                    userId: self.currentUserId,
+                    generation: self.userStateGeneration,
+                    isSignedIn: self.isSignedIn
+                )
+            },
+            applyAccepted: { [weak self] accepted in
+                guard let self else { return }
+                if accepted.action == .discard || accepted.action == .archive {
+                    self.removeStagingRecordLocally(accepted.recordId)
+                }
+            },
+            refresh: { [weak self] in
+                guard let self else { return }
+                await self.refreshAfterRecordWrite()
+                if let message = self.dashboardMessage, !message.isEmpty {
+                    throw WalletSnapshotReadModelRefreshError(message: message)
+                }
+            }
+        )
+        stagingLifecycleUseCase = useCase
+        return useCase
+    }
+
+    private func resolvedPendingConfirmationUseCase() -> PendingConfirmationUseCase {
+        if let pendingConfirmationUseCase { return pendingConfirmationUseCase }
+        let useCase = PendingConfirmationUseCase(
+            repository: inboxRepository,
+            sessionProvider: { [weak self] forceRefresh in
+                guard let self else { throw SupabaseRemoteError.requestFailed("会话已失效") }
+                return try await self.validSession(forceRefresh: forceRefresh)
+            },
+            contextProvider: { [weak self] in
+                guard let self else {
+                    return PendingConfirmationUserContext(userId: "", generation: -1, isSignedIn: false)
+                }
+                return PendingConfirmationUserContext(
+                    userId: self.currentUserId,
+                    generation: self.userStateGeneration,
+                    isSignedIn: self.isSignedIn
+                )
+            },
+            applyAccepted: { [weak self] accepted in
+                self?.invalidateRecordExpressionPlanState(
+                    afterChanging: ["expense/\(accepted.pendingId)", accepted.recordReference]
+                )
+            },
+            refresh: { [weak self] in
+                guard let self else { return }
+                await self.loadAccounts()
+                if let message = self.accountMessage, !message.isEmpty {
+                    throw WalletSnapshotReadModelRefreshError(message: message)
+                }
+                await self.refreshAfterRecordWrite()
+                if let message = self.dashboardMessage, !message.isEmpty {
+                    throw WalletSnapshotReadModelRefreshError(message: message)
+                }
+            }
+        )
+        pendingConfirmationUseCase = useCase
+        return useCase
+    }
+
+    func resolveStagingImageURL(for record: NativeStagingRecord) async throws -> URL {
+        guard let imagePath = record.imagePath, !imagePath.isEmpty else {
+            throw SupabaseRemoteError.requestFailed("这条记录没有可查看的截图")
+        }
+        let session = try await validSession()
+        return try await inboxRepository.resolveImageURL(path: imagePath, accessToken: session.accessToken)
+    }
+
+    private func loadRemoteRecordDetail(
+        reference canonicalReference: String,
+        force: Bool,
+        generation: Int
+    ) async {
+        if !force, let cached = recordDetailCache[canonicalReference] {
+            selectedRecordDetail = cached
+            if let session = try? await validSession() {
+                hydrateRecordDetailImageIfNeeded(cached, reference: canonicalReference, session: session, generation: generation)
+                await prepareRecordExpressionPlan(
+                    for: cached,
+                    canonicalReference: canonicalReference,
+                    session: session,
+                    generation: generation
+                )
+            }
+            return
+        }
+        if selectedRecordDetail.map({ !NativeRecordReference($0.id).matchesReference(canonicalReference) }) ?? true {
+            selectedRecordDetail = nil
+        }
+        do {
+            let session = try await validSession()
+            let detail = try await recordRepository.fetchDetail(reference: canonicalReference, accessToken: session.accessToken)
+            guard generation == userStateGeneration,
+                  isSignedIn,
+                  currentUserId == session.user.id else { return }
+            let mergedDetail = detailPreservingExpressionFeedback(detail)
+            recordDetailCache[canonicalReference] = mergedDetail
+            guard activeRecordReference == canonicalReference else { return }
+            selectedRecordDetail = mergedDetail
+            hydrateRecordDetailImageIfNeeded(mergedDetail, reference: canonicalReference, session: session, generation: generation)
+            await prepareRecordExpressionPlan(
+                for: mergedDetail,
+                canonicalReference: canonicalReference,
+                session: session,
+                generation: generation
+            )
+        } catch {
+            if activeRecordReference == canonicalReference {
+                recordDetailMessage = error.localizedDescription
+            }
+        }
+    }
+
+    func loadRecordDetail(reference: String, force: Bool = false) async {
+        let parsedReference = NativeRecordReference(reference)
+        let canonicalReference = parsedReference.canonicalValue
+        let generation = userStateGeneration
+        if let previousReference = activeRecordReference,
+           previousReference != canonicalReference {
+            deactivateRecordDetail(reference: previousReference)
+        }
+        activeRecordReference = canonicalReference
+        recordDetailMessage = nil
+        if parsedReference.kind == "expense", let repository = localPendingFinancialRepository, let imageStore = localImageStore,
+           let profile = try? await localExpenseUseCase?.prepareProfile(),
+           let id = UUID(uuidString: parsedReference.rawId),
+           let detail = try? repository.nativeDetail(profileID: profile.id, id: id, imageStore: imageStore) {
+            let resolved = await localExpressionDetail(detail, generation: generation)
+            selectedRecordDetail = resolved
+            return
+        }
+        if selectedRecordDetail.map({ !NativeRecordReference($0.id).matchesReference(canonicalReference) }) ?? true {
+            recordFeedbackState = .idle
+            recordExpressionPlanExposureState = .idle
+        }
+        if parsedReference.kind == "local-expense"
+            || (parsedReference.kind == "expense" && isKnownLocalFactReference(reference)) {
+            await loadLocalExpenseDetail(reference: reference, force: force, generation: generation)
+            return
+        }
+        if parsedReference.kind == "local-income" {
+            await loadLocalIncomeDetail(reference: reference, force: force, generation: generation)
+            return
+        }
+        if parsedReference.kind == "local-data"
+            || (parsedReference.kind == "data" && isKnownLocalFactReference(reference)) {
+            await loadLocalDomainDetail(reference: reference, force: force, generation: generation)
+            return
+        }
+        if parsedReference.kind == "data", await hasLocalDomainRecord(reference: reference) {
+            await loadLocalDomainDetail(reference: reference, force: force, generation: generation)
+            return
+        }
+        if parsedReference.kind == "expense", await hasLocalExpense(reference: reference) {
+            await loadLocalExpenseDetail(reference: reference, force: force, generation: generation)
+            return
+        }
+        if parsedReference.kind == "income", await hasLocalIncome(reference: reference) {
+            await loadLocalIncomeDetail(reference: reference, force: force, generation: generation)
+            return
+        }
+        guard mayReadRemoteBusinessData else {
+            selectedRecordDetail = nil
+            recordDetailMessage = "本机没有这条记录，未授权的云端读取已停止。"
+            return
+        }
+        await loadRemoteRecordDetail(reference: canonicalReference, force: force, generation: generation)
+    }
+
+    private func hasLocalDomainRecord(reference: String) async -> Bool {
+        guard let localRecordUseCase,
+              let id = UUID(uuidString: NativeRecordReference(reference).rawId) else {
+            return false
+        }
+        do {
+            return try await localRecordUseCase.record(id: id) != nil
+        } catch {
+            return false
+        }
+    }
+
+    private func hasLocalExpense(reference: String) async -> Bool {
+        guard let localExpenseUseCase,
+              let id = UUID(uuidString: NativeRecordReference(reference).rawId) else {
+            return false
+        }
+        do {
+            return try await localExpenseUseCase.expense(id: id) != nil
+        } catch {
+            return false
+        }
+    }
+
+    private func hasLocalIncome(reference: String) async -> Bool {
+        guard let localExpenseUseCase,
+              let id = UUID(uuidString: NativeRecordReference(reference).rawId) else { return false }
+        return (try? await localExpenseUseCase.income(id: id)) != nil
+    }
+
+    private func isLocalIncomeReference(_ reference: String) -> Bool {
+        let parsed = NativeRecordReference(reference)
+        return parsed.kind == "local-income"
+            || (parsed.kind == "income" && isKnownLocalFactReference(reference))
+    }
+
+    private func isLocalExpenseReference(_ reference: String) -> Bool {
+        let parsed = NativeRecordReference(reference)
+        return parsed.kind == "local-expense"
+            || (parsed.kind == "expense" && isKnownLocalFactReference(reference))
+    }
+
+    private func loadLocalIncomeDetail(reference: String, force: Bool, generation: Int) async {
+        guard let localExpenseUseCase,
+              let id = UUID(uuidString: NativeRecordReference(reference).rawId) else {
+            recordDetailMessage = "本地收入记录不可用"
+            return
+        }
+        let canonicalReference = NativeRecordReference(reference).canonicalValue
+        if !force, let cached = recordDetailCache[canonicalReference] {
+            selectedRecordDetail = cached
+            return
+        }
+        do {
+            guard let income = try await localExpenseUseCase.income(id: id) else { throw LocalDataError.recordNotFound }
+            guard generation == userStateGeneration, activeRecordReference == canonicalReference else { return }
+            var detail = LocalIncomeReadModel.detail(from: income, imageStore: localImageStore)
+            if let path = income.imagePath { detail.imageURL = localImageStore?.url(for: path) }
+            detail = await localExpressionDetail(detail, generation: generation)
+            recordDetailCache[canonicalReference] = detail
+            selectedRecordDetail = detail
+        } catch {
+            if activeRecordReference == canonicalReference { recordDetailMessage = error.localizedDescription }
+        }
+    }
+
+    private func isLocalDomainReference(_ reference: String) -> Bool {
+        let parsed = NativeRecordReference(reference)
+        return parsed.kind == "local-data"
+            || (parsed.kind == "data" && isKnownLocalFactReference(reference))
+    }
+
+    private func isKnownLocalFactReference(_ reference: String) -> Bool {
+        let canonical = NativeRecordReference(reference).canonicalValue
+        if localRecordMonthDetails.values.contains(where: { details in
+            details.keys.contains { NativeRecordReference($0).canonicalValue == canonical }
+        }) {
+            return true
+        }
+        return localFactMonths.values.contains { month in
+            month.facts.contains { NativeRecordReference($0.reference).canonicalValue == canonical }
+        }
+    }
+
+    private func loadLocalExpenseDetail(
+        reference: String,
+        force: Bool,
+        generation: Int
+    ) async {
+        guard let localExpenseUseCase else {
+            recordDetailMessage = "本地数据不可用"
+            return
+        }
+        let resolved = NativeRecordReference(reference)
+        guard let id = UUID(uuidString: resolved.rawId) else {
+            recordDetailMessage = "本地记录标识无效"
+            return
+        }
+        let canonicalReference = resolved.canonicalValue
+        if !force, let cached = recordDetailCache[canonicalReference] {
+            selectedRecordDetail = cached
+            return
+        }
+        if selectedRecordDetail.map({ !NativeRecordReference($0.id).matchesReference(canonicalReference) }) ?? true {
+            selectedRecordDetail = nil
+        }
+        do {
+            guard let expense = try await localExpenseUseCase.expense(id: id) else {
+                throw LocalDataError.recordNotFound
+            }
+            guard generation == userStateGeneration,
+                  activeRecordReference == canonicalReference else { return }
+            var detail = LocalExpenseReadModel.detail(from: expense, imageStore: localImageStore)
+            if let path = expense.imagePath { detail.imageURL = localImageStore?.url(for: path) }
+            detail = await localExpressionDetail(detail, generation: generation)
+            recordDetailCache[canonicalReference] = detail
+            selectedRecordDetail = detail
+        } catch {
+            if activeRecordReference == canonicalReference {
+                recordDetailMessage = error.localizedDescription
+            }
+        }
+    }
+
+    private func loadLocalDomainDetail(
+        reference: String,
+        force: Bool,
+        generation: Int
+    ) async {
+        guard let localRecordUseCase else {
+            recordDetailMessage = "本地数据不可用"
+            return
+        }
+        let resolved = NativeRecordReference(reference)
+        guard let id = UUID(uuidString: resolved.rawId) else {
+            recordDetailMessage = "本地记录标识无效"
+            return
+        }
+        let canonicalReference = resolved.canonicalValue
+        if !force, let cached = recordDetailCache[canonicalReference] {
+            selectedRecordDetail = cached
+            return
+        }
+        if selectedRecordDetail.map({ !NativeRecordReference($0.id).matchesReference(canonicalReference) }) ?? true {
+            selectedRecordDetail = nil
+        }
+        do {
+            guard let record = try await localRecordUseCase.record(id: id) else {
+                throw LocalDataError.recordNotFound
+            }
+            guard generation == userStateGeneration,
+                  activeRecordReference == canonicalReference else { return }
+            var detail = LocalRecordReadModel.detail(from: record, imageStore: localImageStore)
+            detail = await localExpressionDetail(detail, generation: generation)
+            recordDetailCache[canonicalReference] = detail
+            selectedRecordDetail = detail
+        } catch {
+            if activeRecordReference == canonicalReference {
+                recordDetailMessage = error.localizedDescription
+            }
+        }
+    }
+
+    private func localExpressionDetail(
+        _ detail: NativeRecordDetail,
+        generation: Int
+    ) async -> NativeRecordDetail {
+        guard userSettings.companionEnabled,
+              let localExpressionPersistence,
+              let profile = try? await localExpenseUseCase?.prepareProfile(),
+              generation == userStateGeneration else { return detail }
+        // Use the same composition context as Hosted/BYOK. This keeps the
+        // detail preview on the cross-record path instead of rebuilding a
+        // current-fact-only candidate.
+        guard let context = localExpressionPersistence.makeCompositionContext(
+            for: detail,
+            profileID: profile.id,
+            settings: userSettings,
+            providerMode: .deterministic
+        ) else { return detail }
+        guard let generatedPlannerFeedback = LocalPlannerCandidateEngine.selectedCandidate(
+            for: context.currentFact,
+            recentFacts: context.recentFacts,
+            memoryContextJSON: context.memoryContextJSON
+        ) else { return detail }
+        let persistedPlannerFeedback = detail.expressionPlannerAiFeedback
+        let plannerFeedback = persistedPlannerFeedback?.claimFingerprint == generatedPlannerFeedback.claimFingerprint
+            ? (persistedPlannerFeedback ?? generatedPlannerFeedback)
+            : generatedPlannerFeedback
+        var resolved = detail
+        resolved.legacyAiFeedback = detail.voiceAiFeedback
+        resolved.plannerAiFeedback = plannerFeedback
+        resolved.aiFeedback = NativeRecordExpressionFeedbackPolicy.plannerFeedbackToDisplayWithoutReplacingVoice(
+            existingVoice: detail.voiceAiFeedback,
+            plannerPreview: plannerFeedback,
+            companionMessage: detail.companionMessage
+        )
+        return resolved
+    }
+
+    /// Provider composition is deliberately detached from the fact write. A
+    /// provider failure leaves the local fact and deterministic Planner intact.
+    private func scheduleLocalCompanion(for detail: NativeRecordDetail) {
+        guard userSettings.companionEnabled,
+              localExpressionPersistence != nil,
+              localVisionModeStore.mode != .disabled else { return }
+        let generation = userStateGeneration
+        Task { @MainActor [weak self] in
+            guard let self,
+                  self.userStateGeneration == generation,
+                  self.userSettings.companionEnabled,
+                  let profile = try? await self.localExpenseUseCase?.prepareProfile() else { return }
+            let mode = self.localVisionModeStore.mode
+            let provider: LocalCompanionProvider
+            switch mode {
+            case .hosted:
+                guard let session = try? await self.validSession() else { return }
+                provider = HostedAICompanionProvider(accessToken: session.accessToken)
+            case .byok:
+                guard let apiKey = try? self.keychain.string(for: KeychainKeys.byokQwenAPIKey),
+                      !apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+                provider = QwenBYOKCompanionProvider(apiKey: apiKey)
+            case .disabled:
+                return
+            }
+            guard let context = self.localExpressionPersistence?.makeCompositionContext(
+                for: detail,
+                profileID: profile.id,
+                settings: self.userSettings,
+                providerMode: mode == .hosted ? .hosted : .byok
+            ) else { return }
+            guard let result = try? await provider.compose(context: context) else { return }
+            guard self.userStateGeneration == generation else { return }
+            self.localExpressionPersistence?.persist(companion: result, for: detail)
+            self.recordDetailCache.removeValue(forKey: NativeRecordReference(detail.id).canonicalValue)
+            await self.loadRecordDetail(reference: detail.id, force: true)
+        }
+    }
+
+    private func hydrateRecordDetailImageIfNeeded(
+        _ detail: NativeRecordDetail,
+        reference: String,
+        session: SupabaseAuthSession?,
+        generation: Int
+    ) {
+        guard detail.imagePath != nil, detail.imageURL == nil, let session else { return }
+        Task { [weak self] in
+            guard let self else { return }
+            let useCase = self.resolvedRecordDetailImageUseCase()
+            let result = await useCase.perform(detail, reference: reference)
+            switch result.transaction {
+            case .hydrated:
+                guard let hydrated = result.detail else { return }
+                let mergedDetail = self.detailPreservingExpressionFeedback(hydrated)
+                self.recordDetailCache[reference] = mergedDetail
+                if self.selectedRecordDetail?.id == hydrated.id {
+                    self.selectedRecordDetail = mergedDetail
+                }
+            case .failed:
+                var failedDetail = detail
+                failedDetail.imageLoadError = true
+                let mergedDetail = self.detailPreservingExpressionFeedback(failedDetail)
+                guard self.userStateGeneration == generation,
+                      self.activeRecordReference == reference,
+                      self.isSignedIn,
+                      self.currentUserId == session.user.id else { return }
+                self.recordDetailCache[reference] = mergedDetail
+                if self.selectedRecordDetail?.id == detail.id {
+                    self.selectedRecordDetail = mergedDetail
+                }
+            case .notNeeded, .stale:
+                return
+            }
+        }
+    }
+
+    private func resolvedRecordDetailImageUseCase() -> RecordDetailImageUseCase {
+        if let recordDetailImageUseCase { return recordDetailImageUseCase }
+        let useCase = RecordDetailImageUseCase(
+            repository: recordRepository,
+            sessionProvider: { [weak self] forceRefresh in
+                guard let self else {
+                    throw SupabaseRemoteError.requestFailed("app_state_unavailable")
+                }
+                return try await self.validSession(forceRefresh: forceRefresh)
+            },
+            contextProvider: { [weak self] in
+                guard let self else {
+                    return RecordDetailImageUserContext(userId: "", generation: -1, isSignedIn: false)
+                }
+                return RecordDetailImageUserContext(
+                    userId: self.currentUserId,
+                    generation: self.userStateGeneration,
+                    isSignedIn: self.isSignedIn,
+                    activeRecordReference: self.activeRecordReference
+                )
+            }
+        )
+        recordDetailImageUseCase = useCase
+        return useCase
+    }
+
+    func thumbnailImageURL(for record: NativeDayRecord, force: Bool = false) async -> URL? {
+        let generation = userStateGeneration
+        let reference = NativeRecordReference(record.reference).canonicalValue
+        let month = String(record.dateKey.prefix(7))
+        func isListed() -> Bool {
+            recordGroups(monthKey: month).flatMap(\.records).contains {
+                NativeRecordReference($0.reference).canonicalValue == reference
+            }
+        }
+        func currentDetail() -> NativeRecordDetail? {
+            let values = recordDetails(from: record.dateKey, through: record.dateKey)
+            return values[reference] ?? values[record.reference]
+        }
+        guard isListed() else { return nil }
+        if isLocalDomainReference(record.reference) {
+            if force { await refreshLocalMonthProjection(monthKey: month) }
+            guard generation == userStateGeneration, isListed() else { return nil }
+            return currentDetail()?.imageURL
+        }
+        guard var detail = currentDetail() else { return nil }
+        if !force, let url = detail.imageURL { return url }
+        if force { detail.imageURL = nil }
+        if thumbnailImageUseCase == nil {
+            thumbnailImageUseCase = RecordDetailImageUseCase(
+                repository: recordRepository,
+                sessionProvider: { [weak self] forceRefresh in
+                    guard let self else { throw SupabaseRemoteError.requestFailed("app_state_unavailable") }
+                    return try await self.validSession(forceRefresh: forceRefresh)
+                },
+                contextProvider: { [weak self] in
+                    RecordDetailImageUserContext(userId: self?.currentUserId ?? "", generation: self?.userStateGeneration ?? -1,
+                                                 isSignedIn: self?.isSignedIn ?? false)
+                }
+            )
+        }
+        guard let useCase = thumbnailImageUseCase else { return nil }
+        let result = await useCase.perform(detail, reference: reference)
+        guard generation == userStateGeneration, isListed(), currentDetail()?.imagePath == detail.imagePath else { return nil }
+        return result.detail?.imageURL
+    }
+
+    private func prepareRecordExpressionPlan(
+        for detail: NativeRecordDetail,
+        canonicalReference: String,
+        session: SupabaseAuthSession,
+        generation: Int
+    ) async {
+        var currentDetail = detail
+        if let pending = pendingRecordExpressionPlans[canonicalReference],
+           pending.plan.feedback.isCompanionMessageDelivery,
+           !pending.plan.feedback.matchesVisibleCompanionMessage(detail.companionMessage) {
+            discardPendingExpressionPlan(pending, canonicalReference: canonicalReference)
+            if currentDetail.aiFeedback == pending.plan.feedback {
+                currentDetail.aiFeedback = pending.previousFeedback
+                currentDetail.plannerAiFeedback = nil
+            }
+        }
+        var baseDetail = detailPreservingExpressionFeedback(currentDetail)
+        let selectedFeedback = selectedRecordDetail.flatMap { selected -> NativeAIFeedback? in
+            NativeRecordReference(selected.id).canonicalValue == canonicalReference
+                ? selected.aiFeedback
+                : nil
+        }
+        baseDetail.aiFeedback = NativeRecordExpressionFeedbackPolicy.feedbackToPreserve(
+            existing: [
+                baseDetail.aiFeedback,
+                recordDetailCache[canonicalReference]?.aiFeedback,
+                selectedFeedback
+            ],
+            pending: nil
+        )
+        guard !NativeRecordExpressionFeedbackPolicy.hasAcknowledgedPlannerFeedback([
+            baseDetail.aiFeedback,
+            recordDetailCache[canonicalReference]?.aiFeedback,
+            selectedFeedback
+        ]) else {
+            publishResolvedRecordDetail(baseDetail, canonicalReference: canonicalReference)
+            return
+        }
+
+        if let pending = pendingRecordExpressionPlans[canonicalReference],
+           pending.userId == session.user.id,
+           pending.generation == generation {
+            let selected = NativeRecordExpressionFeedbackPolicy.plannerFeedbackToDisplayWithoutReplacingVoice(
+                existingVoice: baseDetail.voiceAiFeedback,
+                plannerPreview: pending.plan.feedback,
+                companionMessage: baseDetail.companionMessage
+            )
+            let plannerIsIndependentCard = pending.plan.feedback.presentationTarget == "feedback_card"
+            if !plannerIsIndependentCard, selected != pending.plan.feedback {
+                discardPendingExpressionPlan(pending, canonicalReference: canonicalReference)
+                baseDetail.aiFeedback = selected
+                publishResolvedRecordDetail(baseDetail, canonicalReference: canonicalReference)
+            } else {
+                baseDetail.aiFeedback = selected
+                baseDetail.plannerAiFeedback = pending.plan.feedback
+                publishResolvedRecordDetail(baseDetail, canonicalReference: canonicalReference)
+            }
+            return
+        }
+        guard expressionPlanDeliveryTokens[canonicalReference] == nil else { return }
+        let deliveryToken = UUID()
+        expressionPlanDeliveryTokens[canonicalReference] = deliveryToken
+        defer {
+            if expressionPlanDeliveryTokens[canonicalReference] == deliveryToken {
+                expressionPlanDeliveryTokens.removeValue(forKey: canonicalReference)
+            }
+        }
+
+        guard let preview = await NativeRecordExpressionPlanRetryPolicy.resolve(
+            fetch: {
+                try await self.recordRepository.getRecordExpressionPlan(
+                    reference: detail.id,
+                    accessToken: session.accessToken
+                )
+            },
+            shouldContinue: {
+                self.expressionPlanDeliveryTokens[canonicalReference] == deliveryToken
+                    && self.isCurrentExpressionPlanDelivery(
+                    canonicalReference: canonicalReference,
+                    session: session,
+                    generation: generation
+                )
+            }
+        ) else {
+            if isCurrentExpressionPlanDelivery(
+                canonicalReference: canonicalReference,
+                session: session,
+                generation: generation
+            ) {
+                publishResolvedRecordDetail(baseDetail, canonicalReference: canonicalReference)
+            }
+            return
+        }
+
+        guard !Task.isCancelled,
+              expressionPlanDeliveryTokens[canonicalReference] == deliveryToken,
+              generation == userStateGeneration,
+              isSignedIn,
+              currentUserId == session.user.id,
+              activeRecordReference == canonicalReference else { return }
+
+        guard !NativeRecordExpressionFeedbackPolicy.hasAcknowledgedPlannerFeedback([
+            baseDetail.aiFeedback,
+            recordDetailCache[canonicalReference]?.aiFeedback
+        ]) else {
+            publishResolvedRecordDetail(baseDetail, canonicalReference: canonicalReference)
+            return
+        }
+
+        let previousFeedback = NativeRecordExpressionFeedbackPolicy.feedbackToPreserve(
+            existing: [
+                baseDetail.aiFeedback,
+                recordDetailCache[canonicalReference]?.aiFeedback
+            ],
+            pending: nil
+        )
+        let selected = NativeRecordExpressionFeedbackPolicy.plannerFeedbackToDisplayWithoutReplacingVoice(
+            existingVoice: baseDetail.voiceAiFeedback ?? previousFeedback,
+            plannerPreview: preview.feedback,
+            companionMessage: baseDetail.companionMessage
+        )
+        baseDetail.aiFeedback = selected
+        let plannerIsIndependentCard = preview.feedback.presentationTarget == "feedback_card"
+        if selected == preview.feedback || plannerIsIndependentCard {
+            baseDetail.plannerAiFeedback = preview.feedback
+        }
+        guard selected == preview.feedback || plannerIsIndependentCard else {
+            publishResolvedRecordDetail(baseDetail, canonicalReference: canonicalReference)
+            recordExpressionPlanExposureState = .idle
+            return
+        }
+
+        pendingRecordExpressionPlans[canonicalReference] = PendingRecordExpressionPlanDelivery(
+            id: UUID(),
+            recordId: detail.rawId,
+            plan: preview,
+            previousFeedback: previousFeedback,
+            userId: session.user.id,
+            generation: generation
+        )
+        publishResolvedRecordDetail(baseDetail, canonicalReference: canonicalReference)
+        recordFeedbackState = .idle
+        recordExpressionPlanExposureState = .idle
+    }
+
+    private func publishResolvedRecordDetail(
+        _ detail: NativeRecordDetail,
+        canonicalReference: String
+    ) {
+        let synchronized = synchronizeAIFeedbackSlots(detail)
+        recordDetailCache[canonicalReference] = synchronized
+        guard activeRecordReference == canonicalReference else { return }
+        selectedRecordDetail = synchronized
+    }
+
+    func setRecordExpressionPlanCardVisible(
+        _ isVisible: Bool,
+        reference: String,
+        feedbackIdentity: String? = nil
+    ) {
+        let canonicalReference = NativeRecordReference(reference).canonicalValue
+        let identity = feedbackIdentity ?? selectedRecordDetail.flatMap { detail -> String? in
+            guard NativeRecordReference(detail.id).canonicalValue == canonicalReference else { return nil }
+            return detail.aiFeedback?.renderIdentity
+        }
+        if isVisible {
+            guard let identity else { return }
+            visibleRecordExpressionPlanCards[canonicalReference] = identity
+        } else if feedbackIdentity == nil
+                    || visibleRecordExpressionPlanCards[canonicalReference] == feedbackIdentity {
+            visibleRecordExpressionPlanCards.removeValue(forKey: canonicalReference)
+        }
+    }
+
+    func isRecordExpressionPlanCardVisible(
+        reference: String,
+        feedbackIdentity: String? = nil
+    ) -> Bool {
+        let visibleIdentity = visibleRecordExpressionPlanCards[
+            NativeRecordReference(reference).canonicalValue
+        ]
+        if let feedbackIdentity {
+            return visibleIdentity == feedbackIdentity
+        }
+        return visibleIdentity != nil
+    }
+
+    func acknowledgeRecordExpressionPlanIfVisible(reference: String) async {
+        let canonicalReference = NativeRecordReference(reference).canonicalValue
+        guard let pending = pendingRecordExpressionPlans[canonicalReference] else { return }
+        guard expressionPlanAcknowledgementTokens[canonicalReference] == nil else { return }
+        guard isPendingExpressionPlanActive(
+            pending,
+            canonicalReference: canonicalReference
+        ) else {
+            discardPendingExpressionPlan(pending, canonicalReference: canonicalReference)
+            return
+        }
+        guard !Task.isCancelled,
+              visibleRecordExpressionPlanCards[canonicalReference]
+                == pending.plan.feedback.renderIdentity else { return }
+
+        let acknowledgementToken = UUID()
+        expressionPlanAcknowledgementTokens[canonicalReference] = acknowledgementToken
+        recordExpressionPlanExposureState = .acknowledging
+        defer {
+            if expressionPlanAcknowledgementTokens[canonicalReference] == acknowledgementToken {
+                expressionPlanAcknowledgementTokens.removeValue(forKey: canonicalReference)
+            }
+        }
+
+        let session: SupabaseAuthSession
+        do {
+            session = try await validSession()
+        } catch {
+            handleExpressionPlanAcknowledgementFailure(
+                pending,
+                canonicalReference: canonicalReference
+            )
+            return
+        }
+        guard session.user.id == pending.userId,
+              isPendingExpressionPlanActive(
+                pending,
+                canonicalReference: canonicalReference
+              ) else {
+            discardPendingExpressionPlan(pending, canonicalReference: canonicalReference)
+            return
+        }
+
+        guard let acknowledgedFeedback = await NativeRecordExpressionPlanAcknowledgementRetryPolicy.resolve(
+            acknowledge: {
+                try await self.recordRepository.acknowledgeRecordExpressionPlan(
+                    recordId: pending.recordId,
+                    planToken: pending.plan.planToken,
+                    candidateId: pending.plan.candidateId,
+                    accessToken: session.accessToken
+                )
+            },
+            shouldContinue: {
+                !Task.isCancelled
+                    && self.isPendingExpressionPlanActive(
+                        pending,
+                        canonicalReference: canonicalReference
+                    )
+            },
+            sleep: expressionPlanAcknowledgementSleep
+        ) else {
+            handleExpressionPlanAcknowledgementFailure(
+                pending,
+                canonicalReference: canonicalReference
+            )
+            return
+        }
+
+        guard expressionPlanAcknowledgementTokens[canonicalReference] == acknowledgementToken,
+              isPendingExpressionPlanActive(
+            pending,
+            canonicalReference: canonicalReference
+        ) else { return }
+        guard pending.plan.feedback.hasSameDeliveryIdentity(as: acknowledgedFeedback) else {
+            handleExpressionPlanAcknowledgementFailure(
+                pending,
+                canonicalReference: canonicalReference
+            )
+            return
+        }
+        if pendingRecordExpressionPlans[canonicalReference]?.id == pending.id {
+            pendingRecordExpressionPlans.removeValue(forKey: canonicalReference)
+        }
+        guard var finalDetail = recordDetailCache[canonicalReference] else { return }
+        finalDetail.plannerAiFeedback = acknowledgedFeedback
+        finalDetail.aiFeedback = acknowledgedFeedback.presentationTarget == "feedback_card"
+            ? (finalDetail.voiceAiFeedback ?? acknowledgedFeedback)
+            : acknowledgedFeedback
+        recordDetailCache[canonicalReference] = finalDetail
+        if activeRecordReference == canonicalReference,
+           selectedRecordDetail.map({ NativeRecordReference($0.id).canonicalValue == canonicalReference }) == true {
+            selectedRecordDetail = finalDetail
+            recordFeedbackState = .idle
+            recordExpressionPlanExposureState = .idle
+        }
+    }
+
+    private func restoreUnacknowledgedExpressionPreview(
+        _ previewFeedback: NativeAIFeedback,
+        previousFeedback: NativeAIFeedback?,
+        canonicalReference: String
+    ) {
+        if var cached = recordDetailCache[canonicalReference],
+           cached.aiFeedback == previewFeedback || cached.plannerAiFeedback == previewFeedback {
+            if cached.aiFeedback == previewFeedback {
+                cached.aiFeedback = previousFeedback
+            }
+            if cached.plannerAiFeedback == previewFeedback {
+                cached.plannerAiFeedback = nil
+            }
+            recordDetailCache[canonicalReference] = cached
+        }
+        if activeRecordReference == canonicalReference,
+           var selected = selectedRecordDetail,
+           selected.aiFeedback == previewFeedback || selected.plannerAiFeedback == previewFeedback {
+            if selected.aiFeedback == previewFeedback {
+                selected.aiFeedback = previousFeedback
+            }
+            if selected.plannerAiFeedback == previewFeedback {
+                selected.plannerAiFeedback = nil
+            }
+            selectedRecordDetail = selected
+        }
+    }
+
+    private func isPendingExpressionPlanActive(
+        _ pending: PendingRecordExpressionPlanDelivery,
+        canonicalReference: String
+    ) -> Bool {
+        pendingRecordExpressionPlans[canonicalReference]?.id == pending.id
+            && pending.generation == userStateGeneration
+            && isSignedIn
+            && currentUserId == pending.userId
+            && activeRecordReference == canonicalReference
+            && selectedRecordDetail.map {
+                guard NativeRecordReference($0.id).canonicalValue == canonicalReference else { return false }
+                if pending.plan.feedback.presentationTarget == "feedback_card" {
+                    return $0.plannerAiFeedback == pending.plan.feedback
+                }
+                return $0.aiFeedback == pending.plan.feedback
+            } == true
+    }
+
+    private func handleExpressionPlanAcknowledgementFailure(
+        _ pending: PendingRecordExpressionPlanDelivery,
+        canonicalReference: String
+    ) {
+        guard isPendingExpressionPlanActive(
+            pending,
+            canonicalReference: canonicalReference
+        ) else {
+            discardPendingExpressionPlan(pending, canonicalReference: canonicalReference)
+            return
+        }
+        recordExpressionPlanExposureState = .failed
+    }
+
+    private func discardPendingExpressionPlan(
+        _ pending: PendingRecordExpressionPlanDelivery,
+        canonicalReference: String
+    ) {
+        guard pendingRecordExpressionPlans[canonicalReference]?.id == pending.id else { return }
+        pendingRecordExpressionPlans.removeValue(forKey: canonicalReference)
+        expressionPlanAcknowledgementTokens.removeValue(forKey: canonicalReference)
+        visibleRecordExpressionPlanCards.removeValue(forKey: canonicalReference)
+        restoreUnacknowledgedExpressionPreview(
+            pending.plan.feedback,
+            previousFeedback: pending.previousFeedback,
+            canonicalReference: canonicalReference
+        )
+        if activeRecordReference == canonicalReference {
+            recordExpressionPlanExposureState = .idle
+        }
+    }
+
+    private func isCurrentExpressionPlanDelivery(
+        canonicalReference: String,
+        session: SupabaseAuthSession,
+        generation: Int
+    ) -> Bool {
+        !Task.isCancelled
+            && generation == userStateGeneration
+            && isSignedIn
+            && currentUserId == session.user.id
+            && activeRecordReference == canonicalReference
+    }
+
+    private func detailPreservingExpressionFeedback(
+        _ detail: NativeRecordDetail
+    ) -> NativeRecordDetail {
+        let synchronizedDetail = synchronizeAIFeedbackSlots(detail)
+        let canonicalReference = NativeRecordReference(synchronizedDetail.id).canonicalValue
+        let selectedFeedback = selectedRecordDetail.flatMap { selected -> NativeAIFeedback? in
+            NativeRecordReference(selected.id).canonicalValue == canonicalReference
+                ? selected.aiFeedback
+                : nil
+        }
+        guard let feedback = NativeRecordExpressionFeedbackPolicy.feedbackToPreserve(
+            existing: [selectedFeedback, recordDetailCache[canonicalReference]?.aiFeedback],
+            pending: pendingRecordExpressionPlans[canonicalReference]?.plan.feedback,
+            companionMessage: synchronizedDetail.companionMessage
+        ) else { return synchronizedDetail }
+        var preserved = synchronizedDetail
+        preserved.aiFeedback = feedback
+        return synchronizeAIFeedbackSlots(preserved)
+    }
+
+    private func synchronizeAIFeedbackSlots(
+        _ detail: NativeRecordDetail
+    ) -> NativeRecordDetail {
+        var synchronized = detail
+        guard let feedback = synchronized.aiFeedback else { return synchronized }
+        if feedback.source == "expression_planner" {
+            synchronized.plannerAiFeedback = feedback
+        } else if synchronized.legacyAiFeedback == nil {
+            synchronized.legacyAiFeedback = feedback
+        }
+        return synchronized
+    }
+
+    func recordDetail(matching reference: String) -> NativeRecordDetail? {
+        let canonicalReference = NativeRecordReference(reference).canonicalValue
+        guard let detail = selectedRecordDetail,
+              NativeRecordReference(detail.id).canonicalValue == canonicalReference else { return nil }
+        return detail
+    }
+
+    func deactivateRecordDetail(reference: String) {
+        let canonicalReference = NativeRecordReference(reference).canonicalValue
+        guard activeRecordReference == canonicalReference else { return }
+        if let pending = pendingRecordExpressionPlans[canonicalReference] {
+            discardPendingExpressionPlan(pending, canonicalReference: canonicalReference)
+        }
+        expressionPlanDeliveryTokens.removeValue(forKey: canonicalReference)
+        expressionPlanAcknowledgementTokens.removeValue(forKey: canonicalReference)
+        visibleRecordExpressionPlanCards.removeValue(forKey: canonicalReference)
+        activeRecordReference = nil
+        selectedRecordDetail = nil
+        recordFeedbackState = .idle
+        recordExpressionPlanExposureState = .idle
+    }
+
+    func invalidateRecordExpressionPlanState(afterChanging references: [String]) {
+        let canonicalReferences = Set(references.map { NativeRecordReference($0).canonicalValue })
+        for canonicalReference in canonicalReferences {
+            pendingRecordExpressionPlans.removeValue(forKey: canonicalReference)
+            expressionPlanDeliveryTokens.removeValue(forKey: canonicalReference)
+            expressionPlanAcknowledgementTokens.removeValue(forKey: canonicalReference)
+            visibleRecordExpressionPlanCards.removeValue(forKey: canonicalReference)
+            recordDetailCache.removeValue(forKey: canonicalReference)
+        }
+        if let selectedReference = selectedRecordDetail.map({
+            NativeRecordReference($0.id).canonicalValue
+        }), canonicalReferences.contains(selectedReference) {
+            selectedRecordDetail = nil
+        }
+        if let activeRecordReference, canonicalReferences.contains(activeRecordReference) {
+            self.activeRecordReference = nil
+            recordFeedbackState = .idle
+            recordExpressionPlanExposureState = .idle
+        }
+    }
+
+    private func localExpenseForReference(_ reference: String) async throws -> LocalExpense {
+        guard let localExpenseUseCase else { throw LocalDataError.invalidRecord }
+        let resolved = NativeRecordReference(reference)
+        guard resolved.kind == "local-expense" || resolved.kind == "expense",
+              let id = UUID(uuidString: resolved.rawId) else {
+            throw LocalDataError.invalidIdentifier
+        }
+        guard let expense = try await localExpenseUseCase.expense(id: id) else {
+            throw LocalDataError.recordNotFound
+        }
+        return expense
+    }
+
+    private func saveLocalRecordDetail(_ draft: NativeRecordEditDraft) async throws -> Bool {
+        guard let localExpenseUseCase else { throw LocalDataError.invalidRecord }
+        let current = try await localExpenseForReference(draft.reference)
+        guard let expectedVersion = draft.localVersion else { throw LocalDataError.invalidRecord }
+        let accountID = draft.accountId.flatMap(UUID.init(uuidString:))
+        let command = LocalExpenseUpdateCommand(
+            id: current.id,
+            expectedVersion: expectedVersion,
+            accountID: accountID,
+            amountText: draft.amountText,
+            currency: current.currency,
+            merchantName: draft.title,
+            platform: draft.platform,
+            category: draft.category,
+            paymentMethod: draft.paymentMethod,
+            transactionDate: draft.recordDate,
+            transactionTime: draft.transactionTime,
+            note: draft.note.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : draft.note,
+            updatedAt: Date()
+        )
+        let outcome = try await localExpenseUseCase.update(command)
+        guard let saved = outcome.expense else { throw LocalDataError.invalidRecord }
+        let oldMonth = String(current.transactionDate.prefix(7))
+        let newMonth = String(saved.transactionDate.prefix(7))
+        invalidateRecordExpressionPlanState(afterChanging: [draft.reference])
+        _ = await prepareLocalWorkspace()
+        await refreshLocalMonthProjection(monthKey: oldMonth)
+        if newMonth != oldMonth {
+            await refreshLocalMonthProjection(monthKey: newMonth)
+        }
+        recordDetailCache.removeValue(forKey: NativeRecordReference(draft.reference).canonicalValue)
+        await loadRecordDetail(reference: "local-expense/\(saved.id.uuidString)", force: true)
+        return true
+    }
+
+    private func saveLocalIncomeDetail(_ draft: NativeRecordEditDraft) async throws -> Bool {
+        guard let localExpenseUseCase,
+              let id = UUID(uuidString: NativeRecordReference(draft.reference).rawId),
+              let current = try await localExpenseUseCase.income(id: id),
+              let expectedVersion = draft.localVersion else {
+            throw LocalDataError.recordNotFound
+        }
+        let eventTime: Date?
+        if let time = draft.transactionTime {
+            guard let timestamp = NativeLocalDate.financeOccurredAt(dateKey: draft.recordDate, timeKey: time),
+                  let parsed = ISO8601DateFormatter().date(from: timestamp),
+                  NativeLocalDate.dateKey(parsed) == draft.recordDate else {
+                throw LocalDataError.invalidRecord
+            }
+            eventTime = parsed
+        } else {
+            eventTime = nil
+        }
+        let profile = try await localExpenseUseCase.prepareProfile()
+        let saved = try await localExpenseUseCase.updateIncome(LocalIncomeUpdate(
+            id: current.id,
+            profileID: profile.id,
+            expectedVersion: expectedVersion,
+            accountID: draft.accountId.flatMap(UUID.init(uuidString:)),
+            amountMinor: try LocalExpenseMapper.amountMinor(draft.amountText),
+            currency: current.currency,
+            sourceName: draft.title.trimmingCharacters(in: .whitespacesAndNewlines),
+            category: draft.category,
+            incomeDate: draft.recordDate,
+            occurredAt: eventTime,
+            note: draft.note.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : draft.note,
+            updatedAt: Date()
+        ))
+        let oldMonth = String(current.incomeDate.prefix(7))
+        let newMonth = String(saved.incomeDate.prefix(7))
+        invalidateRecordExpressionPlanState(afterChanging: [draft.reference])
+        _ = await prepareLocalWorkspace()
+        await refreshLocalMonthProjection(monthKey: oldMonth)
+        if oldMonth != newMonth { await refreshLocalMonthProjection(monthKey: newMonth) }
+        recordDetailCache.removeValue(forKey: NativeRecordReference(draft.reference).canonicalValue)
+        await loadRecordDetail(reference: "local-income/\(saved.id.uuidString)", force: true)
+        return true
+    }
+
+    private func deleteLocalIncome(reference: String) async throws -> Bool {
+        guard let localExpenseUseCase,
+              let id = UUID(uuidString: NativeRecordReference(reference).rawId),
+              let current = try await localExpenseUseCase.income(id: id) else {
+            throw LocalDataError.recordNotFound
+        }
+        _ = try await localExpenseUseCase.deleteIncome(id: current.id, expectedVersion: current.localVersion, deletedAt: Date())
+        invalidateRecordExpressionPlanState(afterChanging: [reference])
+        recordsPath = NavigationPath()
+        _ = await prepareLocalWorkspace()
+        await refreshLocalMonthProjection(monthKey: String(current.incomeDate.prefix(7)))
+        return true
+    }
+
+    private func deleteLocalRecord(reference: String) async throws -> Bool {
+        guard let localExpenseUseCase else { throw LocalDataError.invalidRecord }
+        let current = try await localExpenseForReference(reference)
+        _ = try await localExpenseUseCase.delete(LocalExpenseDeleteCommand(
+            id: current.id,
+            expectedVersion: current.localVersion,
+            deletedAt: Date()
+        ))
+        let monthKey = String(current.transactionDate.prefix(7))
+        invalidateRecordExpressionPlanState(afterChanging: [reference])
+        recordsPath = NavigationPath()
+        _ = await prepareLocalWorkspace()
+        await refreshLocalMonthProjection(monthKey: monthKey)
+        return true
+    }
+
+    private func localDomainRecordForReference(_ reference: String) async throws -> LocalRecord {
+        guard let localRecordUseCase else { throw LocalDataError.invalidRecord }
+        let resolved = NativeRecordReference(reference)
+        guard resolved.kind == "local-data" || resolved.kind == "data",
+              let id = UUID(uuidString: resolved.rawId) else {
+            throw LocalDataError.invalidIdentifier
+        }
+        guard let record = try await localRecordUseCase.record(id: id) else {
+            throw LocalDataError.recordNotFound
+        }
+        return record
+    }
+
+    private func saveLocalDomainRecord(_ draft: NativeRecordEditDraft) async throws -> Bool {
+        guard let localRecordUseCase else { throw LocalDataError.invalidRecord }
+        let current = try await localDomainRecordForReference(draft.reference)
+        guard let expectedVersion = draft.localVersion else { throw LocalDataError.invalidRecord }
+        var payload = (try? LocalRecordCodec.decode(current.payloadJSON)) ?? [:]
+        let trimmedNote = draft.note.trimmingCharacters(in: .whitespacesAndNewlines)
+        payload["note"] = trimmedNote.isEmpty
+            ? AnyCodable(NSNull())
+            : AnyCodable(trimmedNote)
+        let command = LocalRecordUpdateCommand(
+            id: current.id,
+            expectedVersion: expectedVersion,
+            title: draft.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                ? current.title
+                : draft.title,
+            summary: draft.note.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                ? current.summary
+                : draft.note,
+            payload: payload,
+            recordDate: draft.recordDate,
+            recordTime: draft.transactionTime,
+            note: draft.note.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : draft.note,
+            updatedAt: Date()
+        )
+        let outcome = try await localRecordUseCase.update(command)
+        let oldMonth = String(current.businessDate.prefix(7))
+        let newMonth = String(outcome.record.recordDate.prefix(7))
+        invalidateRecordExpressionPlanState(afterChanging: [draft.reference])
+        await refreshLocalMonthProjection(monthKey: oldMonth)
+        if newMonth != oldMonth {
+            await refreshLocalMonthProjection(monthKey: newMonth)
+        }
+        recordDetailCache.removeValue(forKey: NativeRecordReference(draft.reference).canonicalValue)
+        await loadRecordDetail(reference: "local-data/\(outcome.record.id.uuidString)", force: true)
+        return true
+    }
+
+    private func deleteLocalDomainRecord(reference: String) async throws -> Bool {
+        guard let localRecordUseCase else { throw LocalDataError.invalidRecord }
         let current = try await localDomainRecordForReference(reference)
         _ = try await localRecordUseCase.delete(LocalRecordDeleteCommand(
             id: current.id,
