@@ -183,6 +183,174 @@ final class IOSPrototypeRenderingTests: XCTestCase {
         }
     }
 
+    /// Promotional source captures: a whole synthetic day across all five domains.
+    /// The fixtures are deliberately richer than a single-record smoke test so
+    /// App Store artwork can show the product's cross-domain context honestly.
+    func testPROMOExportRichCrossDomainSourceCaptures() async throws {
+        let date = "2026-10-17"
+        var records: [NativeDayRecord] = []
+        var details: [String: NativeRecordDetail] = [:]
+
+        func add(_ record: NativeDayRecord, detail: NativeRecordDetail) {
+            records.append(record)
+            details[record.reference] = detail
+        }
+
+        func expense(
+            _ id: String, _ title: String, _ amount: Double, _ time: String,
+            category: String, payment: String, note: String,
+            companion: String? = nil, feedback: [String: AnyCodable]? = nil,
+            dateKey: String = date
+        ) {
+            let reference = "expense/promo-\(id)"
+            let record = NativeDayRecord(
+                id: "promo-\(id)", reference: reference, dateKey: dateKey,
+                kind: .expense, domainKey: "expense", title: title,
+                subtitle: "\(category) · \(payment)", value: String(format: "¥%.2f", amount),
+                timeLabel: time, systemImage: "creditcard", transactionType: "expense",
+                status: "done", amount: amount
+            )
+            let detail = NativeRecordDetail(
+                id: reference, rawId: record.id, kind: "expense", title: title,
+                subtitle: record.subtitle, value: record.value,
+                detailRows: [
+                    NativeDetailRow(label: "消费分类", value: category),
+                    NativeDetailRow(label: "支付方式", value: payment),
+                    NativeDetailRow(label: "交易时间", value: time),
+                    NativeDetailRow(label: "备注", value: note)
+                ], imageURL: nil, imageLoadError: false, imagePath: nil, imageHash: nil,
+                amount: amount, merchantName: title, platform: payment,
+                category: category, paymentMethod: payment, recordDate: dateKey,
+                note: note, companionMessage: companion, accountId: nil,
+                systemImage: "creditcard", payload: nil, transactionTime: time,
+                domainKey: "expense", source: "shortcut-screenshot", status: "done",
+                aiFeedback: feedback.flatMap(NativeAIFeedback.init(payload:))
+            )
+            add(record, detail: detail)
+        }
+
+        let companion = "早上用咖啡把自己叫醒，中午按时吃饭，晚上也把花销收得住。今天的节奏，比昨天更像你想要的样子。"
+        let companionFeedback: [String: AnyCodable] = [
+            "icon": AnyCodable("sparkles"), "badge": AnyCodable("今天的节奏"),
+            "band": AnyCodable("positive"), "source": AnyCodable("hosted"),
+            "emotion_line": AnyCodable(companion),
+            "utility_line": AnyCodable("把睡眠、饮食、运动和消费放在一起看，才看得见这一天的起伏。"),
+            "detail_reason": AnyCodable("依据：7 笔消费、3 餐饮食、1 次骑行和昨夜 7 小时 45 分睡眠。"),
+            "presentation_target": AnyCodable("companion_message"),
+            "claim_fingerprint": AnyCodable("promo-cross-domain-20261017"),
+            "rendered_text_fingerprint": AnyCodable("promo-companion-v1")
+        ]
+
+        expense("breakfast", "全家便利店（软件园店）", 18.50, "07:35", category: "早餐", payment: "微信支付", note: "豆浆和饭团")
+        expense("coffee", "瑞幸咖啡（软件园店）", 22.00, "09:10", category: "咖啡", payment: "微信支付", note: "生椰拿铁", companion: companion, feedback: companionFeedback)
+        expense("lunch", "园区食堂", 36.00, "12:20", category: "午餐", payment: "支付宝", note: "番茄牛腩饭")
+        expense("snack", "喜茶（万象城店）", 14.00, "15:45", category: "下午茶", payment: "微信支付", note: "无糖茶饮")
+        expense("grocery", "盒马鲜生（滨江店）", 86.00, "18:30", category: "日常采购", payment: "银行卡", note: "蔬菜和酸奶")
+        expense("takeaway", "美团外卖 · 暖锅小馆", 42.00, "20:15", category: "晚餐", payment: "微信支付", note: "晚饭补充")
+        expense("transit", "杭州地铁", 6.00, "22:10", category: "交通", payment: "支付宝", note: "回家")
+
+        func universal(
+            _ id: String, domain: String, title: String, subtitle: String,
+            time: String, image: String, payload: [String: AnyCodable],
+            dateKey: String = date
+        ) {
+            let reference = "data/promo-\(id)"
+            let kind = NativeDayRecordKind(rawValue: domain)!
+            let record = NativeDayRecord(
+                id: "promo-\(id)", reference: reference, dateKey: dateKey,
+                kind: kind, domainKey: domain, title: title, subtitle: subtitle,
+                value: "", timeLabel: time, systemImage: image, status: "done"
+            )
+            let detail = NativeRecordDetail(
+                id: reference, rawId: record.id, kind: "data", title: title,
+                subtitle: subtitle, value: "", detailRows: [], imageURL: nil,
+                imageLoadError: false, imagePath: nil, imageHash: nil, amount: nil,
+                merchantName: nil, platform: nil, category: nil, paymentMethod: nil,
+                recordDate: dateKey, note: payload.string("note"),
+                companionMessage: nil, accountId: nil, systemImage: image,
+                payload: payload, transactionTime: time, domainKey: domain,
+                source: "shortcut", status: "done"
+            )
+            add(record, detail: detail)
+        }
+
+        universal("breakfast-meal", domain: "food", title: "早餐", subtitle: "早餐 · 估算", time: "07:50", image: "fork.knife", payload: [
+            "meal_type": AnyCodable("breakfast"), "total_calorie_kcal": AnyCodable(420),
+            "dishes": AnyCodable([["name": "鸡蛋", "calorie_kcal": 90], ["name": "全麦面包", "calorie_kcal": 180], ["name": "无糖豆浆", "calorie_kcal": 150]]),
+            "note": AnyCodable("吃得简单，上午精神比较稳")
+        ])
+        universal("lunch-meal", domain: "food", title: "番茄牛腩饭", subtitle: "午餐 · 估算", time: "12:25", image: "fork.knife", payload: [
+            "meal_type": AnyCodable("lunch"), "total_calorie_kcal": AnyCodable(680),
+            "dishes": AnyCodable([["name": "番茄牛腩", "calorie_kcal": 360], ["name": "米饭", "calorie_kcal": 260], ["name": "青菜", "calorie_kcal": 60]]),
+            "note": AnyCodable("午餐按时完成")
+        ])
+        universal("dinner-meal", domain: "food", title: "蔬菜鸡肉沙拉", subtitle: "晚餐 · 估算", time: "19:40", image: "fork.knife", payload: [
+            "meal_type": AnyCodable("dinner"), "total_calorie_kcal": AnyCodable(560),
+            "dishes": AnyCodable([["name": "鸡胸肉", "calorie_kcal": 260], ["name": "生菜", "calorie_kcal": 80], ["name": "玉米", "calorie_kcal": 120], ["name": "酸奶", "calorie_kcal": 100]]),
+            "note": AnyCodable("晚上没有继续加餐")
+        ])
+        universal("night-sleep", domain: "sleep", title: "主要睡眠", subtitle: "睡眠 · 7 小时 45 分钟", time: "07:25", image: "moon.zzz", payload: [
+            "sleep_minutes": AnyCodable(465),
+            "sleep_start_at": AnyCodable("2026-10-16T23:40:00+08:00"),
+            "wake_at": AnyCodable("2026-10-17T07:25:00+08:00"),
+            "sleep_quality": AnyCodable("稳")
+        ])
+        universal("morning-ride", domain: "sport", title: "骑行", subtitle: "运动类型 · 骑行", time: "08:05", image: "figure.run", payload: [
+            "duration_minutes": AnyCodable(30), "sport_type": AnyCodable("骑行"), "note": AnyCodable("通勤路上")
+        ])
+        universal("evening-walk", domain: "sport", title: "散步", subtitle: "运动类型 · 散步", time: "21:10", image: "figure.walk", payload: [
+            "duration_minutes": AnyCodable(22), "sport_type": AnyCodable("散步"), "note": AnyCodable("饭后走了一会儿")
+        ])
+        universal("reading", domain: "reading", title: "《掌控习惯》", subtitle: "阅读 · 32 分钟", time: "22:35", image: "book", payload: [
+            "reading_minutes": AnyCodable(32), "pages": AnyCodable(18), "book_name": AnyCodable("《掌控习惯》"), "note": AnyCodable("睡前读了两节")
+        ])
+
+        // Add a small, synthetic seven-day history so the trend cards have shape.
+        for offset in -6 ... -1 {
+            guard let day = NativeLocalDate.shiftedDateKey(date, byDays: offset) else { continue }
+            let amount = Double(32 + abs(offset) * 11)
+            expense("history-\(offset)", "日常便利店", amount, "18:00", category: "日常", payment: "微信支付", note: "合成历史记录", dateKey: day)
+            universal("food-history-\(offset)", domain: "food", title: "家常餐食", subtitle: "晚餐 · 估算", time: "19:00", image: "fork.knife", payload: [
+                "meal_type": AnyCodable("dinner"), "total_calorie_kcal": AnyCodable(520 + abs(offset) * 18)
+            ], dateKey: day)
+            universal("sport-history-\(offset)", domain: "sport", title: "散步", subtitle: "运动类型 · 散步", time: "20:00", image: "figure.walk", payload: [
+                "duration_minutes": AnyCodable(18 + abs(offset) * 2), "sport_type": AnyCodable("散步")
+            ], dateKey: day)
+        }
+
+        let groups = Dictionary(grouping: records, by: \.dateKey)
+            .map { NativeDayRecordGroup(dateKey: $0.key, records: $0.value) }
+        let state = try makeIsolatedState()
+        state.selectedDateKey = date
+        state.selectedDomain = .expense
+
+        for domain in [AppDomain.expense, .food, .sleep, .sport, .reading] {
+            let model = NativeDomainScenePresentation.make(
+                domain: domain, dateKey: date, weekGroups: groups, details: details,
+                isSignedIn: true, isLoading: false, errorMessage: nil, todayKey: date
+            )
+            let view = ZStack(alignment: .topTrailing) {
+                DomainSceneView(domain: domain)
+                DomainCatView(domain: domain).padding(.trailing, JieziPrototypeLayout.metric_inset)
+                NativeDomainPageContent(
+                    domain: domain, weekDates: model.weeklyValues.map(\.dateKey),
+                    details: details, loadingWindow: false, model: model
+                )
+            }
+            .environmentObject(state)
+            .environment(\.dynamicTypeSize, .large)
+            try await capture(view, name: "promo-rich-\(domain.rawValue)", height: 1250)
+        }
+
+        let companionReference = "expense/promo-coffee"
+        let companionDetail = try XCTUnwrap(details[companionReference])
+        let detailView = PromoCompanionSourceView(detail: companionDetail)
+            .environmentObject(state)
+            .environmentObject(JieziThemeManager.shared)
+            .environment(\.dynamicTypeSize, .large)
+        try await capture(detailView, name: "promo-rich-ai-companion", height: 1250)
+    }
+
     func testIOSV2POLISH001ExportEmptyShellAtNormalAndAccessibleType() async throws {
         let sizes: [DynamicTypeSize] = [.large, .accessibility3]
         for domain in AppDomain.allCases {
@@ -489,5 +657,101 @@ final class IOSPrototypeRenderingTests: XCTestCase {
         attachment.name = name
         attachment.lifetime = .keepAlways
         add(attachment)
+    }
+}
+
+/// The detail source capture keeps the production AI card and typography while
+/// avoiding a network read. It is used only for synthetic promotional artwork.
+private struct PromoCompanionSourceView: View {
+    let detail: NativeRecordDetail
+
+    var body: some View {
+        ZStack {
+            JieziTheme.pageBackground.ignoresSafeArea()
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    Text("记录详情")
+                        .font(.largeTitle.bold())
+                        .padding(.top, 18)
+
+                    HStack(spacing: 12) {
+                        Image(systemName: detail.systemImage)
+                            .font(.title3.weight(.semibold))
+                            .foregroundStyle(JieziTheme.brand)
+                            .frame(width: 40, height: 40)
+                            .background(JieziTheme.brand.opacity(0.1), in: RoundedRectangle(cornerRadius: 8))
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(detail.title).font(.headline)
+                            Text(detail.subtitle).font(.caption).foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Text(detail.value).font(.headline.monospacedDigit())
+                    }
+                    .padding(16)
+                    .jieziPrototypePanel()
+
+                    VStack(alignment: .leading, spacing: 0) {
+                        Text("基本信息").font(.headline).padding(.bottom, 12)
+                        ForEach(detail.detailRows) { row in
+                            HStack(alignment: .top, spacing: 16) {
+                                Text(row.label).foregroundStyle(.secondary)
+                                Spacer()
+                                Text(row.value).multilineTextAlignment(.trailing)
+                            }
+                            .font(.subheadline)
+                            .padding(.vertical, 11)
+                            Divider()
+                        }
+                    }
+                    .padding(16)
+                    .background(.white.opacity(0.68), in: RoundedRectangle(cornerRadius: 12))
+
+                    if let message = detail.companionMessage,
+                       let feedback = detail.voiceAiFeedback {
+                        HStack(alignment: .top, spacing: 12) {
+                            Image(systemName: "quote.bubble.fill")
+                                .foregroundStyle(JieziTheme.brand)
+                            VStack(alignment: .leading, spacing: 10) {
+                                HStack(spacing: 8) {
+                                    Text("AI 陪伴").font(.caption.weight(.bold)).foregroundStyle(.secondary)
+                                    Text(feedback.badge)
+                                        .font(.caption2.weight(.semibold))
+                                        .foregroundStyle(JieziTheme.brand)
+                                }
+                                Text(message)
+                                    .font(.subheadline)
+                                    .fixedSize(horizontal: false, vertical: true)
+                                NativeAIFeedbackSupportingContent(
+                                    feedback: feedback, primaryMessage: message, compact: true
+                                )
+                            }
+                        }
+                        .padding(16)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(JieziTheme.brand.opacity(0.07), in: RoundedRectangle(cornerRadius: 12))
+
+                        NativeAIFeedbackCard(
+                            feedback: feedback,
+                            compact: true,
+                            primaryMessage: message,
+                            reviewable: false,
+                            reviewState: .idle,
+                            exposureState: .idle
+                        )
+                    }
+
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("AI 摘要").font(.headline)
+                        Text("把一条记录放回这一天里，睡眠、饮食、运动和消费就不再是孤立的数字。")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .padding(16)
+                    .background(.white.opacity(0.68), in: RoundedRectangle(cornerRadius: 12))
+                }
+                .padding(16)
+            }
+        }
     }
 }
