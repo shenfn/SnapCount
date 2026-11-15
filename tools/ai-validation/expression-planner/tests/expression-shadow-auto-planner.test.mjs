@@ -213,7 +213,12 @@ test('keeps a pending expense out of aggregates while exposing its verified reco
   assert.ok(context)
   assert.equal(context.claim.structured_value.fact_status, 'pending_review')
   assert.match(context.claim.canonical_text, /分类仍待确认/)
-  assert.equal(context.evidence[0].ledger_status, 'pending_review')
+  assert.deepEqual(context.evidence[0], {
+    kind: 'current_fact',
+    source: 'local_record',
+    reference: 'pending-current',
+    field: null,
+  })
   assert.deepEqual(plan.candidates.map(candidate => candidate.claim.semantic_key), ['expense_current_record_context'])
   assert.equal(plan.shortcut_plan.silent, true)
   assert.equal(plan.plan_summary.record_detail.selected[0].semantic_key, 'expense_current_record_context')
