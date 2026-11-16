@@ -198,7 +198,7 @@ struct SettingsView: View {
                         Text(versionLabel).foregroundStyle(.secondary)
                     }
                     LabeledContent("数据存储") {
-                        Text("本机优先 · 云端可选").foregroundStyle(.secondary)
+                        Text("本机优先 · AI 云端按授权").foregroundStyle(.secondary)
                     }
                 }
 
@@ -239,14 +239,15 @@ struct SettingsView: View {
                             .foregroundStyle(message.contains("失败") ? JieziTheme.coral : .secondary)
                     }
                 }
-                if let message = appState.localSyncMessage {
+                if JieziReleaseCapabilities.cloudSync, let message = appState.localSyncMessage {
                     Section {
                         Text(message)
                             .font(.footnote)
                             .foregroundStyle(message.contains("失败") || message.contains("无法") ? JieziTheme.coral : .secondary)
                     }
                 }
-                if appState.localSyncDiagnostic != nil || appState.localSyncFailureDiagnostic != nil {
+                if JieziReleaseCapabilities.cloudSync,
+                   appState.localSyncDiagnostic != nil || appState.localSyncFailureDiagnostic != nil {
                     Section("同步诊断") {
                         if let diagnostic = appState.localSyncDiagnostic {
                             Text(diagnostic.summary)
@@ -323,8 +324,10 @@ struct SettingsView: View {
             .environmentObject(appState)
         }
         .task {
-            appState.refreshLocalSyncState()
-            appState.loadLatestLocalSyncDiagnostic()
+            if JieziReleaseCapabilities.cloudSync {
+                appState.refreshLocalSyncState()
+                appState.loadLatestLocalSyncDiagnostic()
+            }
             appState.loadLatestLocalStorageInitializationDiagnostic()
             appState.loadLatestLocalProjectionRefreshDiagnostic()
             if appState.isSignedIn { await appState.loadUserSettings() }

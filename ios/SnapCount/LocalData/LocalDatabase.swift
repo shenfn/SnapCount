@@ -4,12 +4,25 @@ import GRDB
 final class LocalDatabase {
     let writer: DatabaseQueue
 
+    /// The app and its Shortcut/App Intents process can open the same local
+    /// database at the same time. WAL keeps readers from blocking a writer,
+    /// while an immediate transaction plus a short busy timeout makes a
+    /// competing writer wait for the current commit instead of surfacing a
+    /// transient `SQLITE_BUSY` as a failed photo intake.
+    private static var sharedConfiguration: Configuration {
+        var configuration = Configuration()
+        configuration.journalMode = .wal
+        configuration.defaultTransactionKind = .immediate
+        configuration.busyMode = .timeout(5)
+        return configuration
+    }
+
     init(databaseURL: URL) throws {
         try FileManager.default.createDirectory(
             at: databaseURL.deletingLastPathComponent(),
             withIntermediateDirectories: true
         )
-        writer = try DatabaseQueue(path: databaseURL.path)
+        writer = try DatabaseQueue(path: databaseURL.path, configuration: Self.sharedConfiguration)
         try Self.migrator.migrate(writer)
     }
 
