@@ -441,13 +441,20 @@ struct VisionSettingsView: View {
     @EnvironmentObject private var appState: AppState
     @State private var byokAPIKeyInput = ""
     @State private var showDeleteBYOKConfirmation = false
+    @State private var showHostedConsent = false
 
     var body: some View {
         Form {
             Section("识别授权") {
                 Picker("图片识别", selection: Binding(
                     get: { appState.localVisionMode },
-                    set: { appState.setLocalVisionMode($0) }
+                    set: { mode in
+                        if mode == .hosted, appState.localVisionMode != .hosted {
+                            showHostedConsent = true
+                        } else {
+                            appState.setLocalVisionMode(mode)
+                        }
+                    }
                 )) {
                     ForEach(LocalVisionMode.allCases.filter { $0 != .byok || JieziReleaseCapabilities.byok }) { mode in
                         Text(mode.title).tag(mode)
@@ -456,7 +463,7 @@ struct VisionSettingsView: View {
                 Text(appState.localVisionMode == .disabled
                      ? "关闭后，图片只保存在本机并进入手工处理；不会发送图片或调用 OCR。"
                      : appState.localVisionMode == .hosted
-                     ? "图片发送到芥子 Hosted AI；关闭云同步不会关闭这项单独授权。"
+                     ? "通过芥子在新加坡的服务发给阿里云百炼（中国内地）。关闭识别可停止后续 Hosted 图片识别和陪伴请求。"
                      : "图片经 TLS 直接发送至阿里云百炼北京端点的 Qwen 3.6 Flash；费用由你的供应商账户承担。")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
@@ -504,6 +511,12 @@ struct VisionSettingsView: View {
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             }
+        }
+        .alert("允许 Hosted AI 处理这些数据？", isPresented: $showHostedConsent) {
+            Button("同意并启用") { appState.setLocalVisionMode(.hosted) }
+            Button("取消", role: .cancel) {}
+        } message: {
+            Text("你提交识别的照片和截图会经芥子在新加坡的服务发给阿里云百炼（中国内地）。开启陪伴文案时，当前记录、部分近期同类记录（可能含金额、饮食、运动或睡眠信息）和表达偏好也会发送。开启长期记忆时，还会发送同类记忆摘要和近期陪伴文案。结果保存在本机。你可以随时在这里关闭。")
         }
         .navigationTitle("识别模型配置")
         .scrollContentBackground(.hidden)
@@ -583,7 +596,7 @@ struct CompanionSettingsView: View {
             Section {
                 Toggle("陪伴文案", isOn: asyncToggle(appState.userSettings.companionEnabled, appState.setCompanionEnabled))
                 Toggle("长期记忆", isOn: asyncToggle(appState.userSettings.companionMemoryEnabled, appState.setCompanionMemoryEnabled))
-                Text("开启长期记忆后，精简的同类记录摘要会随当前记录发送给所选 AI 陪伴服务，用来生成更贴合的陪伴文案。Hosted 模式经芥子服务端转发给模型服务商；BYOK 模式直接发送给你配置的服务商。关闭后不读取、不发送本地记忆；已有摘要仍留在本机，重新开启时会按当前正式记录整理。摘要不进入云同步，也不单独展示为反馈。")
+                Text("使用 Hosted 陪伴时，当前记录和部分近期同类记录会发给阿里云百炼。开启长期记忆后，还会附上同类记忆摘要和近期陪伴文案。关闭长期记忆会停止读取和发送这两项，近期同类记录仍可用于生成文案。要停止云端生成，可关闭陪伴文案或 Hosted AI。")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             }

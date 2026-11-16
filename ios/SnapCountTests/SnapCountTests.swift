@@ -3986,7 +3986,7 @@ final class SnapCountTests: XCTestCase {
     func testRegistrationConsentUsesCurrentLegalVersions() {
         let consent = NativeRegistrationConsent.current(at: Date(timeIntervalSince1970: 0))
         XCTAssertEqual(consent.termsVersion, "2026-07-19")
-        XCTAssertEqual(consent.privacyVersion, "2026-11-11")
+        XCTAssertEqual(consent.privacyVersion, "2026-11-16")
         XCTAssertEqual(consent.legalAcceptedAt, consent.sensitiveDataAcceptedAt)
     }
 

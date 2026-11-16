@@ -152,7 +152,7 @@ struct LoginView: View {
                     .font(.footnote.weight(.semibold))
             }
             Toggle(isOn: $acceptedSensitiveData) {
-                Text("我同意处理主动提交的财务、睡眠等敏感数据，并知悉主要数据存储于新加坡、图片会传输至阿里云百炼中国内地接口完成 Qwen 识别。")
+                Text("我同意芥子处理我主动提交的财务、睡眠等敏感数据。iOS 记录优先保存在本机，云端账户服务位于新加坡。启用 Hosted AI 时会另行确认数据发送范围。")
                     .font(.footnote)
                     .foregroundStyle(JieziTheme.muted)
                     .fixedSize(horizontal: false, vertical: true)
