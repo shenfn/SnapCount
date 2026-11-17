@@ -357,21 +357,19 @@ struct ShortcutUploadResult {
         route = payload.routePath
     }
 
-    /// Archived Shortcut outcome. Compose the companion + fixed receipt facts
-    /// once and reuse it for both the result card and the system notification.
     static func archived(
         notificationText: String,
         companionMessage: String?,
         feedback: NativeAIFeedback?
     ) -> ShortcutUploadResult {
-        let mergedText = expandedDisplayText(
-            baseText: notificationText,
+        let receipt = LocalIntakeNotificationText.archivedReceipt(
+            facts: notificationText,
             companionMessage: companionMessage,
-            feedback: feedback
+            feedback: feedback.map { LocalIntakeNotificationFeedback($0) }
         )
         return ShortcutUploadResult(
-            displayText: mergedText,
-            notificationText: mergedText,
+            displayText: receipt.displayText,
+            notificationText: receipt.notificationText,
             route: "records"
         )
     }

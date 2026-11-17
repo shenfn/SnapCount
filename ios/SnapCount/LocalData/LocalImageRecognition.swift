@@ -160,9 +160,29 @@ struct LocalImageIntakeOutcome: Equatable {
     var feedback: NativeAIFeedback? = nil
     /// 原始反馈置信度，用于在异步 Companion 接线时保持低置信度降级。
     var feedbackConfidence: Double? = nil
+    var receiptText: String? = nil
+    var companionMessage: String? = nil
+
+    var archivedReceipt: LocalIntakeReceipt? {
+        switch result {
+        case .staged, .financialPending: return nil
+        case .archived, .financialArchived:
+            guard let receiptText else { return nil }
+            return LocalIntakeNotificationText.archivedReceipt(
+                facts: receiptText,
+                companionMessage: companionMessage,
+                feedback: feedback.map { LocalIntakeNotificationFeedback($0, confidence: feedbackConfidence) }
+            )
+        }
+    }
 }
 
 final class LocalImageRecognitionUseCase {
+    private typealias NotificationContent = (
+        text: String, feedback: NativeAIFeedback?, confidence: Double?,
+        receiptText: String?, companionMessage: String?
+    )
+
     private let localRecordUseCase: LocalRecordUseCaseProtocol
     private let imageStore: LocalImageStore
     private let intakeRepository: LocalImageIntakeRepository
@@ -323,7 +343,9 @@ final class LocalImageRecognitionUseCase {
                         imageHash: imageHash,
                         notificationText: composed?.text,
                         feedback: composed?.feedback,
-                        feedbackConfidence: composed?.confidence
+                        feedbackConfidence: composed?.confidence,
+                        receiptText: composed?.receiptText,
+                        companionMessage: composed?.companionMessage
                     )
                 default:
                     // 已删除的财务事实按新图重新识别。
@@ -337,7 +359,9 @@ final class LocalImageRecognitionUseCase {
                     imageHash: imageHash,
                     notificationText: composed.text,
                     feedback: composed.feedback,
-                    feedbackConfidence: composed.confidence
+                    feedbackConfidence: composed.confidence,
+                    receiptText: composed.receiptText,
+                    companionMessage: composed.companionMessage
                 )
             }
             if let staging = try await localRecordUseCase.staging(id: "local-ai-\(imageHash)"),
@@ -361,7 +385,9 @@ final class LocalImageRecognitionUseCase {
                     imageHash: imageHash,
                     notificationText: composed.text,
                     feedback: composed.feedback,
-                    feedbackConfidence: composed.confidence
+                    feedbackConfidence: composed.confidence,
+                    receiptText: composed.receiptText,
+                    companionMessage: composed.companionMessage
                 )
             }
             if let staging = try await localRecordUseCase.staging(id: "local-ai-\(imageHash)"),
@@ -374,7 +400,9 @@ final class LocalImageRecognitionUseCase {
                     imageHash: imageHash,
                     notificationText: composed.text,
                     feedback: composed.feedback,
-                    feedbackConfidence: composed.confidence
+                    feedbackConfidence: composed.confidence,
+                    receiptText: composed.receiptText,
+                    companionMessage: composed.companionMessage
                 )
             }
         }
@@ -625,8 +653,8 @@ final class LocalImageRecognitionUseCase {
             let outcome: LocalRecordIntakeOutcome = autoArchive ? .financialArchived(id) : .financialPending(id)
             // PWA 判重命中时通知是固定两行（`index.ts:7321`），不参与 feedback 的三行拼装；
             // 「疑似重复」那条 ai_feedback 只用于待处理页与卡片。
-            let composed: (text: String, feedback: NativeAIFeedback?, confidence: Double?) = isDuplicate
-                ? (text: Self.duplicateNotificationText, feedback: NativeAIFeedback(payload: feedbackPayload), confidence: recognized.confidence)
+            let composed: NotificationContent = isDuplicate
+                ? (Self.duplicateNotificationText, NativeAIFeedback(payload: feedbackPayload), recognized.confidence, nil, nil)
                 : composeNotification(
                     domainKey: recognized.domainKey,
                     feedbackPayload: feedbackPayload,
@@ -647,7 +675,9 @@ final class LocalImageRecognitionUseCase {
                 imageHash: imageHash,
                 notificationText: composed.text,
                 feedback: composed.feedback,
-                feedbackConfidence: composed.confidence
+                feedbackConfidence: composed.confidence,
+                receiptText: composed.receiptText,
+                companionMessage: composed.companionMessage
             )
         }
         guard !recognized.domainKey.isEmpty,
@@ -721,7 +751,9 @@ final class LocalImageRecognitionUseCase {
             imageHash: imageHash,
             notificationText: composed.text,
             feedback: composed.feedback,
-            feedbackConfidence: composed.confidence
+            feedbackConfidence: composed.confidence,
+            receiptText: composed.receiptText,
+            companionMessage: composed.companionMessage
         )
     }
 
@@ -815,7 +847,7 @@ final class LocalImageRecognitionUseCase {
     private func composeNotification(
         for record: LocalRecord,
         profileID: UUID
-    ) -> (text: String, feedback: NativeAIFeedback?, confidence: Double?) {
+    ) -> NotificationContent {
         let payload = (try? LocalRecordCodec.decode(record.payloadJSON)) ?? [:]
         return composeNotification(
             domainKey: record.domainKey,
@@ -846,7 +878,7 @@ final class LocalImageRecognitionUseCase {
         isPending: Bool,
         profileID: UUID,
         dateKey: String
-    ) -> (text: String, feedback: NativeAIFeedback?, confidence: Double?) {
+    ) -> NotificationContent {
         var todaySpendMinor: Int64 = 0
         var todaySpendCount = 0
         var monthIncomeMinor: Int64 = 0
@@ -859,7 +891,7 @@ final class LocalImageRecognitionUseCase {
                 .reduce(0) { $0 + $1.amountMinor }
         }
         let feedback = NativeAIFeedback(payload: feedbackPayload)
-        let text = LocalIntakeNotificationText.compose(LocalIntakeNotificationInput(
+        let input = LocalIntakeNotificationInput(
             domainKey: domainKey,
             feedback: feedback,
             confidence: confidence,
@@ -872,8 +904,11 @@ final class LocalImageRecognitionUseCase {
             todaySpendCount: todaySpendCount,
             monthIncomeMinor: monthIncomeMinor,
             isPending: isPending
-        ))
-        return (text, feedback, confidence)
+        )
+        return (
+            LocalIntakeNotificationText.compose(input), feedback, confidence,
+            LocalIntakeNotificationText.fallbackText(input), companionMessage
+        )
     }
 
     private static func safeFailureMessage(for error: Error) -> String {

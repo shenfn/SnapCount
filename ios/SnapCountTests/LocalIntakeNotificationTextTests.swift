@@ -47,6 +47,47 @@ final class LocalIntakeNotificationTextTests: XCTestCase {
         text.components(separatedBy: "\n")
     }
 
+    // AI-FB-001-RECEIPT-ORDER
+    func testArchivedReceiptDropsGenericOrRepeatedAdvice() {
+        let receipt = LocalIntakeNotificationText.archivedReceipt(
+            facts: "💸 -¥8.00 · 示例小店\n今日已花 ¥42.00（3 笔）",
+            companionMessage: "第一次记录到这家店。",
+            feedback: LocalIntakeNotificationFeedback(
+                icon: "✨", badge: "新商户记录", confidence: 0.9,
+                emotionLine: "这笔是傍晚的开销。", utilityLine: "刚吃完记得擦擦嘴。"
+            )
+        )
+        XCTAssertEqual(receipt.observation, "第一次记录到这家店。")
+        XCTAssertNil(receipt.suggestion)
+        XCTAssertEqual(receipt.displayText.components(separatedBy: "\n").count, 3)
+    }
+
+    func testArchivedReceiptKeepsAllFactsWhenAINotAvailable() {
+        let facts = "💰 +¥30.00 · 示例来源\n本月已入 ¥80.00"
+        let receipt = LocalIntakeNotificationText.archivedReceipt(
+            facts: facts, companionMessage: "已记录。",
+            feedback: LocalIntakeNotificationFeedback(
+                icon: "✨", badge: "观察", confidence: 0.2,
+                emotionLine: "这家店第一次出现。", utilityLine: "可以写一句备注。"
+            )
+        )
+        XCTAssertEqual(receipt.displayText, facts)
+        XCTAssertEqual(receipt.notificationText, facts)
+    }
+
+    func testArchivedNotificationKeepsTotalWhenMerchantNameIsLong() {
+        let total = "今日已花 ¥42.00（3 笔）"
+        let receipt = LocalIntakeNotificationText.archivedReceipt(
+            facts: "💸 -¥8.00 · " + String(repeating: "商", count: 180) + "\n" + total,
+            companionMessage: "第一次记录到这家店。",
+            feedback: nil
+        )
+        XCTAssertLessThanOrEqual(receipt.notificationText.count, 160)
+        XCTAssertTrue(receipt.notificationText.hasPrefix("💸 -¥8.00"))
+        XCTAssertTrue(receipt.notificationText.hasSuffix(total))
+        XCTAssertTrue(receipt.displayText.hasSuffix("第一次记录到这家店。"))
+    }
+
     // 1
     func testCompanionMessageLeadsAndSkipsEmotionLine() throws {
         let modelFeedback = try feedback(emotion: "情绪句不应该出现在 companion 分支", utility: "实用句也不应该出现")

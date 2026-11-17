@@ -246,28 +246,23 @@ final class LocalAIIntegrationRegressionTests: XCTestCase {
         XCTAssertEqual(state.recordsPath.count, 1)
     }
 
-    func testArchivedShortcutResultKeepsCompanionAndFactsInNotificationBody() throws {
+    // AI-FB-001-RECEIPT-ORDER
+    func testArchivedShortcutResultKeepsFactsBeforeObservationAndSuggestion() throws {
         let feedback = try XCTUnwrap(NativeAIFeedback(payload: [
-            "badge": AnyCodable("观察"),
-            "icon": AnyCodable("✨"),
-            "band": AnyCodable("neutral"),
-            "emotion_line": AnyCodable("这笔消费有明确依据。"),
-            "utility_line": AnyCodable("保留这份节奏"),
+            "badge": AnyCodable("新商户记录"),
+            "emotion_line": AnyCodable("第一次记录到这家店。"),
+            "utility_line": AnyCodable("觉得合口的话，可以在备注里记一下点了什么。"),
             "confidence": AnyCodable(0.9)
         ]))
+        let facts = "💸 -¥8.00 · 示例煎饼店 · 餐饮\n今日已花 ¥42.00（3 笔）"
         let result = ShortcutUploadResult.archived(
-            notificationText: "💸 -¥12.80 · 便利店 · 日用\n今日已花 ¥12.80（1 笔）",
-            companionMessage: "这笔便利店消费已记录，金额为¥12.80。",
-            feedback: feedback
+            notificationText: facts, companionMessage: "傍晚的杂粮煎饼，已归档。", feedback: feedback
         )
 
         XCTAssertEqual(result.route, "records")
-        XCTAssertEqual(result.displayText, result.notificationText)
-        let body = result.notificationBody
-        XCTAssertTrue(body.contains("这笔便利店消费已记录"))
-        XCTAssertTrue(body.contains("-¥12.80"))
-        XCTAssertTrue(body.contains("今日已花 ¥12.80"))
-        XCTAssertLessThanOrEqual(body.count, 160)
+        XCTAssertEqual(result.displayText, facts + "\n第一次记录到这家店。\n觉得合口的话，可以在备注里记一下点了什么。")
+        XCTAssertTrue(result.notificationBody.hasPrefix(facts + "\n第一次记录到这家店。"))
+        XCTAssertLessThanOrEqual(result.notificationBody.count, 160)
     }
 
     private func makeStubSession() throws -> URLSession {

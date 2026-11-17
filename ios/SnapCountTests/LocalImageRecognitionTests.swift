@@ -86,7 +86,8 @@ final class LocalImageRecognitionTests: XCTestCase {
             domainKey: "expense", confidence: 0.92, payload: payload, missingFields: []))
         let recognition = LocalImageRecognitionUseCase(localRecordUseCase: context.useCase,
             imageStore: context.imageStore, intakeRepository: context.intakeRepository,
-            provider: provider, pendingRepository: pending)
+            provider: provider, pendingRepository: pending,
+            expenseRepository: try LocalExpenseRepository(database: context.database))
         let data = Data("financial-auto-archive".utf8)
         let outcome = try await recognition.ingest(imageData: data, captureKind: "screenshot", filename: "expense.jpg")
         guard case .financialArchived(let id) = outcome.result else {
@@ -97,6 +98,10 @@ final class LocalImageRecognitionTests: XCTestCase {
             .expenses(profileID: profile.id, monthKey: "2026-09")
         let archived = try XCTUnwrap(expenses.first { $0.id == id })
         XCTAssertEqual(archived.amountMinor, 2000)
+        XCTAssertEqual(outcome.archivedReceipt?.facts, [
+            "💸 -¥20.00 · 沈氏牛肉汤春波店 · food",
+            "今日已花 ¥20.00（1 笔）"
+        ])
         XCTAssertEqual(archived.merchantName, "沈氏牛肉汤春波店")
         XCTAssertEqual(archived.platform, "微信")
         XCTAssertEqual(archived.category, "food")
@@ -109,6 +114,7 @@ final class LocalImageRecognitionTests: XCTestCase {
         XCTAssertEqual(repeated.result, outcome.result)
         XCTAssertEqual(repeated.imageHash, outcome.imageHash)
         XCTAssertEqual(repeated.notificationText, outcome.notificationText)
+        XCTAssertEqual(repeated.archivedReceipt, outcome.archivedReceipt)
         XCTAssertEqual(repeated.feedback, outcome.feedback)
         XCTAssertNil(repeated.feedbackConfidence)
         XCTAssertEqual(outcome.feedbackConfidence, 0.92)

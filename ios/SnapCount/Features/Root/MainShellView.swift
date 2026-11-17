@@ -12,6 +12,7 @@ struct MainShellView: View {
     @State private var showCaptureResult = false
     @State private var captureMessage = ""
     @State private var captureFeedback: NativeAIFeedback?
+    @State private var captureReceipt: LocalIntakeReceipt?
     @State private var captureRoute: AppOverlay?
     @State private var captureIsError = false
     @State private var showsCalendar = false
@@ -68,7 +69,8 @@ struct MainShellView: View {
                     showCaptureResult = false
                     if let captureRoute { appState.presentedOverlay = captureRoute }
                 },
-                onDismiss: { showCaptureResult = false }
+                onDismiss: { showCaptureResult = false },
+                receipt: captureReceipt
             )
         }
     }
@@ -300,6 +302,7 @@ struct MainShellView: View {
             )
             captureMessage = outcome.notificationText ?? "识别结果已保存到本机。"
             captureFeedback = outcome.feedback
+            captureReceipt = outcome.archivedReceipt
             captureIsError = false
             captureRoute = switch outcome.result {
             case .archived, .financialArchived: .records
@@ -311,6 +314,7 @@ struct MainShellView: View {
                 persisted: appState.hasPersistedInputImage(data)
             )
             captureFeedback = nil
+            captureReceipt = nil
             captureIsError = true
             captureRoute = .inbox
         }

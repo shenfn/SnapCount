@@ -1492,7 +1492,9 @@ final class AppState: ObservableObject {
                 }
             ),
             feedback: deliveryFeedback,
-            feedbackConfidence: feedbackConfidence
+            feedbackConfidence: feedbackConfidence,
+            receiptText: outcome.receiptText,
+            companionMessage: message ?? outcome.companionMessage
         )
     }
 

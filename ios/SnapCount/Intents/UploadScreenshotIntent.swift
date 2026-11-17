@@ -104,8 +104,8 @@ struct UploadScreenshotIntent: AppIntent {
                         case .archived, .financialArchived:
                             trialOutcome = .archived
                             trace?.record("record=archived")
-                            let text = outcome.notificationText ?? "AI 识别结果已自动记录到本机。"
-                            var companionMessage: String?
+                            let text = outcome.receiptText ?? "AI 识别结果已自动记录到本机。"
+                            var companionMessage = outcome.companionMessage
                             var deliveryFeedback = Self.normalizedShortcutFeedback(
                                 outcomeFeedback: outcome.feedback,
                                 outcomeConfidence: outcome.feedbackConfidence,
