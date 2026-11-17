@@ -9,6 +9,9 @@ struct UploadScreenshotIntent: AppIntent {
     @Parameter(title: "JPEG 图像")
     var image: IntentFile?
 
+    @Parameter(title: "显示 AI 诊断", default: false)
+    var showAIDiagnostics: Bool
+
     static var parameterSummary: some ParameterSummary {
         Summary("上传 \(\.$image) 到芥子")
     }
@@ -72,8 +75,10 @@ struct UploadScreenshotIntent: AppIntent {
                 )
                 let result: ShortcutUploadResult
                 let trialOutcome: ShortcutTrialOutcome
+                var secondRound = "跳过 · 第一轮未完成"
                 do {
                     if mode == .disabled {
+                        secondRound = "跳过 · AI 识别已关闭"
                         _ = try recognition.receiveForManual(
                             imageData: imageData, captureKind: "screenshot", filename: "shortcut-jpeg.jpg"
                         )
@@ -101,13 +106,16 @@ struct UploadScreenshotIntent: AppIntent {
                                 outcomeConfidence: outcome.feedbackConfidence,
                                 composedResult: nil
                             )
-                            if let companionProvider = await companionProvider(for: mode) {
+                            if !localSettings.companionEnabled {
+                                secondRound = "跳过 · AI 陪伴已关闭"
+                            } else if let companionProvider = await companionProvider(for: mode) {
                                 let providerMode: LocalExpressionProviderMode = mode == .hosted ? .hosted : .byok
                                 if let composed = await recognition.composeCompanion(
                                     for: outcome.result,
                                     provider: companionProvider,
                                     settings: localSettings,
-                                    providerMode: providerMode
+                                    providerMode: providerMode,
+                                    reportDiagnostic: showAIDiagnostics ? { secondRound = $0 } : nil
                                 ) {
                                     if let message = composed.companionMessage?.trimmingCharacters(in: .whitespacesAndNewlines),
                                        !message.isEmpty {
@@ -119,6 +127,8 @@ struct UploadScreenshotIntent: AppIntent {
                                         composedResult: composed
                                     )
                                 }
+                            } else {
+                                secondRound = "跳过 · 文字模型凭据不可用"
                             }
                             result = ShortcutUploadResult.archived(
                                 notificationText: text,
@@ -126,6 +136,7 @@ struct UploadScreenshotIntent: AppIntent {
                                 feedback: deliveryFeedback
                             )
                         case .staged, .financialPending:
+                            secondRound = "跳过 · 记录待确认"
                             trialOutcome = .staged
                             let text = outcome.notificationText ?? "AI 识别结果已保存到本地收件箱，请打开芥子确认。"
                             result = ShortcutUploadResult(
@@ -159,11 +170,11 @@ struct UploadScreenshotIntent: AppIntent {
                 if let trialID { await ShortcutTrialStore.shared.complete(id: trialID, outcome: trialOutcome) }
                 await ShortcutNotificationService.shared.notifyUploadResult(result)
                 let value = ShortcutFeedbackPreferences.resultCardEnabled ? result.displayText : result.compactDisplayText
-                return .result(value: value)
+                return .result(value: showAIDiagnostics ? "\(value)\nAI 第二轮：\(secondRound)" : value)
             } catch {
                 if let trialID { await ShortcutTrialStore.shared.complete(id: trialID, outcome: .failed) }
                 let message = "上传失败：\(error.localizedDescription)"
-                return .result(value: message)
+                return .result(value: showAIDiagnostics ? "\(message)\nAI 第二轮：跳过 · 图片处理未完成" : message)
             }
         }
 

@@ -3,6 +3,7 @@ import Foundation
 struct LocalCompanionResult {
     let companionMessage: String?
     let aiFeedback: [String: AnyCodable]?
+    var hostedVoiceStatus: String? = nil
 }
 
 protocol LocalCompanionProvider {
@@ -43,12 +44,22 @@ final class HostedAICompanionProvider: LocalCompanionProvider {
             throw QwenBYOKError.invalidResponse
         }
         do {
-            return try LocalCompanionResultNormalizer.normalize(
+            var result = try LocalCompanionResultNormalizer.normalize(
                 companionMessage: envelope.data?.companionMessage,
                 aiFeedback: envelope.data?.aiFeedback,
                 domainKey: context.currentFact.domainKey,
                 recentCompanionLines: context.recentCompanionLines
             )
+            if let data = envelope.data {
+                if data.plannerFallbackReason != nil {
+                    result.hostedVoiceStatus = "服务端报告 Planner 降级，模型执行结果待确认"
+                } else if data.error != nil {
+                    result.hostedVoiceStatus = "服务端报告文字生成异常"
+                } else {
+                    result.hostedVoiceStatus = "服务端未报告文字生成异常"
+                }
+            }
+            return result
         } catch {
             throw QwenBYOKError.invalidResponse
         }
@@ -358,10 +369,14 @@ private struct HostedExpressionEnvelope: Decodable {
     struct Payload: Decodable {
         let companionMessage: String?
         let aiFeedback: [String: AnyCodable]?
+        let error: String?
+        let plannerFallbackReason: String?
 
         enum CodingKeys: String, CodingKey {
             case companionMessage = "companion_message"
             case aiFeedback = "ai_feedback"
+            case error
+            case plannerFallbackReason = "planner_fallback_reason"
         }
     }
 }

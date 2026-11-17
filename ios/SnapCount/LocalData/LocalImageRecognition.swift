@@ -236,8 +236,10 @@ final class LocalImageRecognitionUseCase {
         for outcome: LocalRecordIntakeOutcome,
         provider: LocalCompanionProvider,
         settings: NativeUserSettings,
-        providerMode: LocalExpressionProviderMode
+        providerMode: LocalExpressionProviderMode,
+        reportDiagnostic: ((String) -> Void)? = nil
     ) async -> LocalCompanionResult? {
+        reportDiagnostic?("跳过 · 本机上下文不可用")
         guard let expressionPersistence else { return nil }
         let detail: NativeRecordDetail
         let profileID: UUID
@@ -258,15 +260,26 @@ final class LocalImageRecognitionUseCase {
         case .staged, .financialPending:
             return nil
         }
-        guard (detail.companionMessage ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-              let context = expressionPersistence.makeCompositionContext(
-                for: detail,
-                profileID: profileID,
-                settings: settings,
-                providerMode: providerMode
-              ),
-              let result = try? await provider.compose(context: context) else {
+        guard (detail.companionMessage ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            reportDiagnostic?("跳过 · 复用已保存的陪伴文案")
             return nil
+        }
+        guard let context = expressionPersistence.makeCompositionContext(
+            for: detail,
+            profileID: profileID,
+            settings: settings,
+            providerMode: providerMode
+        ) else { return nil }
+        guard let result = try? await provider.compose(context: context) else {
+            reportDiagnostic?("已尝试文字请求 · 请求失败或响应校验失败")
+            return nil
+        }
+        if let reportDiagnostic {
+            let content = result.companionMessage == nil && result.aiFeedback == nil
+                ? "无可用文案或反馈"
+                : "有可用文案或反馈"
+            let status = result.hostedVoiceStatus.map { " · \($0)" } ?? ""
+            reportDiagnostic("文字接口已返回 · \(content)\(status)")
         }
         expressionPersistence.persist(companion: result, for: detail)
         return result
