@@ -1,4 +1,23 @@
 import Foundation
+import OSLog
+
+struct ShortcutAITrace {
+    private static let logger = Logger(subsystem: "com.jiezi.app", category: "ShortcutAI")
+    private let id = UUID()
+    private let sink: ((String) -> Void)?
+
+    init(_ sink: ((String) -> Void)? = nil) {
+        self.sink = sink
+    }
+
+    // Only pass fixed status codes and bounded counts. Never send payload values here.
+    func record(_ event: String) {
+        sink?(event)
+        #if DEBUG
+        Self.logger.notice("trace=\(id.uuidString, privacy: .public) \(event, privacy: .public)")
+        #endif
+    }
+}
 
 struct LocalCompanionResult {
     let companionMessage: String?
@@ -15,41 +34,75 @@ final class HostedAICompanionProvider: LocalCompanionProvider {
     private let accessToken: String
     private let service: SnapCountUploadService
 
-    init(accessToken: String, service: SnapCountUploadService = SnapCountUploadService()) {
+    private let trace: ShortcutAITrace?
+
+    init(accessToken: String, service: SnapCountUploadService = SnapCountUploadService(), trace: ShortcutAITrace? = nil) {
         self.accessToken = accessToken
         self.service = service
+        self.trace = trace
     }
 
     func compose(context: LocalExpressionContext) async throws -> LocalCompanionResult {
         let selected = LocalPlannerCandidateEngine.selectedCandidate(
             for: context.currentFact,
-            recentFacts: context.recentFacts,
+            recentFacts: [],
             memoryContextJSON: context.memoryContextJSON
         )
+        let candidateAvailable = context.sharedCompanionPlan.map { $0.briefJSON != nil } ?? (selected != nil)
+        trace?.record("text.context=candidate:\(candidateAvailable),memory:\(context.memoryContextJSON != nil)")
         let response = try await service.generateLocalExpression(
             currentFact: Self.factPayload(context.currentFact),
             plannerCandidate: Self.plannerPayload(selected, fact: context.currentFact),
-            recentFacts: context.recentFacts.map(Self.factPayload),
             localMemoryContext: LocalCompanionCompositionSupport.jsonObject(context.memoryContextJSON) as? [String: Any],
             expressionPreferences: Self.preferencesPayload(context.expressionPreferences),
             clientLocalTime: context.clientLocalTime,
             clientCapturedAt: context.clientCapturedAt,
             weekday: context.weekday,
             recentCompanionLines: context.recentCompanionLines,
-            accessToken: accessToken
+            accessToken: accessToken,
+            sharedPlan: context.sharedCompanionPlan,
+            trace: trace
         )
         guard let envelope = try? JSONDecoder().decode(HostedExpressionEnvelope.self, from: response),
               envelope.ok != false else {
+            trace?.record("text.response=invalid_envelope")
             throw QwenBYOKError.invalidResponse
         }
+        if context.sharedCompanionPlan != nil {
+            let status: String
+            switch envelope.data?.sharedPlannerStatus {
+            case "accepted": status = "accepted"
+            case "empty": status = "empty"
+            case "rejected": status = "rejected"
+            default: status = "unsupported"
+            }
+            trace?.record("text.shared_planner=\(status)")
+        }
+        if envelope.data?.plannerFallbackReason != nil {
+            trace?.record("text.server=planner_fallback")
+        } else if envelope.data?.error != nil {
+            trace?.record("text.server=generation_error")
+        } else {
+            trace?.record("text.server=no_error_reported")
+        }
         do {
-            return try LocalCompanionResultNormalizer.normalize(
+            let result = try LocalCompanionResultNormalizer.normalize(
                 companionMessage: envelope.data?.companionMessage,
                 aiFeedback: envelope.data?.aiFeedback,
                 domainKey: context.currentFact.domainKey,
                 recentCompanionLines: context.recentCompanionLines
             )
+            let content: String
+            switch (result.companionMessage != nil, result.aiFeedback != nil) {
+            case (true, true): content = "companion_and_feedback"
+            case (true, false): content = "companion"
+            case (false, true): content = "feedback"
+            case (false, false): content = "empty"
+            }
+            trace?.record("text.content=\(content)")
+            return result
         } catch {
+            trace?.record("text.response=content_rejected")
             throw QwenBYOKError.invalidResponse
         }
     }
@@ -137,7 +190,11 @@ final class QwenBYOKCompanionProvider: LocalCompanionProvider {
             memoryContextJSON: context.memoryContextJSON
         )
         var facts = HostedAICompanionProvider.factPayload(context.currentFact)
-        facts["planner_candidate"] = HostedAICompanionProvider.plannerPayload(selected, fact: context.currentFact) ?? NSNull()
+        if let shared = context.sharedCompanionPlan {
+            facts["planner_candidate"] = shared.brief as Any? ?? NSNull()
+        } else {
+            facts["planner_candidate"] = HostedAICompanionProvider.plannerPayload(selected, fact: context.currentFact) ?? NSNull()
+        }
         facts["expression_preferences"] = HostedAICompanionProvider.preferencesPayload(context.expressionPreferences)
         facts["client_local_time"] = context.clientLocalTime ?? NSNull()
         facts["client_captured_at"] = context.clientCapturedAt ?? NSNull()
@@ -323,7 +380,7 @@ private enum LocalCompanionResultNormalizerError: Error {
     case malformedFeedback
 }
 
-private enum LocalCompanionCompositionSupport {
+enum LocalCompanionCompositionSupport {
     static func jsonObject(_ json: String?) -> Any? {
         guard let json, let data = json.data(using: .utf8) else { return nil }
         return try? JSONSerialization.jsonObject(with: data)
@@ -358,10 +415,16 @@ private struct HostedExpressionEnvelope: Decodable {
     struct Payload: Decodable {
         let companionMessage: String?
         let aiFeedback: [String: AnyCodable]?
+        let error: AnyCodable?
+        let plannerFallbackReason: AnyCodable?
+        let sharedPlannerStatus: String?
 
         enum CodingKeys: String, CodingKey {
             case companionMessage = "companion_message"
             case aiFeedback = "ai_feedback"
+            case error
+            case plannerFallbackReason = "planner_fallback_reason"
+            case sharedPlannerStatus = "shared_planner_status"
         }
     }
 }

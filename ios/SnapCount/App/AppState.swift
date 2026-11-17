@@ -4589,11 +4589,17 @@ final class AppState: ObservableObject {
             settings: userSettings,
             providerMode: .deterministic
         ) else { return detail }
-        guard let generatedPlannerFeedback = LocalPlannerCandidateEngine.selectedCandidate(
-            for: context.currentFact,
-            recentFacts: context.recentFacts,
-            memoryContextJSON: context.memoryContextJSON
-        ) else { return detail }
+        let generatedPlannerFeedback: NativeAIFeedback?
+        if let plan = context.sharedCompanionPlan {
+            generatedPlannerFeedback = plan.feedback
+        } else {
+            generatedPlannerFeedback = LocalPlannerCandidateEngine.selectedCandidate(
+                for: context.currentFact,
+                recentFacts: context.recentFacts,
+                memoryContextJSON: context.memoryContextJSON
+            )
+        }
+        guard let generatedPlannerFeedback else { return detail }
         let persistedPlannerFeedback = detail.expressionPlannerAiFeedback
         let plannerFeedback = persistedPlannerFeedback?.claimFingerprint == generatedPlannerFeedback.claimFingerprint
             ? (persistedPlannerFeedback ?? generatedPlannerFeedback)

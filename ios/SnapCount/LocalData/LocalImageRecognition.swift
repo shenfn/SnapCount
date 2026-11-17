@@ -236,9 +236,13 @@ final class LocalImageRecognitionUseCase {
         for outcome: LocalRecordIntakeOutcome,
         provider: LocalCompanionProvider,
         settings: NativeUserSettings,
-        providerMode: LocalExpressionProviderMode
+        providerMode: LocalExpressionProviderMode,
+        trace: ShortcutAITrace? = nil
     ) async -> LocalCompanionResult? {
-        guard let expressionPersistence else { return nil }
+        guard let expressionPersistence else {
+            trace?.record("companion.skipped=persistence_unavailable")
+            return nil
+        }
         let detail: NativeRecordDetail
         let profileID: UUID
         switch outcome {
@@ -253,22 +257,31 @@ final class LocalImageRecognitionUseCase {
                 detail = LocalIncomeReadModel.detail(from: income, imageStore: imageStore)
                 profileID = income.profileID
             } else {
+                trace?.record("companion.skipped=record_unavailable")
                 return nil
             }
         case .staged, .financialPending:
+            trace?.record("companion.skipped=pending")
             return nil
         }
-        guard (detail.companionMessage ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-              let context = expressionPersistence.makeCompositionContext(
-                for: detail,
-                profileID: profileID,
-                settings: settings,
-                providerMode: providerMode
-              ),
-              let result = try? await provider.compose(context: context) else {
+        guard (detail.companionMessage ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            trace?.record("companion.skipped=already_saved")
             return nil
         }
-        expressionPersistence.persist(companion: result, for: detail)
+        guard let context = expressionPersistence.makeCompositionContext(
+            for: detail,
+            profileID: profileID,
+            settings: settings,
+            providerMode: providerMode
+        ) else {
+            trace?.record("companion.skipped=context_unavailable")
+            return nil
+        }
+        guard let result = try? await provider.compose(context: context) else {
+            trace?.record("companion.result=provider_failed")
+            return nil
+        }
+        expressionPersistence.persist(companion: result, for: detail, trace: trace)
         return result
     }
 
@@ -888,9 +901,11 @@ final class LocalImageRecognitionUseCase {
 final class HostedAIImageRecognitionProvider: LocalImageRecognitionProvider {
     private let uploadService: SnapCountUploadService
     private let decoder = JSONDecoder()
+    private let trace: ShortcutAITrace?
 
-    init(uploadService: SnapCountUploadService = SnapCountUploadService()) {
+    init(uploadService: SnapCountUploadService = SnapCountUploadService(), trace: ShortcutAITrace? = nil) {
         self.uploadService = uploadService
+        self.trace = trace
     }
 
     func recognize(_ request: LocalImageRecognitionRequest) async throws -> LocalRecognitionCandidate {
@@ -899,7 +914,8 @@ final class HostedAIImageRecognitionProvider: LocalImageRecognitionProvider {
             uploadToken: request.uploadToken,
             captureKind: request.captureKind,
             filename: request.filename,
-            mimeType: "image/jpeg"
+            mimeType: "image/jpeg",
+            trace: trace
         )
         let envelope = try decoder.decode(HostedAIRecognitionEnvelope.self, from: responseData)
         guard envelope.operation == "recognize_only", envelope.schemaVersion == "local-recognition-candidate-v1",

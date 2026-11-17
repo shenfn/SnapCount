@@ -73,8 +73,11 @@ interface ShadowPlannerInput extends ShadowPlannerOptions {
   currentRecordId: string;
   occurredAt?: string | null;
   relatedRecords?: ShadowRelatedRecord[];
+  localExpenseEvidence?: { completeDay: boolean };
+  currentOnly?: boolean;
+  requirePreciseRelatedTime?: boolean;
 }
-interface GenericPlannerInput extends ShadowPlannerOptions { domainKey: string; records: ShadowGenericRecord[]; currentRecordId: string; domainProfile?: Record<string, unknown>; relatedRecords?: ShadowRelatedRecord[]; }
+interface GenericPlannerInput extends ShadowPlannerOptions { currentOnly?: boolean; domainKey: string; records: ShadowGenericRecord[]; currentRecordId: string; domainProfile?: Record<string, unknown>; relatedRecords?: ShadowRelatedRecord[]; }
 
 export const EXPRESSION_PLANNER_VERSION = "expression-shadow-auto-v0.6";
 const MERCHANT_ALIAS_MAP = compileMerchantAliases(merchantAliasConfig);
@@ -149,7 +152,7 @@ export function buildIncomePlannerSourceRecord(row: Record<string, unknown>): Sh
       : ""),
     amount: numberOrNull(row.amount),
     source_name: stringOrNull(row.source_name),
-    payload: { category: stringOrNull(row.category) },
+    payload: { category: stringOrNull(row.category), income_date: incomeDate },
     source_type: "income_record",
   };
 }
@@ -464,6 +467,31 @@ export function buildExpressionShadowPlan(input: ShadowPlannerInput) {
     currentEventId: `transaction:${currentRecord.id}`,
     timeZone: "Asia/Shanghai",
   }) : [];
+  const finish = (candidates: Record<string, unknown>[]) => finalizePlan("expense", {
+    id: currentRecord.id,
+    entity_id: entityId,
+    merchant_name: currentRecord.merchant.canonical_name,
+    raw_merchant_name: currentRecord.merchant.raw_name,
+    merchant_observation: merchantObservation,
+    transaction_date: localDate,
+    amount: currentRecord.amount,
+    category: currentRecord.category,
+    fact_contract: currentRecord.fact_contract,
+    occurred_at: currentRecord.occurred_at,
+  }, candidates, input, [],
+  buildExpensePlannerSourceRecord(input.transactions.find(row => row.id === input.currentRecordId)!), "transactions",
+  input.transactions.map(buildExpensePlannerSourceRecord),
+  input.relatedRecords ?? []);
+  if (input.currentOnly) return finish(currentRecordCandidates);
+  if (input.localExpenseEvidence) {
+    // The handset supplied a bounded set for these two observations only.
+    // It cannot establish first occurrence, category trends or other windows.
+    const daily = input.localExpenseEvidence.completeDay
+      ? factCandidates.filter((item: Record<string, unknown>) =>
+        objectOrEmpty(item.claim).semantic_key === "merchant_daily_count_total")
+      : [];
+    return finish([...daily, ...recurrenceCandidates]);
+  }
   const comparisonCandidates = currentRecordConfirmed && entityId ? generateComparisonCandidates({
     records,
     currentDayEvents,
@@ -479,7 +507,8 @@ export function buildExpressionShadowPlan(input: ShadowPlannerInput) {
       currentRecord: {
         id: currentRecord.id,
         domain_key: "expense",
-        occurred_at: currentRecord.occurred_at,
+        occurred_at: (!input.requirePreciseRelatedTime || currentRecord.has_precise_event_time)
+          ? currentRecord.occurred_at : null,
         created_at: currentRecord.created_at,
         title: currentRecord.merchant.canonical_name,
         merchant_name: currentRecord.merchant.raw_name,
@@ -489,21 +518,8 @@ export function buildExpressionShadowPlan(input: ShadowPlannerInput) {
       relatedRecords: input.relatedRecords ?? [],
     })
     : [];
-  return finalizePlan("expense", {
-    id: currentRecord.id,
-    entity_id: entityId,
-    merchant_name: currentRecord.merchant.canonical_name,
-    raw_merchant_name: currentRecord.merchant.raw_name,
-    merchant_observation: merchantObservation,
-    transaction_date: localDate,
-    amount: currentRecord.amount,
-    category: currentRecord.category,
-    fact_contract: currentRecord.fact_contract,
-    occurred_at: currentRecord.occurred_at,
-  }, [...currentRecordCandidates, ...firstOccurrenceCandidates, ...factCandidates, ...recurrenceCandidates, ...comparisonCandidates, ...categoryComparisonCandidates, ...crossRecordCandidates], input, [],
-  buildExpensePlannerSourceRecord(input.transactions.find(row => row.id === input.currentRecordId)!), "transactions",
-  input.transactions.map(buildExpensePlannerSourceRecord),
-  input.relatedRecords ?? []);
+  return finish([...currentRecordCandidates, ...firstOccurrenceCandidates, ...factCandidates,
+    ...recurrenceCandidates, ...comparisonCandidates, ...categoryComparisonCandidates, ...crossRecordCandidates]);
 }
 
 export function buildGenericExpressionShadowPlan(input: GenericPlannerInput) {
@@ -512,6 +528,8 @@ export function buildGenericExpressionShadowPlan(input: GenericPlannerInput) {
   if (!currentRecord) return { status: "skipped", reason: "current_domain_record_missing", domain_key: input.domainKey, changes_user_output: false };
   const candidates = input.domainKey === "income"
     ? generateIncomeCandidates(planningRecords, input.currentRecordId)
+      .filter((candidate: Record<string, unknown>) =>
+        !input.currentOnly || objectOrEmpty(candidate.claim).semantic_key === "income_current_amount")
     : generateBuiltinDomainCandidates(input.domainKey, planningRecords, input.currentRecordId, input.domainProfile ?? {});
   const crossRecordCandidates = generateCrossRecordRelationshipCandidates({
     currentRecord: {

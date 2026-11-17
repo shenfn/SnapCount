@@ -20,10 +20,12 @@ const PAYLOAD_STRING_FIELDS = new Set([
   "occurred_at", "order_finished_at", "meal_type", "sport_type", "avg_pace", "book_name",
   "record_kind", "account_name", "category", "income_category", "merchant_name", "source_name",
   "platform", "payment_method", "dish_name", "food_name", "meal_name",
+  "sleep_start_at", "wake_at", "quality_level", "account_snapshot_kind", "snapshot_at",
 ]);
 const PAYLOAD_NUMBER_FIELDS = new Set([
   "amount", "amount_minor", "balance_minor", "snapshot_balance_minor", "sleep_hours", "sleep_minutes",
-  "quality_score", "duration_minutes", "distance_km", "total_calorie_kcal", "reading_minutes", "progress_percent",
+  "quality_score", "deep_sleep_minutes", "light_sleep_minutes", "rem_minutes", "awake_minutes",
+  "duration_minutes", "duration_min", "distance_km", "total_calorie_kcal", "reading_minutes", "progress_percent",
 ]);
 const CURRENT_FACT_STRING_FIELDS = new Set([
   "id", "domain_key", "title", "summary", "merchant_name", "platform", "category", "payment_method",
@@ -53,6 +55,7 @@ function boundedNumber(value: unknown): number | string | null {
 function sanitizePayload(value: unknown): Record<string, unknown> | null {
   if (!isRecord(value)) return null;
   const result: Record<string, unknown> = {};
+  if (typeof value.is_estimated === "boolean") result.is_estimated = value.is_estimated;
   for (const [key, raw] of Object.entries(value)) {
     if (PAYLOAD_STRING_FIELDS.has(key)) {
       const normalized = boundedString(raw);
@@ -81,6 +84,10 @@ function sanitizePayload(value: unknown): Record<string, unknown> | null {
         if (amount !== null) entry.amount = amount;
         const kcal = boundedNumber(item.kcal ?? item.calorie_kcal);
         if (kcal !== null) entry.kcal = kcal;
+        for (const macro of ["protein_g", "carb_g", "fat_g"]) {
+          const grams = boundedNumber(item[macro]);
+          if (grams !== null) entry[macro] = grams;
+        }
         items.push(entry);
       }
       if (items.length > 0) result[key] = items;

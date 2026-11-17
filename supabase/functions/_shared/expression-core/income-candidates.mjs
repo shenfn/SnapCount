@@ -1,5 +1,9 @@
 import { candidate, localDate, num } from './generic-domain-shared.mjs'
 
+function incomeDate(record) {
+  return record.payload?.income_date ?? localDate(record.occurred_at)
+}
+
 function monthStart(date) {
   return `${date.slice(0, 7)}-01`
 }
@@ -9,10 +13,10 @@ export function generateIncomeCandidates(records, currentRecordId) {
   if (!current) return []
   const amount = num(current.amount)
   if (amount === null) return []
-  const date = localDate(current.occurred_at)
+  const date = incomeDate(current)
   const monthRecords = records.filter(record => (
-    localDate(record.occurred_at) >= monthStart(date)
-    && localDate(record.occurred_at) <= date
+    incomeDate(record) >= monthStart(date)
+    && incomeDate(record) <= date
   ))
   const monthAmounts = monthRecords.map(record => num(record.amount)).filter(value => value !== null)
   const monthTotal = Math.round(monthAmounts.reduce((sum, value) => sum + value, 0) * 100) / 100

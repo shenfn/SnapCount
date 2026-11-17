@@ -10,17 +10,20 @@ import {
   normalizeSemanticMemories,
   resolveExpressedSemanticKey,
 } from "./context-packet.ts";
-import type { ContextPacket, ContextPacketCandidate } from "./context-packet.ts";
+import type { ContextPacket } from "./context-packet.ts";
 import { submitExpressionFeedback } from "./expression-feedback.ts";
 import {
   acknowledgeRecordExpressionPlan,
+  buildLocalExpenseVoiceBrief,
   buildPreInsertPlannerVoiceBrief,
   deliverShortcutExpressionPlan,
   expressionRenderedTextFingerprint,
   getRecordExpressionPlan,
   isRecordExpressionOwnerEnabled,
 } from "./expression-delivery.ts";
-import type { PlannerVoiceBrief } from "./expression-delivery.ts";
+import { plannerBriefContextCandidate } from "./planner-voice-brief.ts";
+import type { PlannerVoiceBrief } from "./planner-voice-brief.ts";
+import { normalizeLocalSharedBrief } from "./local-shared-brief.ts";
 import { normalizeLocalExpressionAction } from "./local-expression-action.ts";
 import {
   loadDomainProfiles,
@@ -3527,24 +3530,6 @@ function plannerBriefSignal(brief: PlannerVoiceBrief): DomainSignal {
   };
 }
 
-function plannerBriefContextCandidate(brief: PlannerVoiceBrief): ContextPacketCandidate {
-  return {
-    candidate_id: brief.candidate_id,
-    semantic_key: brief.semantic_key,
-    kind: brief.semantic_key,
-    dimension: brief.dimension,
-    fact: brief.canonical_text,
-    numbers: brief.numbers,
-    count_numbers: brief.count_numbers,
-    number_facts: brief.number_facts,
-    evidence: brief.evidence,
-    source: "expression_planner",
-    source_surface: brief.source_surface,
-    planner_version: brief.planner_version,
-    claim_fingerprint: brief.claim_fingerprint,
-  };
-}
-
 function voiceExpressionTrace(
   contextPacket: ContextPacket,
   brief: PlannerVoiceBrief | null | undefined,
@@ -5617,7 +5602,18 @@ Deno.serve(async (req) => {
           companion_message: null,
         };
         const plannerCandidate = normalizedAction.candidate;
-        const plannerBrief: PlannerVoiceBrief | undefined = plannerCandidate
+        const sharedExpenseBrief = buildLocalExpenseVoiceBrief(currentFact, jsonBody?.expense_evidence);
+        const localSharedInput: unknown = jsonBody?.shared_planner_brief;
+        const sharedBrief = normalizeLocalSharedBrief(localSharedInput, currentFact);
+        const sharedPlannerStatus = localSharedInput === undefined ? undefined
+          : localSharedInput === null ? "empty"
+          : sharedBrief ? "accepted" : "rejected";
+        const plannerFallbackReason = sharedPlannerStatus === undefined
+          ? (sharedExpenseBrief ? null : normalizedAction.plannerFallbackReason)
+          : (sharedPlannerStatus === "rejected" ? "invalid_shared_planner_brief" : null);
+        const plannerBrief: PlannerVoiceBrief | null | undefined = localSharedInput !== undefined
+          ? sharedBrief
+          : sharedExpenseBrief ?? (plannerCandidate
           ? {
             candidate_id: plannerCandidate.candidate_id.slice(0, 200),
             semantic_key: plannerCandidate.semantic_key.slice(0, 200),
@@ -5631,7 +5627,7 @@ Deno.serve(async (req) => {
             evidence: plannerCandidate.evidence,
             claim_fingerprint: plannerCandidate.claim_fingerprint,
           }
-          : undefined;
+          : undefined);
         const result = await generateVoiceFeedback({
           ai,
           domainKey,
@@ -5651,15 +5647,16 @@ Deno.serve(async (req) => {
           localMemoryContext: normalizedAction.localMemoryContext,
           textProvider,
           plannerBrief,
-          plannerFallbackReason: normalizedAction.plannerFallbackReason,
+          plannerFallbackReason,
         });
         return new Response(JSON.stringify({
           ok: true,
           data: {
             companion_message: result.companion_message,
             ai_feedback: result.ai_feedback,
-            error: normalizedAction.plannerFallbackReason ?? result.error ?? null,
-            planner_fallback_reason: normalizedAction.plannerFallbackReason,
+            error: plannerFallbackReason ?? result.error ?? null,
+            planner_fallback_reason: plannerFallbackReason,
+            shared_planner_status: sharedPlannerStatus,
           },
         }), {
           headers: { "Content-Type": "application/json", ...corsHeaders },

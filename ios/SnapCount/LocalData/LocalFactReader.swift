@@ -62,9 +62,29 @@ final class LocalFactReader {
         )
     }
 
-    func range(profileID: UUID, from startDate: String, to endDate: String) throws -> LocalFactMonth {
+    func range(
+        profileID: UUID, from startDate: String, to endDate: String, domainKey: String? = nil
+    ) throws -> LocalFactMonth {
         try database.writer.read { db in
-            try Self.readMonth(db, profileID: profileID, from: startDate, to: endDate)
+            try Self.readMonth(db, profileID: profileID, from: startDate, to: endDate, domainKey: domainKey)
+        }
+    }
+
+    func fact(profileID: UUID, id: String, domainKey: String) throws -> LocalFact? {
+        let source: (table: String, project: (Row) throws -> LocalFact)
+        switch domainKey {
+        case "expense": source = ("local_expenses", Self.fact(expenseRow:))
+        case "income": source = ("local_income_records", Self.fact(incomeRow:))
+        case "wallet": source = ("local_wallet_snapshots", Self.walletFact(row:))
+        default: source = ("local_records", Self.fact(recordRow:))
+        }
+        return try database.writer.read { db in
+            guard let row = try Row.fetchOne(db, sql: """
+                SELECT * FROM \(source.table)
+                WHERE id = ? AND profile_id = ? AND deleted_at IS NULL
+                """, arguments: [UUID(uuidString: id)?.uuidString ?? id, profileID.uuidString]) else { return nil }
+            let fact = try source.project(row)
+            return fact.domainKey == domainKey ? fact : nil
         }
     }
 
@@ -86,8 +106,10 @@ final class LocalFactReader {
         }
     }
 
-    private static func readMonth(_ db: Database, profileID: UUID, from startDate: String, to endDate: String) throws -> LocalFactMonth {
-            let expenseRows = try Row.fetchAll(
+    private static func readMonth(
+        _ db: Database, profileID: UUID, from startDate: String, to endDate: String, domainKey: String? = nil
+    ) throws -> LocalFactMonth {
+            let expenseRows = domainKey == nil || domainKey == "expense" ? try Row.fetchAll(
                 db,
                 sql: """
                     SELECT * FROM local_expenses
@@ -96,19 +118,19 @@ final class LocalFactReader {
                       AND deleted_at IS NULL
                     """,
                 arguments: [profileID.uuidString, startDate, endDate]
-            )
+            ) : []
             let expenses = expenseRows.compactMap { row in
                 do { return try Self.fact(expenseRow: row) }
                 catch { Self.reportProjectionSkip(table: "local_expenses", row: row, error: error); return nil }
             }
-            let incomeRows = try Row.fetchAll(
+            let incomeRows = domainKey == nil || domainKey == "income" ? try Row.fetchAll(
                 db,
                 sql: """
                     SELECT * FROM local_income_records
                     WHERE profile_id = ? AND income_date BETWEEN ? AND ? AND deleted_at IS NULL
                     """,
                 arguments: [profileID.uuidString, startDate, endDate]
-            )
+            ) : []
             let incomes = incomeRows.compactMap { row in
                 do { return try Self.fact(incomeRow: row) }
                 catch { Self.reportProjectionSkip(table: "local_income_records", row: row, error: error); return nil }
@@ -120,9 +142,10 @@ final class LocalFactReader {
                     WHERE profile_id = ?
                       AND domain_key IN ('food', 'sleep', 'sport', 'reading')
                       AND (domain_key = 'sleep' OR record_date BETWEEN ? AND ?)
+                      AND (? IS NULL OR domain_key = ?)
                       AND deleted_at IS NULL
                     """,
-                arguments: [profileID.uuidString, startDate, endDate]
+                arguments: [profileID.uuidString, startDate, endDate, domainKey, domainKey]
             )
             let records = recordRows.compactMap { row in
                 do {
@@ -134,7 +157,7 @@ final class LocalFactReader {
                 }
             }
 
-            let walletRows = try Row.fetchAll(
+            let walletRows = domainKey == nil || domainKey == "wallet" ? try Row.fetchAll(
                 db,
                 sql: """
                     SELECT * FROM local_wallet_snapshots
@@ -143,7 +166,7 @@ final class LocalFactReader {
                       AND deleted_at IS NULL
                     """,
                 arguments: [profileID.uuidString, startDate, endDate]
-            )
+            ) : []
             let wallets = walletRows.compactMap { row in
                 do { return try Self.walletFact(row: row) }
                 catch {
@@ -251,6 +274,9 @@ final class LocalFactReader {
         }
         var normalizedPayload = (try? LocalRecordCodec.decode(payloadJSON)) ?? [:]
         normalizedPayload["snapshot_balance_minor"] = AnyCodable(Double(balanceMinor))
+        normalizedPayload["currency"] = (row["currency"] as String?).map(AnyCodable.init)
+        normalizedPayload["account_snapshot_kind"] = (row["account_snapshot_kind"] as String?).map(AnyCodable.init)
+        normalizedPayload["linked_account_id"] = (row["linked_account_id"] as String?).map(AnyCodable.init)
         let normalizedPayloadJSON = (try? LocalRecordCodec.encode(normalizedPayload)) ?? payloadJSON
         return LocalFact(
             id: id,

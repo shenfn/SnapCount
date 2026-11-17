@@ -175,6 +175,7 @@ struct LocalExpressionContext: Equatable {
     var clientCapturedAt: String? = nil
     var weekday: String? = nil
     var recentCompanionLines: [String] = []
+    var sharedCompanionPlan: LocalSharedCompanionPlan? = nil
 }
 
 struct LocalCompanionExpressionPreferences: Equatable {
