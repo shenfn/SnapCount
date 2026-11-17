@@ -13,7 +13,7 @@ struct UploadScreenshotIntent: AppIntent {
     var showAIDiagnostics: Bool
 
     static var parameterSummary: some ParameterSummary {
-        Summary("上传 \(\.$image) 到芥子")
+        Summary("上传 \(\.$image) 到芥子 · 显示 AI 诊断 \(\.$showAIDiagnostics)")
     }
 
     static func normalizedShortcutFeedback(
@@ -168,9 +168,18 @@ struct UploadScreenshotIntent: AppIntent {
                     )
                 }
                 if let trialID { await ShortcutTrialStore.shared.complete(id: trialID, outcome: trialOutcome) }
-                await ShortcutNotificationService.shared.notifyUploadResult(result)
                 let value = ShortcutFeedbackPreferences.resultCardEnabled ? result.displayText : result.compactDisplayText
-                return .result(value: showAIDiagnostics ? "\(value)\nAI 第二轮：\(secondRound)" : value)
+                if showAIDiagnostics {
+                    let diagnostic = "AI 第二轮：\(secondRound)"
+                    await ShortcutNotificationService.shared.notifyUploadResult(ShortcutUploadResult(
+                        displayText: result.displayText,
+                        notificationText: "\(diagnostic)\n\(result.notificationText)",
+                        route: result.route
+                    ))
+                    return .result(value: "\(value)\n\(diagnostic)")
+                }
+                await ShortcutNotificationService.shared.notifyUploadResult(result)
+                return .result(value: value)
             } catch {
                 if let trialID { await ShortcutTrialStore.shared.complete(id: trialID, outcome: .failed) }
                 let message = "上传失败：\(error.localizedDescription)"
