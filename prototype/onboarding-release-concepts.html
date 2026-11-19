@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>芥子 · 首次使用原型</title>
+<!-- Design question: when should shortcut setup appear? A on the welcome page, B on request, C after entering the app. -->
+<style>
+:root{color-scheme:light;--paper:#f4efe4;--ink:#253831;--muted:#53645b;--green:#355f50;--line:#d9d4c9;--white:#fffcf4;--soft:#e9eee3}
+*{box-sizing:border-box}body{margin:0;background:#e2e5dc;color:var(--ink);font:15px/1.55 -apple-system,BlinkMacSystemFont,"PingFang SC",sans-serif}button{font:inherit;cursor:pointer;color:inherit}button:focus-visible,summary:focus-visible{outline:3px solid #286ea1;outline-offset:3px}button:not(.row){min-height:44px}.desk{display:grid;grid-template-columns:235px minmax(0,390px);gap:52px;align-items:start;justify-content:center;padding:42px 24px 100px}.note{padding-top:60px}.note h1{font-size:24px;margin:5px 0 12px}.note p{color:var(--muted);margin:0 0 18px}.note .caption{font-size:12px}.phone{width:100%;min-height:655px;background:var(--paper);border:7px solid #31433a;border-radius:37px;overflow:hidden;box-shadow:0 17px 44px #34443525;display:flex;flex-direction:column}.status{font-weight:650;font-size:13px;padding:13px 25px 0;display:flex;justify-content:space-between}.screen{padding:22px 24px 25px;flex:1;display:flex;flex-direction:column}.top{display:flex;justify-content:space-between;align-items:center;min-height:44px}.brand{display:flex;gap:8px;align-items:center;font-weight:700}.brand img{width:30px;height:30px;border-radius:8px}.plain{border:0;background:none;padding:0;color:var(--green)}h2{font-family:"Songti SC","Noto Serif CJK SC",serif;font-size:37px;line-height:1.17;margin:22px 0 9px;font-weight:750;letter-spacing:-.035em}h3{font-size:16px;margin:0 0 5px}.intro{color:var(--muted);margin:0 0 13px}.sample{margin:19px 0 20px;background:var(--white);border:1px solid var(--line);padding:15px 16px;transform:rotate(-2deg);box-shadow:3px 5px 0 #e4d9c5}.sample div{display:flex;justify-content:space-between;gap:10px}.sample small{color:var(--muted);display:block;margin-top:6px}.sample strong{font-variant-numeric:tabular-nums}.privacy{font-size:13px;color:var(--muted);margin:10px 0}.bottom{margin-top:auto;padding-top:15px;display:grid;gap:4px}.primary,.secondary{width:100%;padding:9px 12px;border-radius:13px;font-weight:650}.primary{background:var(--green);color:white;border:1px solid var(--green)}.secondary{border:1px solid var(--line);background:transparent}.rows{margin:5px 0 9px;border-top:1px solid var(--line)}.row{width:100%;background:transparent;border:0;border-bottom:1px solid var(--line);min-height:48px;padding:9px 2px;text-align:left;display:flex;justify-content:space-between;gap:9px;align-items:center}.row span:last-child{color:var(--green)}.guide{border-left:2px solid var(--green);padding:9px 12px;background:var(--soft);margin:9px 0;font-size:13px}.guide p{margin:3px 0}.guide strong{display:block}.choices{display:flex;gap:4px;flex-wrap:wrap}.choices button{border:1px solid var(--line);background:var(--white);border-radius:8px;padding:2px 7px;font-size:12px}.choices button[aria-pressed=true]{background:var(--green);color:#fff}.muted{font-size:13px;color:var(--muted)}.home{border-block:1px solid var(--line);padding:14px 0;margin:16px 0}.tip{background:var(--soft);border-radius:12px;padding:14px}.tip p{margin:0 0 5px;font-size:13px}.switcher{position:fixed;z-index:1;bottom:14px;left:50%;transform:translateX(-50%);display:flex;align-items:center;gap:6px;padding:3px 8px;background:#253831;color:white;border-radius:999px;white-space:nowrap;box-shadow:0 4px 16px #293e3a40}.switcher button{background:transparent;color:white;border:0;padding:0 10px;font-size:19px}.switcher span{min-width:143px;text-align:center;font-size:13px}
+@media(max-width:680px){.desk{display:block;padding:9px 12px 80px;max-width:430px;margin:auto}.note{padding:0 4px 11px}.note h1{font-size:17px;margin:0 0 2px}.note p{margin:0;font-size:12px}.note .caption{display:none}.phone{border-width:4px;min-height:min(655px,86dvh);border-radius:28px}.screen{padding:13px 19px 18px}h2{font-size:32px;margin-top:15px}}
+</style>
+</head>
+<body>
+<main class="desk">
+<aside class="note"><h1>芥子首次使用</h1><p id="description"></p><p class="caption">可点击的原型。添加、登录和保存均为演示。</p></aside>
+<section class="phone" aria-label="手机预览"><div class="status"><span>9:41</span><span aria-hidden="true">▴ ▰</span></div><div id="screen" class="screen"></div></section>
+</main>
+<nav class="switcher" aria-label="切换原型"><button data-action="prev" aria-label="上一方案">‹</button><span id="variantName"></span><button data-action="next" aria-label="下一方案">›</button></nav>
+<script>
+const variants = [
+  {key:'a', name:'A · 一页讲清', description:'欢迎和添加快捷指令都在同一页。适合希望打开就配置的人。'},
+  {key:'b', name:'B · 按需设置', description:'推荐。首页先说清楚芥子做什么，想用快捷指令的人再打开设置页。'},
+  {key:'c', name:'C · 先用起来', description:'首次直接进入空白首页。在记录入口旁提供可随时关闭的快捷指令提示。'}
+];
+const requested = variants.findIndex(v => v.key === new URL(location.href).searchParams.get('variant'));
+let index = requested < 0 ? 1 : requested;
+let page, added, pending, binding, method, signedIn, recognized, recorded, tip, setupPage;
+const screen = document.querySelector('#screen');
+const brand = '<span class="brand"><img alt="" src="../ios/SnapCount/Resources/Assets.xcassets/AppIcon.appiconset/AppIcon-120.png">芥子</span>';
+const routes = {
+  back: ['轻点背面','设置 › 无障碍 › 触控 › 轻点背面','选轻点两下或三下，再选刚添加的快捷指令。'],
+  action: ['操作按钮','设置 › 操作按钮 › 快捷指令','在有操作按钮的 iPhone 上，选刚添加的快捷指令。'],
+  share: ['共享菜单','快捷指令 › 指令详情 › 在共享表单中显示','适用于支持接收分享内容的指令。']
+};
+function reset(){ page = index === 2 ? 'home' : 'welcome'; added = new Set(); pending = ''; binding = false; method = 'back'; signedIn = false; recognized = false; recorded = false; tip = true; setupPage = index === 0 ? 'welcome' : 'setup'; }
+function row(label, action, tail = '›'){ return '<button class="row" data-action="'+action+'"><span>'+label+'</span><span>'+tail+'</span></button>'; }
+function button(label, action, style='primary'){ return '<button class="'+style+'" data-action="'+action+'">'+label+'</button>'; }
+function setup(){
+  let text = '<div class="rows">'+row('拍照记录','add-photo',added.has('photo')?'已添加':'添加')+row('截图记录','add-screenshot',added.has('screenshot')?'已添加':'添加')+'</div>';
+  text += '<div class="rows">'+row(added.size ? '绑定启动方式' : '已添加？设置启动方式','binding',binding?'收起':'›')+'</div>';
+  if(binding) {
+    text += '<div class="choices" aria-label="启动方式">'+Object.entries(routes).map(([key,value])=>'<button data-action="method-'+key+'" aria-pressed="'+(key===method)+'">'+value[0]+'</button>').join('')+'</div>';
+    text += '<div class="guide"><strong>'+routes[method][1]+'</strong><p>'+routes[method][2]+'</p></div>';
+  } else if(added.size) text += '<p class="muted">也可以直接在「快捷指令」App 里运行。</p>';
+  if(added.size || binding) text += '<div class="rows">'+row(recognized?'自动识别已开启':(signedIn?'开启自动识别':'登录以开启自动识别'),recognized?'consent':(signedIn?'consent':'login'))+'</div>';
+  return text;
+}
+function render(){
+  const v = variants[index];
+  document.querySelector('#variantName').textContent = v.name;
+  document.querySelector('#description').textContent = v.description;
+  if(page === 'home'){
+    screen.innerHTML = '<div class="top">'+brand+button('快捷指令','setup','plain')+'</div><h2>今天</h2><div class="home"><h3>我的记录</h3><p class="intro">'+(recorded?'便利店早餐　¥12.00':'今天还没有记录。')+'</p>'+button('手动记一笔','record','secondary')+'</div>'+
+      (index===2 && tip?'<div class="tip"><h3>用截图或拍照记录</h3><p>添加一个快捷指令，想记的时候就能用。</p>'+button('设置快捷指令','setup','plain')+'　'+button('稍后','hide','plain')+'</div>':'')+'<div class="bottom"><p class="privacy">记录优先保存在这台设备上。</p></div>';
+  } else if(page === 'install'){
+    screen.innerHTML = '<div class="top">'+button('返回芥子','cancel-install','plain')+'</div><h2>添加'+(pending==='photo'?'拍照记录':'截图记录')+'</h2><p class="intro">模拟系统「快捷指令」中的添加页面。</p><div class="bottom">'+button('添加快捷指令，返回芥子','installed')+'</div>';
+  } else if(page === 'login' || page === 'consent'){
+    screen.innerHTML = '<div class="top">'+button('返回','return','plain')+'</div><h2>'+(page==='login'?'登录芥子':'开启自动识别')+'</h2><p class="intro">'+(page==='login'?'登录后可开启照片和截图的自动识别。':'你提交的图片会发给云端 AI 识别。正式 App 会在这里说明服务商和发送范围。')+'</p><div class="bottom">'+button(page==='login'?'模拟登录':'同意并开启',page==='login'?'signed-in':'enabled')+'</div>';
+  } else if(page === 'setup'){
+    screen.innerHTML = '<div class="top">'+button('返回','back','plain')+button('开始记录','start','plain')+'</div><h2>添加快捷指令</h2><p class="intro">选一种你顺手的记录方式。</p>'+setup();
+  } else {
+    screen.innerHTML = '<div class="top">'+brand+'</div><h2>生活小事，<br>随手记。</h2><p class="intro">今天吃了什么、花了多少，都能随手留一笔。</p>'+
+      (index===0?setup():'<div class="sample"><div><span>便利店早餐</span><strong>¥12.00</strong></div><small>一笔日常记录示例</small></div>')+
+      '<p class="privacy">记录优先保存在这台设备。手动记录无需登录。</p><div class="bottom">'+(index===1?button('设置快捷指令','setup'):'')+button('直接开始记录','start',index===1?'secondary':'primary')+'</div>';
+  }
+}
+function change(delta){
+  index = (index+delta+variants.length)%variants.length;
+  const url = new URL(location.href); url.searchParams.set('variant',variants[index].key); history.replaceState(null,'',url);
+  reset(); render();
+}
+const returnToSetup = () => setupPage;
+document.addEventListener('click',event=>{
+  const action=event.target.closest('[data-action]')?.dataset.action;
+  if(!action) return;
+  if(action==='prev'||action==='next'){ change(action==='prev'?-1:1); return; }
+  if(action.startsWith('add-')){ setupPage=page; pending=action.slice(4); page='install'; }
+  else if(action.startsWith('method-')) method=action.slice(7);
+  else if(action==='installed'){ added.add(pending); binding=true; page=returnToSetup(); }
+  else if(action==='cancel-install'||action==='return') page=returnToSetup();
+  else if(action==='binding') binding=!binding;
+  else if(action==='setup') page=action;
+  else if(action==='login'||action==='consent'){ setupPage=page; page=action; }
+  else if(action==='signed-in'){ signedIn=true; page='consent'; }
+  else if(action==='enabled'){ recognized=true; page=returnToSetup(); }
+  else if(action==='start') page='home';
+  else if(action==='back') page=index===2?'home':'welcome';
+  else if(action==='hide') tip=false;
+  else if(action==='record') recorded=true;
+  render();
+});
+document.addEventListener('keydown',event=>{if(event.key==='ArrowLeft'||event.key==='ArrowRight') change(event.key==='ArrowLeft'?-1:1);});
+reset(); render();
+</script>
+</body>
+</html>
