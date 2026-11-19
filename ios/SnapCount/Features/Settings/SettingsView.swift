@@ -16,12 +16,12 @@ struct SettingsView: View {
                     profileHeader
                 }
 
-                Section("数据与同步") {
+                Section(JieziReleaseCapabilities.cloudSync ? "数据与同步" : "账户与存储") {
                     LabeledContent("本机数据") {
-                        Text("保存在此 iPhone")
+                        Text("保存在这台设备")
                             .foregroundStyle(.secondary)
                     }
-                    LabeledContent("云端身份") {
+                    LabeledContent("登录状态") {
                         Text(appState.isSignedIn ? "已登录" : "未登录")
                             .foregroundStyle(.secondary)
                     }
@@ -68,18 +68,13 @@ struct SettingsView: View {
                                 Label("关闭云同步", systemImage: "icloud.slash")
                             }
                         }
-                    } else {
-                        Text("云同步暂未在 1.0 开放。本机记录和导出仍可用；登录仅用于 Hosted AI 等需要云端身份的功能。")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
                     }
                     if !appState.isSignedIn {
                         Button {
                             showLogin = true
                         } label: {
                             Label(
-                                JieziReleaseCapabilities.cloudSync ? "登录并管理云同步" : "登录使用 Hosted AI",
+                                JieziReleaseCapabilities.cloudSync ? "登录并管理云同步" : "登录以使用自动识别",
                                 systemImage: "person.crop.circle.badge.plus"
                             )
                         }
@@ -131,7 +126,7 @@ struct SettingsView: View {
                     } label: {
                         settingsRow(
                             "截图 / 拍照识别",
-                            detail: "图片识别：\(appState.localVisionMode.title) · 截图：\(providerTitle(appState.userSettings.screenshotVisionPrimary)) · 拍照：\(providerTitle(appState.userSettings.photoVisionPrimary))",
+                            detail: appState.localVisionMode == .disabled ? "未开启" : "已开启",
                             systemImage: "viewfinder"
                         )
                     }
@@ -175,7 +170,7 @@ struct SettingsView: View {
                     } label: {
                         settingsRow(
                             "快捷指令设置",
-                            detail: appState.localVisionMode == .disabled ? "AI 已关闭，可保存到本机收件箱" : (appState.localVisionMode == .byok ? "使用本机 BYOK 凭据" : (appState.hasUploadToken ? "Hosted 凭据已同步" : "Hosted 凭据暂不可用")),
+                            detail: "添加拍照或截图快捷指令，设置启动方式",
                             systemImage: "wand.and.stars"
                         )
                     }
@@ -196,9 +191,6 @@ struct SettingsView: View {
                 Section("关于") {
                     LabeledContent("当前版本") {
                         Text(versionLabel).foregroundStyle(.secondary)
-                    }
-                    LabeledContent("数据存储") {
-                        Text("本机优先 · AI 云端按授权").foregroundStyle(.secondary)
                     }
                 }
 
@@ -410,10 +402,6 @@ struct SettingsView: View {
         .padding(.vertical, 3)
     }
 
-    private func providerTitle(_ id: String) -> String {
-        optionTitle(NativeSettingsOptions.visionProviders, id)
-    }
-
     private func optionTitle(_ options: [NativeSettingsOption], _ id: String) -> String {
         options.first(where: { $0.id == id })?.title ?? id
     }
@@ -457,13 +445,13 @@ struct VisionSettingsView: View {
                     }
                 )) {
                     ForEach(LocalVisionMode.allCases.filter { $0 != .byok || JieziReleaseCapabilities.byok }) { mode in
-                        Text(mode.title).tag(mode)
+                        Text(mode == .hosted ? "自动识别" : mode.title).tag(mode)
                     }
                 }
                 Text(appState.localVisionMode == .disabled
-                     ? "关闭后，图片只保存在本机并进入手工处理；不会发送图片或调用 OCR。"
+                     ? "关闭后，图片保存在本机，可稍后手动填写。"
                      : appState.localVisionMode == .hosted
-                     ? "通过芥子在新加坡的服务发给阿里云百炼（中国内地）。关闭识别可停止后续 Hosted 图片识别和陪伴请求。"
+                     ? "你提交识别的图片会经芥子在新加坡的服务发给阿里云百炼（中国内地）。关闭后将停止后续云端识别和陪伴。"
                      : "图片经 TLS 直接发送至阿里云百炼北京端点的 Qwen 3.6 Flash；费用由你的供应商账户承担。")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
@@ -494,6 +482,7 @@ struct VisionSettingsView: View {
                     }
                 }
             }
+            #if DEBUG
             Section("当前链路") {
                 LabeledContent("截图") {
                     Text(routeSummary(forPhoto: false)).foregroundStyle(.secondary)
@@ -511,14 +500,15 @@ struct VisionSettingsView: View {
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             }
+            #endif
         }
-        .alert("允许 Hosted AI 处理这些数据？", isPresented: $showHostedConsent) {
+        .alert("允许云端 AI 处理这些数据？", isPresented: $showHostedConsent) {
             Button("同意并启用") { appState.setLocalVisionMode(.hosted) }
             Button("取消", role: .cancel) {}
         } message: {
             Text("你提交识别的照片和截图会经芥子在新加坡的服务发给阿里云百炼（中国内地）。开启陪伴文案时，当前记录、部分近期同类记录（可能含金额、饮食、运动或睡眠信息）和表达偏好也会发送。开启长期记忆时，还会发送同类记忆摘要和近期陪伴文案。结果保存在本机。你可以随时在这里关闭。")
         }
-        .navigationTitle("识别模型配置")
+        .navigationTitle("图片识别")
         .scrollContentBackground(.hidden)
         .background(JieziTheme.pageBackground)
         .tint(JieziTheme.brand)
@@ -654,10 +644,10 @@ struct PrivacySettingsView: View {
 
     var body: some View {
         Form {
-            Section("Hosted 云端识别数据") {
-                Toggle("AI 日志记录", isOn: asyncToggle(appState.userSettings.aiLogsEnabled, appState.setAILogsEnabled))
-                Toggle("Prompt 优化参与", isOn: asyncToggle(appState.userSettings.promptOptimizationEnabled, appState.setPromptOptimizationEnabled))
-                Text("Prompt 优化开启后会保留脱敏后的模型原始输出，默认关闭。")
+            Section("云端识别与改进") {
+                Toggle("保留识别日志", isOn: asyncToggle(appState.userSettings.aiLogsEnabled, appState.setAILogsEnabled))
+                Toggle("分享脱敏的识别结果", isOn: asyncToggle(appState.userSettings.promptOptimizationEnabled, appState.setPromptOptimizationEnabled))
+                Text("开启后会保留脱敏后的模型原始输出，用于改进识别，默认关闭。")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
                 Toggle("参与 AI 改进", isOn: asyncToggle(appState.userSettings.expressionImprovementEnabled, appState.setExpressionImprovementEnabled))
@@ -684,10 +674,6 @@ struct PrivacySettingsView: View {
                     .font(.footnote)
                     .foregroundStyle(message.contains("失败") ? JieziTheme.coral : .secondary)
                 }
-            }
-            Section("数据存储") {
-                LabeledContent("服务节点", value: "Supabase 新加坡")
-                LabeledContent("访问隔离", value: "用户级 RLS")
             }
         }
         .navigationTitle("隐私与留存")
@@ -1245,173 +1231,117 @@ struct ShortcutSetupView: View {
     @EnvironmentObject private var appState: AppState
     @Environment(\.openURL) private var openURL
     @State private var setupMessage: String?
+    @State private var showLogin = false
 
     var body: some View {
-        ZStack {
-            JieziTheme.pageBackground.ignoresSafeArea()
-            List {
-                Section {
-                    HStack(spacing: 12) {
-                        Image(systemName: appState.hasUploadToken ? "key.fill" : "key.slash")
-                            .font(.title2)
-                            .foregroundStyle(appState.hasUploadToken ? JieziTheme.mint : JieziTheme.coral)
-                            .frame(width: 38, height: 38)
-                            .background(JieziTheme.brand.opacity(0.08), in: Circle())
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text(appState.hasUploadToken ? "凭据已同步" : "凭据未同步")
-                                .font(.headline)
-                            Text(appState.hasUploadToken ? "快捷指令会自动读取 Keychain，不需要填写 upload_token。" : "请先返回 App 登录一次，再配置快捷指令。")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                    .padding(.vertical, 4)
-
+        List {
+            Section("添加记录方式") {
+                ForEach(ShortcutTemplateKind.allCases) { template in
                     Button {
-                        appState.verifyShortcutCredential()
+                        openShortcutTemplate(template)
                     } label: {
-                        Label("重新检查凭据", systemImage: "arrow.clockwise")
+                        Label("添加\(template.title)", systemImage: template.systemImage)
                     }
                 }
-
-                Section("系统内置动作") {
-                    ShortcutActionRow(title: "上传 JPEG 到芥子", detail: "接收上一部“转换为 JPEG”的结果。点击动作里的 JPEG 图像槽，选择“转换后的图像”。", systemImage: "square.and.arrow.up")
-                    ShortcutActionRow(title: "检查芥子凭据", detail: "确认登录后 Keychain 凭据可被快捷指令自动读取。", systemImage: "key.viewfinder")
+                if let setupMessage {
+                    Text(setupMessage).font(.footnote).foregroundStyle(.secondary)
                 }
-
-                Section("快捷指令模板") {
-                    ShortcutStepRow(index: 1, title: "选择记录方式", detail: "拍照和截图使用不同模板。安装后都由“上传 JPEG 到芥子”完成识别，不需要手动填写凭据。")
-                    VStack(spacing: 10) {
-                        Button {
-                            openShortcutTemplate(.photo)
-                        } label: {
-                            Label("安装拍照记录模板", systemImage: "camera.fill")
-                                .frame(maxWidth: .infinity)
-                        }
-                        .buttonStyle(.borderedProminent)
-                        .tint(JieziTheme.brand)
-
-                        Button {
-                            openShortcutTemplate(.screenshot)
-                        } label: {
-                            Label("安装截图记录模板", systemImage: "rectangle.on.rectangle.angled")
-                                .frame(maxWidth: .infinity)
-                        }
-                        .buttonStyle(.bordered)
-                        .tint(JieziTheme.brand)
-                    }
-                    if let setupMessage {
-                        Text(setupMessage)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                    ShortcutStepRow(index: 2, title: "压缩建议", detail: "如果在快捷指令里压缩，建议长边保留 1200 以上；640 容易让小字识别变差。")
-                    ShortcutStepRow(index: 3, title: "结果通知", detail: "推荐开启。上传完成会弹出系统通知；点击通知会回到芥子。")
-                    ShortcutStepRow(index: 4, title: "显示结果", detail: "可选兜底。如果你喜欢通知优先，可以在设置里关闭结果卡片，并在快捷指令模板里删掉“显示结果”。")
-                    ShortcutStepRow(index: 5, title: "凭据处理", detail: "快捷指令里不放 token。芥子会从 Keychain 自动读取登录后同步的上传凭据。")
+            }
+            Section {
+                NavigationLink {
+                    ShortcutBindingView()
+                } label: {
+                    Label("绑定启动方式", systemImage: "hand.tap")
                 }
-
-                Section {
-                    Button {
-                        Task {
-                            await appState.requestShortcutNotificationPermission()
-                        }
-                    } label: {
-                        Label("开启上传结果通知", systemImage: "bell.badge")
+                Link("打开快捷指令", destination: URL(string: "shortcuts://")!)
+            } header: {
+                Text("添加后")
+            } footer: {
+                Text("添加完成后回到这里，就能查看怎么绑定。")
+            }
+            Section("自动识别") {
+                if !appState.isSignedIn {
+                    Button { showLogin = true } label: {
+                        Label("登录以使用自动识别", systemImage: "person.crop.circle")
                     }
-                    Button {
-                        Task {
-                            await appState.sendTestShortcutNotification()
-                        }
+                } else {
+                    NavigationLink {
+                        VisionSettingsView()
                     } label: {
-                        Label("发送测试通知", systemImage: "bell.and.waves.left.and.right")
+                        Label(appState.localVisionMode == .disabled ? "开启自动识别" : "自动识别设置",
+                              systemImage: "viewfinder")
                     }
-                    Button {
-                        UIPasteboard.general.string = "上传 JPEG 到芥子"
-                    } label: {
-                        Label("复制动作名称", systemImage: "doc.on.doc")
-                    }
-                    Button {
-                        if let url = URL(string: "shortcuts://") {
-                            openURL(url)
-                        }
-                    } label: {
-                        Label("打开快捷指令 App", systemImage: "arrow.up.forward.app")
+                    if appState.localVisionMode == .hosted && !appState.hasUploadToken && !appState.isSigningIn {
+                        Button("重新登录以恢复识别") { showLogin = true }
                     }
                 }
             }
-            .scrollContentBackground(.hidden)
-            .listStyle(.insetGrouped)
-            .tint(JieziTheme.brand)
         }
+        .listStyle(.insetGrouped)
+        .scrollContentBackground(.hidden)
+        .background(JieziTheme.pageBackground)
+        .tint(JieziTheme.brand)
         .navigationTitle("快捷指令")
-        .toolbarBackground(JieziScene.expense.surface, for: .navigationBar)
+        .navigationBarTitleDisplayMode(.inline)
+        .sheet(isPresented: $showLogin) {
+            NavigationStack {
+                LoginView()
+                    .toolbar {
+                        ToolbarItem(placement: .cancellationAction) {
+                            Button("关闭") { showLogin = false }
+                        }
+                    }
+            }
+        }
+        .onChange(of: appState.isSignedIn) { _, signedIn in
+            if signedIn { showLogin = false }
+        }
+        .onChange(of: appState.hasUploadToken) { _, ready in
+            if ready { showLogin = false }
+        }
+        .task {
+            if !appState.isSigningIn { appState.verifyShortcutCredential() }
+        }
     }
 
     private func openShortcutTemplate(_ template: ShortcutTemplateKind) {
-        if let url = URL(string: template.url), !template.url.isEmpty {
-            openURL(url)
+        setupMessage = nil
+        guard !template.url.isEmpty, let url = URL(string: template.url) else {
+            setupMessage = "暂时无法添加，请稍后再试。"
             return
         }
-
-        setupMessage = "当前构建还没有配置\(template.title)链接。我会先打开快捷指令 App，你可以搜索“上传 JPEG 到芥子”继续手动配置。"
-        if let url = URL(string: "shortcuts://") {
-            openURL(url)
+        openURL(url) { accepted in
+            if !accepted { setupMessage = "无法打开快捷指令，请稍后再试。" }
         }
     }
-
 }
 
-private struct ShortcutActionRow: View {
-    let title: String
-    let detail: String
-    let systemImage: String
-
+private struct ShortcutBindingView: View {
     var body: some View {
-        HStack(alignment: .top, spacing: 12) {
-            Image(systemName: systemImage)
-                .font(.body.weight(.semibold))
-                .foregroundStyle(JieziTheme.mint)
-                .frame(width: 28, height: 28)
-                .background(JieziTheme.brand.opacity(0.08), in: Circle())
-
-            VStack(alignment: .leading, spacing: 3) {
-                Text(title)
-                    .font(.subheadline.weight(.semibold))
-                Text(detail)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+        List {
+            if UIDevice.current.userInterfaceIdiom == .phone {
+                Section("轻点背面") {
+                    Text("设置 → 无障碍 → 触控 → 轻点背面。选两下或三下，再选刚添加的快捷指令。")
+                    Link("查看 Apple 设置说明", destination: URL(string: "https://support.apple.com/zh-cn/111772")!)
+                }
+                Section {
+                    Text("设置 → 操作按钮 → 快捷指令。选择刚添加的快捷指令。")
+                    Link("查看 Apple 设置说明", destination: URL(string: "https://support.apple.com/zh-cn/guide/iphone/iphe89d61d66/ios")!)
+                } header: {
+                    Text("操作按钮")
+                } footer: {
+                    Text("适用于有操作按钮的 iPhone。")
+                }
+            }
+            Section("共享菜单") {
+                Text("打开快捷指令的详细信息，开启「在共享表单中显示」。之后可从图片的共享菜单运行。")
+                Link("打开快捷指令", destination: URL(string: "shortcuts://")!)
             }
         }
-        .padding(.vertical, 4)
+        .navigationTitle("绑定启动方式")
+        .navigationBarTitleDisplayMode(.inline)
     }
 }
-
-private struct ShortcutStepRow: View {
-    let index: Int
-    let title: String
-    let detail: String
-
-    var body: some View {
-        HStack(alignment: .top, spacing: 12) {
-            Text("\(index)")
-                .font(.caption.weight(.bold))
-                .foregroundStyle(.white)
-                .frame(width: 24, height: 24)
-                .background(JieziTheme.mint, in: Circle())
-
-            VStack(alignment: .leading, spacing: 3) {
-                Text(title)
-                    .font(.subheadline.weight(.semibold))
-                Text(detail)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-        }
-        .padding(.vertical, 4)
-    }
-}
-
 
 private struct LocalHistoryMigrationIssueList: View {
     let blockers: [String]

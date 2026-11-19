@@ -414,14 +414,14 @@ final class IOSPrototypeRenderingTests: XCTestCase {
         }
     }
 
-    func testIOSV2POLISH007ExportAllFiveOnboardingSteps() async throws {
+    func testIOSV2POLISH007ExportOnboardingSteps() async throws {
         let sizes: [DynamicTypeSize] = [.large, .accessibility3]
         for size in sizes {
             for step in OnboardingStep.allCases {
-            let view = OnboardingFlowView(initialStep: step)
-                .environmentObject(try makeIsolatedState())
-                .environment(\.dynamicTypeSize, size)
-            try await capture(view, name: "onboarding-\(step)-\(size)", height: 844)
+                let view = OnboardingFlowView(initialStep: step)
+                    .environmentObject(try makeIsolatedState())
+                    .environment(\.dynamicTypeSize, size)
+                try await capture(view, name: "onboarding-\(step)-\(size)", height: 844)
             }
         }
     }
