@@ -3,6 +3,31 @@ import XCTest
 @testable import SnapCount
 
 final class LocalImageRecognitionTests: XCTestCase {
+    func testREC009BatchOnlyOffersFailedImagesBelowRetryLimit() {
+        func intake(status: LocalImageIntakeStatus, attemptCount: Int) -> LocalImageIntake {
+            LocalImageIntake(id: "fixture", profileID: UUID(), captureKind: "photo",
+                filename: "demo.jpg", status: status, imagePath: "demo.jpg", imageHash: "demo",
+                failureMessage: nil, cleanupMessage: nil, attemptCount: attemptCount,
+                createdAt: .distantPast, updatedAt: .distantPast)
+        }
+        XCTAssertTrue(intake(status: .failed, attemptCount: 3).canRetryRecognition)
+        XCTAssertFalse(intake(status: .failed, attemptCount: 4).canRetryRecognition)
+        XCTAssertFalse(intake(status: .receiving, attemptCount: 1).canRetryRecognition)
+        XCTAssertFalse(intake(status: .completed, attemptCount: 1).canRetryRecognition)
+    }
+
+    func testREC009BatchCountsReviewAndFailureSeparatelyFromArchives() {
+        var batch = LocalImageRetryBatch(total: 4)
+        batch.record(.archived)
+        batch.record(.failed)
+        batch.record(.needsReview)
+        XCTAssertEqual(batch.archived, 1)
+        XCTAssertEqual(batch.needsReview, 1)
+        XCTAssertEqual(batch.failed, 1)
+        XCTAssertEqual(batch.processed, 3)
+        XCTAssertEqual(batch.total - batch.processed, 1)
+    }
+
     func testLOCALP1FOOD001HostedFoodPayloadArchivesWithoutDatabaseError() async throws {
         let context = try makeContext()
         defer { cleanup(context) }

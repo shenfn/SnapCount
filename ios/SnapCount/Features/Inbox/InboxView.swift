@@ -11,6 +11,7 @@ struct InboxView: View {
     @State private var manualIntakeData: Data?
     @State private var manualIntake: LocalImageIntake?
     @State private var intakeToDiscard: LocalImageIntake?
+    @State private var intakesToRetry: [LocalImageIntake] = []
 
     private var allItems: [NativeInboxItem] {
         NativeInboxPresentation.items(
@@ -104,6 +105,9 @@ struct InboxView: View {
                         )
                     }
 
+                    if let batch = appState.imageRetryBatch {
+                        messageBanner("正在识别图片 · \(batch.processed)/\(batch.total)", isError: false, isWorking: true)
+                    }
                     failedImageIntakesSection
                     failedImageCleanupSection
 
@@ -194,6 +198,23 @@ struct InboxView: View {
         } message: {
             Text("丢弃后会删除本机保存的输入图片，此操作不可撤销。")
         }
+        .confirmationDialog(
+            "批量识别 \(intakesToRetry.count) 张图片？",
+            isPresented: Binding(
+                get: { !intakesToRetry.isEmpty },
+                set: { if !$0 { intakesToRetry = [] } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button("开始识别") {
+                let intakes = intakesToRetry
+                intakesToRetry = []
+                Task { await appState.retryLocalImageBatch(intakes) }
+            }
+            Button("取消", role: .cancel) { intakesToRetry = [] }
+        } message: {
+            Text("芥子会逐张识别。信息不全的图片仍需确认，识别失败会保留原图。")
+        }
         .onChange(of: scope) { _, _ in
             if (filterCounts[filter] ?? 0) == 0 { filter = .all }
         }
@@ -203,11 +224,15 @@ struct InboxView: View {
     @ViewBuilder
     private var failedImageIntakesSection: some View {
         if !appState.failedLocalImageIntakes.isEmpty {
+            let retryable = appState.retryableLocalImageIntakes
             InboxIntakeBanner(
                 intakes: appState.failedLocalImageIntakes,
                 expanded: $intakeExpanded,
+                retryableCount: retryable.count,
+                isRetryingBatch: appState.imageRetryBatch != nil,
                 dataFor: { intake in try? appState.localImageData(for: intake) },
                 hasImage: { appState.hasLocalImage(for: $0) },
+                onRetryBatch: { intakesToRetry = retryable },
                 onRetry: { intake in
                     Task { _ = await appState.retryLocalImageIntake(intake) }
                 },
