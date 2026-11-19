@@ -3,6 +3,48 @@ import XCTest
 @testable import SnapCount
 
 final class LocalImageRecognitionTests: XCTestCase {
+    func testREC005BatchConfirmationUsesExistingFieldsAndLeavesDuplicatesPending() throws {
+        let context = try makeContext()
+        defer { cleanup(context) }
+        let repository = LocalPendingFinancialRepository(database: context.database)
+        let profile = try context.intakeRepository.activeProfile()
+        func stage(duplicate: Bool) throws -> LocalPendingFinancialRecord {
+            let id = UUID()
+            let record = LocalPendingFinancialRecord(
+                id: id, profileID: profile.id, amountMinor: 188, currency: "CNY",
+                merchantName: "示例商户", transactionDate: "2026-11-07", transactionTime: "19:09:00",
+                occurredAt: nil, createdAt: Date(), platform: "支付宝", category: "other",
+                paymentMethod: "?", reviewReason: duplicate ? "possible_duplicate" : nil
+            )
+            try repository.stage(record)
+            return try XCTUnwrap(repository.record(profileID: profile.id, id: id))
+        }
+        let bill = try stage(duplicate: false)
+        let duplicate = try stage(duplicate: true)
+        let fields = LocalPendingBatchFields(platform: "微信", category: "food", paymentMethod: "银行卡")
+        func item(_ source: LocalPendingFinancialRecord) -> LocalPendingBatchItem {
+            LocalPendingBatchItem(source: source, draft: NativePendingResolutionDraft(
+                detail: LocalPendingFinancialRepository.nativeDetail(source, imageStore: nil)))
+        }
+        XCTAssertNotNil(item(bill).reasonToReviewIndividually)
+        let ready = item(bill).fillingMissing(from: fields)
+        XCTAssertNil(ready.reasonToReviewIndividually)
+        XCTAssertEqual(ready.draft.platform, "支付宝")
+        XCTAssertEqual(ready.draft.category, "other")
+        XCTAssertEqual(ready.draft.paymentMethod, "银行卡")
+        XCTAssertNotNil(item(duplicate).fillingMissing(from: fields).reasonToReviewIndividually)
+        XCTAssertThrowsError(try repository.resolve(profileID: profile.id, pendingID: bill.id,
+            draft: ready.draft, expectedSource: duplicate))
+        _ = try repository.resolve(profileID: profile.id, pendingID: bill.id,
+                                   draft: ready.draft, expectedSource: bill)
+        XCTAssertThrowsError(try repository.resolve(profileID: profile.id, pendingID: bill.id,
+            draft: ready.draft, expectedSource: bill))
+        XCTAssertEqual(try repository.pending(profileID: profile.id).map(\.id), [duplicate.id])
+        let saved = try XCTUnwrap(LocalExpenseRepository(database: context.database).expense(id: bill.id))
+        XCTAssertEqual(saved.amountMinor, 188)
+        XCTAssertEqual(saved.transactionDate, "2026-11-07")
+        XCTAssertNil(saved.accountID)
+    }
     func testREC009BatchOnlyOffersFailedImagesBelowRetryLimit() {
         func intake(status: LocalImageIntakeStatus, attemptCount: Int) -> LocalImageIntake {
             LocalImageIntake(id: "fixture", profileID: UUID(), captureKind: "photo",

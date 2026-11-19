@@ -12,6 +12,8 @@ struct InboxView: View {
     @State private var manualIntake: LocalImageIntake?
     @State private var intakeToDiscard: LocalImageIntake?
     @State private var intakesToRetry: [LocalImageIntake] = []
+    @State private var showsPendingBatch = false
+    @State private var pendingBatchIDs: Set<UUID> = []
 
     private var allItems: [NativeInboxItem] {
         NativeInboxPresentation.items(
@@ -93,6 +95,21 @@ struct InboxView: View {
                         todayCount: todayItems.count
                     )
 
+                    let pending = visibleItems.compactMap(\.pendingExpense)
+                    if !pending.isEmpty {
+                        Button {
+                            pendingBatchIDs = Set(pending.compactMap { UUID(uuidString: $0.id) })
+                            showsPendingBatch = true
+                        } label: {
+                            Label("批量处理待补全账单（\(pending.count)）", systemImage: "checklist")
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                        .buttonStyle(.bordered)
+                        .tint(JieziTheme.brand)
+                        .padding(.horizontal, JieziSpacing.xl2)
+                        .padding(.bottom, JieziSpacing.md)
+                    }
+
                     if let message = appState.inboxFinanceMessage {
                         messageBanner(message, isError: false, isWorking: false)
                     }
@@ -168,6 +185,10 @@ struct InboxView: View {
                 domains: archiveDomains
             )
             .environmentObject(appState)
+        }
+        .sheet(isPresented: $showsPendingBatch) {
+            PendingExpenseBatchView(ids: pendingBatchIDs)
+                .environmentObject(appState)
         }
         .sheet(isPresented: Binding(
             get: { manualIntakeData != nil },
@@ -1761,6 +1782,157 @@ private struct InboxZoomableImage<Content: View>: View {
                 }
             }
             .clipped()
+    }
+}
+
+private struct PendingExpenseBatchView: View {
+    @EnvironmentObject private var appState: AppState
+    @Environment(\.dismiss) private var dismiss
+    let ids: Set<UUID>
+    @State private var items: [LocalPendingBatchItem] = []
+    @State private var selected: Set<UUID> = []
+    @State private var isLoading = true
+    @State private var isSaving = false
+    @State private var processed = 0
+    @State private var message: String?
+    @State private var confirmsSelection = false
+    @State private var fields = LocalPendingBatchFields()
+
+    private var previewItems: [LocalPendingBatchItem] {
+        items.map { $0.fillingMissing(from: fields) }
+    }
+
+    private var eligibleIDs: Set<UUID> {
+        Set(previewItems.filter { $0.reasonToReviewIndividually == nil }.map(\.id))
+    }
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section {
+                    Text("先核对再勾选。已有字段保持原值，新增支出留待补绑账户。")
+                    if isLoading {
+                        ProgressView("正在读取账单")
+                    } else if let message {
+                        Text(message)
+                    }
+                    if !eligibleIDs.isEmpty {
+                        Button(selected == eligibleIDs ? "取消全选" : "全选可确认的 \(eligibleIDs.count) 笔") {
+                            selected = selected == eligibleIDs ? [] : eligibleIDs
+                        }
+                        .disabled(isSaving)
+                    }
+                }
+                if !items.isEmpty {
+                    Section("批量填写缺失字段（可选）") {
+                        batchPicker("消费渠道", kind: .platform, selection: $fields.platform)
+                        batchPicker("消费分类", kind: .category, selection: $fields.category)
+                        batchPicker("支付方式", kind: .payment, selection: $fields.paymentMethod)
+                    }
+                    .disabled(isSaving)
+                }
+                ForEach(previewItems) { item in
+                    if item.reasonToReviewIndividually != nil {
+                        NavigationLink {
+                            PendingExpenseResolutionView(
+                                reference: "expense/\(item.id.uuidString)",
+                                preserveInboxNavigation: true,
+                                onResolved: { items.removeAll { $0.id == item.id } }
+                            )
+                        } label: {
+                            bill(item)
+                        }
+                        .disabled(isSaving)
+                    } else {
+                        Button {
+                            if !selected.insert(item.id).inserted { selected.remove(item.id) }
+                        } label: {
+                            HStack {
+                                Image(systemName: selected.contains(item.id) ? "checkmark.circle.fill" : "circle")
+                                    .foregroundStyle(JieziTheme.brand)
+                                bill(item)
+                            }
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(isSaving)
+                        .accessibilityAddTraits(selected.contains(item.id) ? .isSelected : [])
+                    }
+                }
+            }
+            .navigationTitle("批量处理账单")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("关闭") { dismiss() }.disabled(isSaving)
+                }
+            }
+            .safeAreaInset(edge: .bottom) {
+                Button(isSaving ? "正在保存 \(processed)/\(selected.count)" : "确认所选 \(selected.count) 笔") {
+                    confirmsSelection = true
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(selected.isEmpty || isSaving)
+                .padding()
+                .frame(maxWidth: .infinity)
+                .background(.regularMaterial)
+            }
+            .confirmationDialog("将所选 \(selected.count) 笔存为正式支出？", isPresented: $confirmsSelection, titleVisibility: .visible) {
+                Button("确认保存") { Task { await saveSelection() } }
+                Button("取消", role: .cancel) {}
+            }
+            .onChange(of: eligibleIDs) { _, eligible in selected.formIntersection(eligible) }
+        }
+        .interactiveDismissDisabled(isSaving)
+        .task {
+            guard isLoading else { return }
+            do {
+                items = try await appState.localPendingBatchItems(ids: ids)
+                if items.isEmpty { message = "这些账单已不在本机待处理列表。" }
+            } catch {
+                message = "暂时无法读取本机待补全账单。"
+            }
+            isLoading = false
+        }
+    }
+
+    private func batchPicker(_ title: String, kind: NativeFinanceVocabularyKind, selection: Binding<String>) -> some View {
+        Picker(title, selection: selection) {
+            Text("留空").tag("")
+            ForEach(NativeFinanceOptionCatalog.options(
+                kind: kind, currentValue: selection.wrappedValue, vocabulary: appState.financeVocabulary, limit: 50
+            )) { option in
+                Text(option.title).tag(option.id)
+            }
+        }
+    }
+
+    private func bill(_ item: LocalPendingBatchItem) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(item.source.merchantName.isEmpty ? "未识别商户" : item.source.merchantName)
+                .font(.headline)
+            Text("\(item.source.transactionDate) · ¥\(item.draft.amountText)")
+            let fields = [item.draft.platform, NativeFinanceOptionCatalog.categoryTitle(for: item.draft.category) ?? "", item.draft.paymentMethod]
+            Text(fields.filter { !$0.isEmpty }.joined(separator: " · "))
+            if let reason = item.reasonToReviewIndividually {
+                Text(reason).foregroundStyle(JieziTheme.coral)
+            }
+        }
+        .font(.footnote)
+        .foregroundStyle(JieziTheme.ink)
+        .padding(.vertical, 2)
+    }
+
+    private func saveSelection() async {
+        guard !isSaving else { return }
+        let chosen = previewItems.filter { selected.contains($0.id) && $0.reasonToReviewIndividually == nil }
+        guard !chosen.isEmpty else { return }
+        isSaving = true
+        processed = 0
+        let saved = await appState.confirmLocalPendingBatch(chosen) { processed = $0 }
+        items.removeAll { saved.contains($0.id) }
+        selected.removeAll()
+        message = "已保存 \(saved.count) 笔，未保存 \(chosen.count - saved.count) 笔。"
+        isSaving = false
     }
 }
 

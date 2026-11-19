@@ -5546,6 +5546,55 @@ final class AppState: ObservableObject {
         }
     }
 
+    func localPendingBatchItems(ids: Set<UUID>) async throws -> [LocalPendingBatchItem] {
+        guard !mayReadRemoteBusinessData,
+              let repository = localPendingFinancialRepository,
+              let profile = try await localExpenseUseCase?.prepareProfile() else {
+            throw LocalDataError.recordNotFound
+        }
+        return try repository.pending(profileID: profile.id).filter { ids.contains($0.id) }.reversed().map { source in
+            LocalPendingBatchItem(source: source, draft: NativePendingResolutionDraft(
+                detail: LocalPendingFinancialRepository.nativeDetail(source, imageStore: nil)))
+        }
+    }
+
+    func confirmLocalPendingBatch(
+        _ items: [LocalPendingBatchItem],
+        onProgress: (Int) -> Void
+    ) async -> Set<UUID> {
+        guard !mayReadRemoteBusinessData, !isConfirmingPendingRecord,
+              let repository = localPendingFinancialRepository else { return [] }
+        isConfirmingPendingRecord = true
+        defer { isConfirmingPendingRecord = false }
+        let generation = userStateGeneration
+        guard let profile = try? await localExpenseUseCase?.prepareProfile() else { return [] }
+        var saved: Set<UUID> = []
+        var months: Set<String> = []
+        for (index, item) in items.enumerated() {
+            await Task.yield()
+            guard !Task.isCancelled, generation == userStateGeneration, !mayReadRemoteBusinessData,
+                  (try? repository.activeProfileID()) == profile.id else { break }
+            if item.reasonToReviewIndividually == nil,
+               let _ = try? repository.resolve(profileID: profile.id, pendingID: item.id,
+                                               draft: item.draft, expectedSource: item.source) {
+                saved.insert(item.id)
+                months.insert(String(item.source.transactionDate.prefix(7)))
+                if let expense = try? await localExpenseUseCase?.expense(id: item.id) {
+                    localExpressionPersistence?.refresh(expense: expense)
+                }
+            }
+            onProgress(index + 1)
+        }
+        if generation == userStateGeneration, !saved.isEmpty {
+            await loadLocalAccounts()
+            for month in months.sorted() where generation == userStateGeneration {
+                await refreshLocalMonthProjection(monthKey: month)
+            }
+            if generation == userStateGeneration { await applyLocalStagingProjection() }
+        }
+        return saved
+    }
+
     func confirmPendingRecord(
         _ draft: NativePendingResolutionDraft,
         preserveInboxNavigation: Bool = false
