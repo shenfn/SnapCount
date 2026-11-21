@@ -29,13 +29,13 @@ struct NativeRecordReference: Hashable {
         self.rawId = rawId
     }
 
-    // Local GRDB expenses use a local-only reference prefix while remote
-    // snapshots use the canonical expense prefix. They still represent the
-    // same aggregate when their raw UUID matches.
+    // Local detail and list projections can use different prefixes for the
+    // same record. Keep the original kind for routing and normalize identity here.
     var canonicalValue: String {
         let canonicalKind: String
         switch kind {
         case "local-expense": canonicalKind = "expense"
+        case "local-income": canonicalKind = "income"
         case "local-data": canonicalKind = "data"
         default: canonicalKind = kind
         }
