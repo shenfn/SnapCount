@@ -423,6 +423,9 @@ final class IOSPrototypeRenderingTests: XCTestCase {
                     .environment(\.dynamicTypeSize, size)
                 try await capture(view, name: "onboarding-\(step)-\(size)", height: 844)
             }
+            let binding = NavigationStack { ShortcutBindingView() }
+                .environment(\.dynamicTypeSize, size)
+            try await capture(binding, name: "shortcut-binding-\(size)", height: 844)
         }
     }
 

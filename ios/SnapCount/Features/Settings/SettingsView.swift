@@ -1323,7 +1323,7 @@ struct ShortcutSetupView: View {
             } header: {
                 Text("添加后")
             } footer: {
-                Text("添加完成后回到这里，就能查看怎么绑定。")
+                Text("想用双击悬浮球、轻点背面等方式启动快捷指令？点「绑定启动方式」。")
             }
             Section("自动识别") {
                 if !appState.isSignedIn {
@@ -1391,44 +1391,164 @@ struct ShortcutSetupView: View {
     }
 }
 
-private struct ShortcutBindingView: View {
+struct ShortcutBindingView: View {
+    @Environment(\.openURL) private var openURL
+    @State private var method: Method = .assistiveTouch
     @State private var copiedSearchTerm: String?
 
-    var body: some View {
-        List {
-            if UIDevice.current.userInterfaceIdiom == .phone {
-                Section("轻点背面") {
-                    Text("设置 → 无障碍 → 触控 → 轻点背面。选两下或三下，再选刚添加的快捷指令。")
-                    copySearchTerm("轻点背面")
-                    Link("查看 Apple 设置说明", destination: URL(string: "https://support.apple.com/zh-cn/111772")!)
-                }
-                Section {
-                    Text("设置 → 操作按钮 → 快捷指令。选择刚添加的快捷指令。")
-                    copySearchTerm("操作按钮")
-                    Link("查看 Apple 设置说明", destination: URL(string: "https://support.apple.com/zh-cn/guide/iphone/iphe89d61d66/ios")!)
-                } header: {
-                    Text("操作按钮")
-                } footer: {
-                    Text("适用于有操作按钮的 iPhone。")
-                }
-            }
-            Section("共享菜单") {
-                Text("在支持接收图片的快捷指令详情中，开启「在共享表单中显示」。")
-                Link("前往快捷指令 App", destination: URL(string: "shortcuts://")!)
+    private enum Method: String, CaseIterable {
+        case assistiveTouch, backTap, actionButton, shareSheet
+
+        var title: String {
+            switch self {
+            case .assistiveTouch: "悬浮球（辅助触控）"
+            case .backTap: "轻点背面"
+            case .actionButton: "操作按钮"
+            case .shareSheet: "共享菜单"
             }
         }
-        .navigationTitle("绑定启动方式")
-        .navigationBarTitleDisplayMode(.inline)
+
+        var icon: String {
+            switch self {
+            case .assistiveTouch: "circle.inset.filled"
+            case .backTap: "hand.tap"
+            case .actionButton: "button.programmable"
+            case .shareSheet: "square.and.arrow.up"
+            }
+        }
+
+        var searchTerm: String? {
+            switch self {
+            case .assistiveTouch: "辅助触控"
+            case .backTap, .actionButton: title
+            case .shareSheet: nil
+            }
+        }
+
+        var instructions: String {
+            switch self {
+            case .assistiveTouch:
+                "打开「辅助触控」，在「自定操作」里选「轻点两下」或「长按」，再选已添加的拍照快捷指令。"
+            case .backTap:
+                "选「轻点两下」或「轻点三下」，再选刚添加的快捷指令。"
+            case .actionButton:
+                "切换到「快捷指令」，再选刚添加的指令。适用于有操作按钮的 iPhone。"
+            case .shareSheet:
+                "在支持接收图片的快捷指令详情中，开启「在共享表单中显示」。"
+            }
+        }
+
+        var fallbackPath: String? {
+            switch self {
+            case .assistiveTouch: "设置 → 无障碍 → 触控 → 辅助触控"
+            case .backTap: "设置 → 无障碍 → 触控 → 轻点背面"
+            case .actionButton: "设置 → 操作按钮"
+            case .shareSheet: nil
+            }
+        }
+
+        var helpURL: URL? {
+            switch self {
+            case .assistiveTouch: URL(string: "https://support.apple.com/zh-cn/111794")
+            case .backTap: URL(string: "https://support.apple.com/zh-cn/111772")
+            case .actionButton: URL(string: "https://support.apple.com/zh-cn/guide/iphone/iphe89d61d66/ios")
+            case .shareSheet: nil
+            }
+        }
     }
 
-    private func copySearchTerm(_ term: String) -> some View {
-        Button {
-            UIPasteboard.general.string = term
-            copiedSearchTerm = term
-        } label: {
-            Label(copiedSearchTerm == term ? "已复制，可到设置搜索" : "复制设置搜索词",
-                  systemImage: copiedSearchTerm == term ? "checkmark" : "doc.on.doc")
+    private var methods: [Method] {
+        UIDevice.current.userInterfaceIdiom == .phone ? Method.allCases : [.assistiveTouch, .shareSheet]
+    }
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: JieziSpacing.lg) {
+                Text("选一个顺手的方式，设置一次就能用。")
+                    .font(JieziFont.body)
+                    .foregroundStyle(JieziTheme.muted)
+
+                JieziCard(solid: true) {
+                    VStack(spacing: 0) {
+                        ForEach(methods, id: \.self) { option in
+                            if option != methods.first { Divider() }
+                            Button {
+                                method = option
+                                copiedSearchTerm = nil
+                            } label: {
+                                HStack(spacing: JieziSpacing.md) {
+                                    Image(systemName: option.icon)
+                                        .foregroundStyle(JieziTheme.brand)
+                                        .frame(width: 25)
+                                        .accessibilityHidden(true)
+                                    Text(option.title)
+                                        .font(JieziType.cardTitle)
+                                        .foregroundStyle(JieziTheme.ink)
+                                    Spacer(minLength: 8)
+                                    Image(systemName: method == option ? "checkmark.circle.fill" : "circle")
+                                        .foregroundStyle(method == option ? JieziTheme.brand : JieziTheme.muted)
+                                        .accessibilityHidden(true)
+                                }
+                                .padding(.vertical, JieziSpacing.md)
+                                .frame(minHeight: 46)
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityAddTraits(method == option ? .isSelected : [])
+                        }
+                    }
+                    .padding(.horizontal, JieziSpacing.lg)
+                }
+
+                JieziCard(solid: true) {
+                    VStack(alignment: .leading, spacing: JieziSpacing.md) {
+                        if let term = method.searchTerm {
+                            Label("在系统「设置」里搜索", systemImage: "magnifyingglass")
+                                .font(JieziType.cardTitle)
+                            Text("复制下方文字，打开 iPhone 或 iPad 的「设置」，粘贴到顶部搜索框。")
+                                .font(JieziFont.body)
+                                .foregroundStyle(JieziTheme.muted)
+                            JieziPrimaryButton(
+                                title: copiedSearchTerm == term ? "已复制「\(term)」" : "复制「\(term)」",
+                                systemImage: copiedSearchTerm == term ? "checkmark" : "doc.on.doc"
+                            ) {
+                                UIPasteboard.general.string = term
+                                copiedSearchTerm = term
+                                UIAccessibility.post(notification: .announcement, argument: "已复制\(term)，请打开系统设置并搜索")
+                            }
+                            .accessibilityHint("复制后，打开系统设置并粘贴搜索")
+
+                            Divider()
+                        }
+                        Text(method.instructions)
+                            .font(JieziFont.body)
+                        if let path = method.fallbackPath {
+                            Text("搜索不到时：\(path)")
+                                .font(JieziFont.caption)
+                                .foregroundStyle(JieziTheme.muted)
+                        }
+                        if let helpURL = method.helpURL {
+                            Link("Apple 官方说明", destination: helpURL)
+                                .font(JieziFont.caption)
+                                .frame(minHeight: 44, alignment: .leading)
+                        } else if let url = URL(string: "shortcuts://") {
+                            JieziPrimaryButton(title: "打开快捷指令", systemImage: "arrow.up.forward.app") {
+                                openURL(url)
+                            }
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(JieziSpacing.lg)
+                }
+            }
+            .foregroundStyle(JieziTheme.ink)
+            .frame(maxWidth: 475, alignment: .leading)
+            .padding(JieziSpacing.lg)
+            .frame(maxWidth: .infinity)
         }
+        .background(JieziTheme.pageBackground)
+        .navigationTitle("绑定启动方式")
+        .navigationBarTitleDisplayMode(.inline)
     }
 }
 
