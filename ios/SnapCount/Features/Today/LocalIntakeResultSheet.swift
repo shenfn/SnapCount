@@ -23,11 +23,13 @@ struct LocalIntakeResultSheet: View {
     let isError: Bool
     let onViewRecord: () -> Void
     let onDismiss: () -> Void
+    var receipt: LocalIntakeReceipt? = nil
 
     private var palette: JieziGeneratedPalette { JieziThemeManager.shared.palette }
 
     /// 按换行拆分逐行渲染，避免单个 Text 内换行的行距无法控制；空行丢弃以免出现双倍空隙。
     private var messageLines: [String] {
+        if let receipt { return receipt.facts }
         return notificationText
             .components(separatedBy: "\n")
             .filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
@@ -49,7 +51,23 @@ struct LocalIntakeResultSheet: View {
                     if !messageLines.isEmpty {
                         messageBlock
                     }
-                    if let feedback {
+                    if let receipt {
+                        if let observation = receipt.observation {
+                            JieziCard {
+                                VStack(alignment: .leading, spacing: JieziSpacing.sm) {
+                                    Text(observation)
+                                        .font(JieziFont.subheadline.weight(.semibold))
+                                    if let suggestion = receipt.suggestion {
+                                        Text(suggestion)
+                                            .font(JieziFont.subheadline)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                }
+                                .fixedSize(horizontal: false, vertical: true)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                            }
+                        }
+                    } else if let feedback {
                         NativeAIFeedbackCard(
                             feedback: feedback,
                             compact: true,

@@ -10,8 +10,10 @@ function sleepClock(value) {
   }).format(new Date(parsed))
 }
 
-function clockMinutes(value) {
-  const match = String(value ?? '').match(/(?:T|\s|^)(\d{1,2}):(\d{2})/)
+export function clockMinutes(value) {
+  const raw = String(value ?? '')
+  const local = /(?:Z|[+-]\d{2}:\d{2})$/i.test(raw) ? sleepClock(raw) : raw
+  const match = String(local ?? '').match(/(?:T|\s|^)(\d{1,2}):(\d{2})/)
   if (!match) return null
   const minutes = Number(match[1]) * 60 + Number(match[2])
   return Number.isFinite(minutes) ? minutes : null
@@ -74,7 +76,7 @@ export function generateSleepCandidates(current, prior, domainProfile = {}) {
           baseline: domainProfile.chronotype,
         },
         text: `入睡${describeDelta(startDelta) ?? '时间未知'}，醒来${describeDelta(wakeDelta) ?? '时间未知'}（相对你的典型作息）`,
-        records: [current],
+        records: [current, ...prior.filter(record => domainProfile.chronotype_source_ids?.includes(record.id))],
         numbers: [
           startDelta === null ? null : { value: startDelta, meaning: 'sleep_start_delta_minutes', derivation: 'current_start - typical_start' },
           wakeDelta === null ? null : { value: wakeDelta, meaning: 'wake_delta_minutes', derivation: 'current_wake - typical_wake' },

@@ -25,10 +25,50 @@ struct LocalPendingFinancialRecord: Equatable {
     var reviewReason: String? = nil
 }
 
+struct LocalPendingBatchItem: Identifiable {
+    let source: LocalPendingFinancialRecord
+    let draft: NativePendingResolutionDraft
+
+    var id: UUID { source.id }
+
+    func fillingMissing(from fields: LocalPendingBatchFields) -> Self {
+        var updated = draft
+        if Self.isMissing(updated.platform) { updated.platform = fields.platform }
+        if Self.isMissing(updated.category) { updated.category = fields.category }
+        if Self.isMissing(updated.paymentMethod) { updated.paymentMethod = fields.paymentMethod }
+        return Self(source: source, draft: updated)
+    }
+
+    var reasonToReviewIndividually: String? {
+        if source.reviewReason == "possible_duplicate" { return "疑似重复，请单笔核对" }
+        if draft.kind != .expense { return "请单笔核对收支类型" }
+        if Self.isMissing(draft.merchantOrSourceName) { return "请补充商户" }
+        if Self.isMissing(draft.platform) { return "请选择消费渠道" }
+        if Self.isMissing(draft.category) { return "请选择消费分类" }
+        if Self.isMissing(draft.paymentMethod) { return "请选择支付方式" }
+        return draft.validationMessage
+    }
+
+    private static func isMissing(_ value: String) -> Bool {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty || trimmed == "?" || trimmed == "？"
+    }
+}
+
+struct LocalPendingBatchFields {
+    var platform = ""
+    var category = ""
+    var paymentMethod = ""
+}
+
 /// LF-037.31/41/44. The original transaction, target and ledger change together.
 final class LocalPendingFinancialRepository {
     private let database: LocalDatabase
     init(database: LocalDatabase) { self.database = database }
+
+    func activeProfileID() throws -> UUID {
+        try LocalProfileStore(database: database).activeProfile().id
+    }
 
     func stage(_ record: LocalPendingFinancialRecord) throws {
         guard record.amountMinor >= 0, record.amountMinor <= 99_999_999,
@@ -168,7 +208,7 @@ final class LocalPendingFinancialRepository {
         }
     }
 
-    func resolve(profileID: UUID, pendingID: UUID, draft: NativePendingResolutionDraft, at now: Date = Date()) throws -> NativePendingConfirmationAccepted {
+    func resolve(profileID: UUID, pendingID: UUID, draft: NativePendingResolutionDraft, at now: Date = Date(), expectedSource: LocalPendingFinancialRecord? = nil) throws -> NativePendingConfirmationAccepted {
         guard draft.validationMessage == nil,
               UUID(uuidString: draft.pendingId) == pendingID else { throw LocalDataError.invalidRecord }
         let amount = try LocalExpenseMapper.amountMinor(draft.amountText)
@@ -178,6 +218,11 @@ final class LocalPendingFinancialRepository {
         return try database.writer.write { db in
             guard let row = try Row.fetchOne(db, sql: "SELECT * FROM local_pending_transactions WHERE id = ? AND profile_id = ?", arguments: [pendingID.uuidString, profileID.uuidString]) else { throw LocalDataError.invalidRecord }
             let status: String = row["status"]
+            if let expectedSource {
+                guard status == "pending", try Self.record(row) == expectedSource,
+                      LocalPendingBatchItem(source: expectedSource, draft: draft).reasonToReviewIndividually == nil
+                else { throw LocalDataError.invalidRecord }
+            }
             if status != "pending" {
                 guard let kind: String = row["target_kind"], kind == draft.kind.rawValue,
                       let id: String = row["target_id"], status != "deleted" else { throw LocalDataError.invalidRecord }
@@ -229,12 +274,17 @@ final class LocalPendingFinancialRepository {
 
     func nativeDetail(profileID: UUID, id: UUID, imageStore: LocalImageStore) throws -> NativeRecordDetail? {
         guard let source = try record(profileID: profileID, id: id) else { return nil }
+        return Self.nativeDetail(source, imageStore: imageStore)
+    }
+
+    static func nativeDetail(_ source: LocalPendingFinancialRecord, imageStore: LocalImageStore?) -> NativeRecordDetail {
+        let id = source.id
         let amount = Double(source.amountMinor) / 100
         let feedbackPayload = Self.feedbackPayload(from: source.aiFeedbackJSON)
         return NativeRecordDetail(id: "expense/\(id.uuidString)", rawId: id.uuidString, kind: source.preferredKind.rawValue,
             title: source.merchantName, subtitle: source.transactionDate,
             value: String(format: "¥%.2f", amount), detailRows: [],
-            imageURL: source.imagePath.map { imageStore.url(for: $0) }, imageLoadError: false,
+            imageURL: source.imagePath.flatMap { imageStore?.url(for: $0) }, imageLoadError: false,
             imagePath: source.imagePath, imageHash: source.imageHash, amount: amount,
             merchantName: source.merchantName, platform: source.platform, category: source.category,
             paymentMethod: source.paymentMethod,

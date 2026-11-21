@@ -54,6 +54,7 @@ final class LocalExpenseAppUseCaseTests: XCTestCase {
             XCTAssertEqual(try images.data(at: XCTUnwrap(fact.imagePath)), bytes, "输入副本清理不能删除财务原图")
             await state.loadRecordDetail(reference: fact.reference, force: true)
             XCTAssertNotNil(state.selectedRecordDetail?.imageURL, "详情必须可达本机图")
+            XCTAssertNotNil(state.recordDetail(matching: fact.reference), "列表入口必须显示已经读出的本机详情")
         }
     }
 

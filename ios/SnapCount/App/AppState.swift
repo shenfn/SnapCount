@@ -108,6 +108,8 @@ final class AppState: ObservableObject {
     @Published var stagingRepaymentId: String?
     @Published var inboxFinanceMessage: String?
     @Published var inboxActionRecordId: String?
+    @Published private(set) var imageRetryBatch: LocalImageRetryBatch?
+    private var imageRetryInProgress = false
     @Published var inboxActionMessage: String?
     @Published var inboxActionMessageIsError = false
     @Published var isConfirmingPendingRecord = false
@@ -1492,7 +1494,9 @@ final class AppState: ObservableObject {
                 }
             ),
             feedback: deliveryFeedback,
-            feedbackConfidence: feedbackConfidence
+            feedbackConfidence: feedbackConfidence,
+            receiptText: outcome.receiptText,
+            companionMessage: message ?? outcome.companionMessage
         )
     }
 
@@ -1669,20 +1673,78 @@ final class AppState: ObservableObject {
         }
     }
 
-    func retryLocalImageIntake(_ intake: LocalImageIntake) async -> Bool {
-        guard localVisionMode != .disabled else {
-            inboxActionMessage = "AI 识别已关闭；请开启后重试，或手动处理原图。"
-            inboxActionMessageIsError = true
-            return false
+    var retryableLocalImageIntakes: [LocalImageIntake] {
+        failedLocalImageIntakes.filter { $0.canRetryRecognition && hasLocalImage(for: $0) }
+    }
+
+    private func prepareLocalImageRetry() -> Bool {
+        let message: String
+        switch localVisionMode {
+        case .disabled:
+            message = "请先在设置中开启图片识别，再重试。"
+        case .hosted where !hasUploadToken:
+            message = "请先登录并确认快捷指令凭据已同步，再重试。"
+        default:
+            return true
         }
-        guard let localRecordUseCase, let localImageStore, let localImageIntakeRepository else { return false }
+        inboxActionMessage = message
+        inboxActionMessageIsError = true
+        return false
+    }
+
+    func retryLocalImageIntake(_ intake: LocalImageIntake) async -> Bool {
+        guard imageRetryBatch == nil, !imageRetryInProgress, prepareLocalImageRetry() else { return false }
+        let result = await performLocalImageRetry(intake)
+        switch result {
+        case .archived, .needsReview: return true
+        case .failed: return false
+        }
+    }
+
+    func retryLocalImageBatch(_ requestedIntakes: [LocalImageIntake]) async {
+        guard imageRetryBatch == nil, !imageRetryInProgress, prepareLocalImageRetry(),
+              let repository = localImageIntakeRepository,
+              let profile = try? repository.activeProfile() else { return }
+        let requestedIDs = Set(requestedIntakes.filter { $0.profileID == profile.id }.map(\.id))
+        let intakes = retryableLocalImageIntakes.filter { requestedIDs.contains($0.id) && $0.profileID == profile.id }
+        guard !intakes.isEmpty else { return }
+
+        let generation = userStateGeneration
+        let mode = localVisionMode
+        let credentials = mode == .hosted ? KeychainKeys.uploadToken : KeychainKeys.byokQwenAPIKey
+        let credential = try? keychain.string(for: credentials)
+        var batch = LocalImageRetryBatch(total: intakes.count)
+        imageRetryBatch = batch
+        inboxActionMessage = nil
+        defer { imageRetryBatch = nil }
+
+        for intake in intakes {
+            guard !Task.isCancelled, userStateGeneration == generation, localVisionMode == mode,
+                  (try? keychain.string(for: credentials)) == credential,
+                  (try? repository.activeProfile().id) == profile.id else { break }
+            batch.record(await performLocalImageRetry(intake, reportError: false))
+            imageRetryBatch = batch
+        }
+        guard userStateGeneration == generation, (try? repository.activeProfile().id) == profile.id else { return }
+        let remaining = batch.total - batch.processed
+        let message = "已归档 \(batch.archived) 张，需确认 \(batch.needsReview) 张，失败 \(batch.failed) 张"
+        inboxActionMessage = remaining == 0 ? message : "\(message)，另有 \(remaining) 张未处理"
+        inboxActionMessageIsError = batch.failed > 0 || remaining > 0
+    }
+
+    private func performLocalImageRetry(_ intake: LocalImageIntake, reportError: Bool = true) async -> LocalImageRetryResult {
+        guard let localRecordUseCase, let localImageStore, let localImageIntakeRepository,
+              (try? localImageIntakeRepository.activeProfile().id) == intake.profileID else { return .failed }
+        imageRetryInProgress = true
+        defer { imageRetryInProgress = false }
+        let generation = userStateGeneration
         do {
             let provider: LocalImageRecognitionProvider
             let uploadToken: String?
             var isRecognitionRequestCurrent: @MainActor () -> Bool = { true }
             switch localVisionMode {
             case .disabled:
-                return false
+                return .failed
             case .hosted:
                 provider = HostedAIImageRecognitionProvider()
                 uploadToken = try? keychain.string(for: KeychainKeys.uploadToken)
@@ -1696,7 +1758,6 @@ final class AppState: ObservableObject {
                 uploadToken = nil
             }
             let credentialCheck = isRecognitionRequestCurrent
-            let generation = userStateGeneration
             let requestedMode = localVisionMode
             isRecognitionRequestCurrent = { [weak self] in
                 guard let self, self.userStateGeneration == generation, self.localVisionMode == requestedMode else { return false }
@@ -1715,14 +1776,21 @@ final class AppState: ObservableObject {
             )
             let outcome = try await recognition.retry(intakeID: intake.id, uploadToken: uploadToken)
             _ = await composeLocalImageCompanion(outcome, using: recognition, mode: requestedMode)
+            guard userStateGeneration == generation else { return .failed }
             await refreshFailedLocalImageIntakes()
             await refreshLocalRecognitionProjection()
-            return true
+            switch outcome.result {
+            case .archived, .financialArchived: return .archived
+            case .staged, .financialPending: return .needsReview
+            }
         } catch {
+            guard userStateGeneration == generation else { return .failed }
             await refreshFailedLocalImageIntakes()
-            inboxActionMessage = "重试未完成：\(error.localizedDescription)"
-            inboxActionMessageIsError = true
-            return false
+            if reportError {
+                inboxActionMessage = "重试未完成：\(error.localizedDescription)"
+                inboxActionMessageIsError = true
+            }
+            return .failed
         }
     }
 
@@ -4589,11 +4657,17 @@ final class AppState: ObservableObject {
             settings: userSettings,
             providerMode: .deterministic
         ) else { return detail }
-        guard let generatedPlannerFeedback = LocalPlannerCandidateEngine.selectedCandidate(
-            for: context.currentFact,
-            recentFacts: context.recentFacts,
-            memoryContextJSON: context.memoryContextJSON
-        ) else { return detail }
+        let generatedPlannerFeedback: NativeAIFeedback?
+        if let plan = context.sharedCompanionPlan {
+            generatedPlannerFeedback = plan.feedback
+        } else {
+            generatedPlannerFeedback = LocalPlannerCandidateEngine.selectedCandidate(
+                for: context.currentFact,
+                recentFacts: context.recentFacts,
+                memoryContextJSON: context.memoryContextJSON
+            )
+        }
+        guard let generatedPlannerFeedback else { return detail }
         let persistedPlannerFeedback = detail.expressionPlannerAiFeedback
         let plannerFeedback = persistedPlannerFeedback?.claimFingerprint == generatedPlannerFeedback.claimFingerprint
             ? (persistedPlannerFeedback ?? generatedPlannerFeedback)
@@ -5470,6 +5544,55 @@ final class AppState: ObservableObject {
             recordDetailMessage = error.localizedDescription
             return false
         }
+    }
+
+    func localPendingBatchItems(ids: Set<UUID>) async throws -> [LocalPendingBatchItem] {
+        guard !mayReadRemoteBusinessData,
+              let repository = localPendingFinancialRepository,
+              let profile = try await localExpenseUseCase?.prepareProfile() else {
+            throw LocalDataError.recordNotFound
+        }
+        return try repository.pending(profileID: profile.id).filter { ids.contains($0.id) }.reversed().map { source in
+            LocalPendingBatchItem(source: source, draft: NativePendingResolutionDraft(
+                detail: LocalPendingFinancialRepository.nativeDetail(source, imageStore: nil)))
+        }
+    }
+
+    func confirmLocalPendingBatch(
+        _ items: [LocalPendingBatchItem],
+        onProgress: (Int) -> Void
+    ) async -> Set<UUID> {
+        guard !mayReadRemoteBusinessData, !isConfirmingPendingRecord,
+              let repository = localPendingFinancialRepository else { return [] }
+        isConfirmingPendingRecord = true
+        defer { isConfirmingPendingRecord = false }
+        let generation = userStateGeneration
+        guard let profile = try? await localExpenseUseCase?.prepareProfile() else { return [] }
+        var saved: Set<UUID> = []
+        var months: Set<String> = []
+        for (index, item) in items.enumerated() {
+            await Task.yield()
+            guard !Task.isCancelled, generation == userStateGeneration, !mayReadRemoteBusinessData,
+                  (try? repository.activeProfileID()) == profile.id else { break }
+            if item.reasonToReviewIndividually == nil,
+               let _ = try? repository.resolve(profileID: profile.id, pendingID: item.id,
+                                               draft: item.draft, expectedSource: item.source) {
+                saved.insert(item.id)
+                months.insert(String(item.source.transactionDate.prefix(7)))
+                if let expense = try? await localExpenseUseCase?.expense(id: item.id) {
+                    localExpressionPersistence?.refresh(expense: expense)
+                }
+            }
+            onProgress(index + 1)
+        }
+        if generation == userStateGeneration, !saved.isEmpty {
+            await loadLocalAccounts()
+            for month in months.sorted() where generation == userStateGeneration {
+                await refreshLocalMonthProjection(monthKey: month)
+            }
+            if generation == userStateGeneration { await applyLocalStagingProjection() }
+        }
+        return saved
     }
 
     func confirmPendingRecord(

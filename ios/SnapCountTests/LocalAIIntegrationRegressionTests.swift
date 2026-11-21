@@ -3,6 +3,55 @@ import XCTest
 @testable import SnapCount
 
 final class LocalAIIntegrationRegressionTests: XCTestCase {
+    func testSharedHostedExpenseFindsTheMerchantBeforeLimitingHistory() async throws {
+        let databaseURL = temporaryDatabaseURL()
+        defer { removeDatabase(at: databaseURL) }
+        let database = try LocalDatabase(databaseURL: databaseURL)
+        let profile = try LocalProfileStore(database: database).activeProfile()
+        let repository = try LocalExpenseRepository(database: database)
+        let prior = try repository.createExpense(expenseDraft(
+            id: UUID(), profileID: profile.id, amountMinor: 500, date: "2026-11-17",
+            merchant: "示例便利店有限责任公司", time: "09:00", knownAt: "2026-11-17T01:01:00Z"
+        ), operationID: UUID())
+        for minute in 0..<15 {
+            let minuteText = String(format: "%02d", minute)
+            _ = try repository.createExpense(expenseDraft(
+                id: UUID(), profileID: profile.id, amountMinor: 900, date: "2026-11-17",
+                merchant: "无关商户\(minute)", time: "10:\(minuteText)", knownAt: "2026-11-17T02:\(minuteText):00Z"
+            ), operationID: UUID())
+        }
+        let current = try repository.createExpense(expenseDraft(
+            id: UUID(), profileID: profile.id, amountMinor: 200, date: "2026-11-17",
+            merchant: "示例便利店", time: "12:05", knownAt: "2026-11-17T04:06:00Z"
+        ), operationID: UUID())
+        var settings = NativeUserSettings()
+        settings.companionMemoryEnabled = true
+        let persistence = LocalExpressionPersistence(database: database) {
+            LocalExpressionSettings(companionEnabled: true, memoryEnabled: true)
+        }
+        let context = try XCTUnwrap(persistence.makeCompositionContext(
+            for: LocalExpenseReadModel.detail(from: current), profileID: profile.id,
+            settings: settings, providerMode: .hosted
+        ))
+        let session = try makeStubSession()
+        defer { session.invalidateAndCancel() }
+        BYOKURLProtocolStub.configure(statusCode: 200, responseData: Data(#"{"ok":true,"data":{}}"#.utf8))
+        let provider = HostedAICompanionProvider(accessToken: "test-session", service: SnapCountUploadService(
+            session: session, functionsURL: "https://example.test/functions/v1", anonKey: "test-key"
+        ))
+        _ = try await provider.compose(context: context)
+        let body = try XCTUnwrap(BYOKURLProtocolStub.capturedBody)
+        let packet = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
+        let candidate = try XCTUnwrap(packet["shared_planner_brief"] as? [String: Any])
+        XCTAssertEqual(candidate["semantic_key"] as? String, "merchant_daily_count_total")
+        XCTAssertEqual(candidate["numbers"] as? [Double], [2, 7])
+        let evidence = try XCTUnwrap(candidate["evidence"] as? [[String: Any]])
+        XCTAssertTrue(evidence.contains { $0["reference"] as? String == prior.id.uuidString })
+        XCTAssertNil(packet["expense_evidence"])
+        XCTAssertNil(packet["recent_facts"])
+        XCTAssertFalse(String(decoding: body, as: UTF8.self).contains("无关商户"))
+    }
+
     func testHostedLocalExpressionRoundTripPersistsTheBoundedPacket() async throws {
         let databaseURL = temporaryDatabaseURL()
         defer { removeDatabase(at: databaseURL) }
@@ -10,10 +59,10 @@ final class LocalAIIntegrationRegressionTests: XCTestCase {
         let profile = try LocalProfileStore(database: database).activeProfile()
         let repository = try LocalExpenseRepository(database: database)
         let older = try repository.createExpense(expenseDraft(
-            id: UUID(), profileID: profile.id, amountMinor: 800, date: "2026-11-13"
+            id: UUID(), profileID: profile.id, amountMinor: 800, date: "2026-11-13", knownAt: "2026-11-14T11:00:00Z"
         ), operationID: UUID())
         let current = try repository.createExpense(expenseDraft(
-            id: UUID(), profileID: profile.id, amountMinor: 1280, date: "2026-11-14"
+            id: UUID(), profileID: profile.id, amountMinor: 1280, date: "2026-11-14", knownAt: "2026-11-14T11:00:00Z"
         ), operationID: UUID())
         let detail = LocalExpenseReadModel.detail(from: current)
         var settings = NativeUserSettings()
@@ -52,11 +101,10 @@ final class LocalAIIntegrationRegressionTests: XCTestCase {
         XCTAssertEqual(packet["action"] as? String, "generate_local_expression")
         let currentFact = try XCTUnwrap(packet["current_fact"] as? [String: Any])
         XCTAssertEqual(currentFact["id"] as? String, current.id.uuidString)
-        let candidate = try XCTUnwrap(packet["planner_candidate"] as? [String: Any])
-        // Both fixtures are 「便利店」 expenses, so the cross-record repeat
-        // candidate carries more concrete evidence than the bare current fact
-        // and legitimately wins the deterministic selection.
-        XCTAssertEqual(candidate["dimension"] as? String, "repeat_pattern")
+        let candidate = try XCTUnwrap(packet["shared_planner_brief"] as? [String: Any])
+        // An equal import timestamp cannot contribute a past observation.
+        XCTAssertNil(packet["recent_facts"])
+        XCTAssertNil(packet["planner_candidate"])
         XCTAssertNotNil(packet["local_memory_context"] as? [String: Any])
         XCTAssertEqual((packet["expression_preferences"] as? [String: Any])?["persona"] as? String, "observer")
         XCTAssertEqual(packet["client_local_time"] as? String, "2026-11-14 20:00")
@@ -65,41 +113,13 @@ final class LocalAIIntegrationRegressionTests: XCTestCase {
 
         let canonicalText = try XCTUnwrap(candidate["canonical_text"] as? String)
         XCTAssertFalse(canonicalText.isEmpty)
-        XCTAssertEqual(canonicalText, candidate["emotion_line"] as? String)
         let semanticKey = try XCTUnwrap(candidate["semantic_key"] as? String)
         XCTAssertEqual(
             candidate["claim_fingerprint"] as? String,
             LocalExpressionContract.claimFingerprint(semanticKey: semanticKey, canonicalText: canonicalText)
         )
-        let memoryFacts = ((packet["local_memory_context"] as? [String: Any])?["facts"] as? [[String: Any]]) ?? []
-        let memoryKeys = Set(memoryFacts.compactMap { $0["key"] as? String })
-        let recentFactPayloads = (packet["recent_facts"] as? [[String: Any]]) ?? []
-        let recentIds = Set(recentFactPayloads.compactMap { $0["id"] as? String })
-        XCTAssertEqual(recentIds, [older.id.uuidString])
         let evidence = try XCTUnwrap(candidate["evidence"] as? [[String: Any]])
-        for reference in evidence {
-            switch reference["kind"] as? String {
-            case "current_fact":
-                XCTAssertEqual(reference["reference"] as? String, current.id.uuidString)
-            case "recent_fact":
-                // Edge only accepts history evidence when the referenced id
-                // actually travels in `recent_facts`.
-                XCTAssertTrue(recentIds.contains(reference["reference"] as? String ?? ""))
-            case "local_memory":
-                XCTAssertTrue(memoryKeys.contains(reference["reference"] as? String ?? ""))
-            default:
-                XCTFail("unexpected evidence kind: \(reference)")
-            }
-        }
-        let numberFactValues = ((candidate["number_facts"] as? [[String: Any]]) ?? []).compactMap { $0["value"] as? Double }
-        XCTAssertEqual(numberFactValues, [12.8, 8.0])
-        XCTAssertEqual(candidate["numbers"] as? [Double], Optional([12.8, 8.0]))
-        XCTAssertNoThrow(try EdgePlannerValidatorMirror.validate(
-            candidate,
-            currentFact: currentFact,
-            recentFacts: recentFactPayloads,
-            memoryFacts: memoryFacts
-        ))
+        XCTAssertTrue(evidence.allSatisfy { $0["reference"] as? String == current.id.uuidString })
 
         BYOKURLProtocolStub.configure(
             statusCode: 200,
@@ -226,28 +246,23 @@ final class LocalAIIntegrationRegressionTests: XCTestCase {
         XCTAssertEqual(state.recordsPath.count, 1)
     }
 
-    func testArchivedShortcutResultKeepsCompanionAndFactsInNotificationBody() throws {
+    // AI-FB-001-RECEIPT-ORDER
+    func testArchivedShortcutResultKeepsFactsBeforeObservationAndSuggestion() throws {
         let feedback = try XCTUnwrap(NativeAIFeedback(payload: [
-            "badge": AnyCodable("观察"),
-            "icon": AnyCodable("✨"),
-            "band": AnyCodable("neutral"),
-            "emotion_line": AnyCodable("这笔消费有明确依据。"),
-            "utility_line": AnyCodable("保留这份节奏"),
+            "badge": AnyCodable("新商户记录"),
+            "emotion_line": AnyCodable("第一次记录到这家店。"),
+            "utility_line": AnyCodable("觉得合口的话，可以在备注里记一下点了什么。"),
             "confidence": AnyCodable(0.9)
         ]))
+        let facts = "💸 -¥8.00 · 示例煎饼店 · 餐饮\n今日已花 ¥42.00（3 笔）"
         let result = ShortcutUploadResult.archived(
-            notificationText: "💸 -¥12.80 · 便利店 · 日用\n今日已花 ¥12.80（1 笔）",
-            companionMessage: "这笔便利店消费已记录，金额为¥12.80。",
-            feedback: feedback
+            notificationText: facts, companionMessage: "傍晚的杂粮煎饼，已归档。", feedback: feedback
         )
 
         XCTAssertEqual(result.route, "records")
-        XCTAssertEqual(result.displayText, result.notificationText)
-        let body = result.notificationBody
-        XCTAssertTrue(body.contains("这笔便利店消费已记录"))
-        XCTAssertTrue(body.contains("-¥12.80"))
-        XCTAssertTrue(body.contains("今日已花 ¥12.80"))
-        XCTAssertLessThanOrEqual(body.count, 160)
+        XCTAssertEqual(result.displayText, facts + "\n第一次记录到这家店。\n觉得合口的话，可以在备注里记一下点了什么。")
+        XCTAssertTrue(result.notificationBody.hasPrefix(facts + "\n第一次记录到这家店。"))
+        XCTAssertLessThanOrEqual(result.notificationBody.count, 160)
     }
 
     private func makeStubSession() throws -> URLSession {
@@ -266,12 +281,15 @@ final class LocalAIIntegrationRegressionTests: XCTestCase {
         try? FileManager.default.removeItem(at: url.deletingLastPathComponent())
     }
 
-    private func expenseDraft(id: UUID, profileID: UUID, amountMinor: Int64, date: String) -> LocalExpenseDraft {
+    private func expenseDraft(
+        id: UUID, profileID: UUID, amountMinor: Int64, date: String,
+        merchant: String = "便利店", time: String? = nil, knownAt: String? = nil
+    ) -> LocalExpenseDraft {
         LocalExpenseDraft(
             id: id, profileID: profileID, accountID: nil, amountMinor: amountMinor,
-            currency: "CNY", merchantName: "便利店", platform: "", category: "日用",
-            paymentMethod: "cash", transactionDate: date, transactionTime: nil,
-            note: nil, createdAt: Date()
+            currency: "CNY", merchantName: merchant, platform: "", category: "日用",
+            paymentMethod: "cash", transactionDate: date, transactionTime: time,
+            note: nil, createdAt: knownAt.flatMap { ISO8601DateFormatter().date(from: $0) } ?? Date()
         )
     }
 

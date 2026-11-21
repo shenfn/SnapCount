@@ -20,6 +20,11 @@ import type { PlannerEvidenceReference } from "./local-expression-contract.ts";
 // @ts-ignore Production-owned render version is shared with the offline lab.
 import { SURFACE_RENDER_CONTRACT_VERSION } from "../_shared/expression-core/render-contract.mjs";
 
+import { plannerNumberFacts, plannerVoiceBriefFromPlan } from "./planner-voice-brief.ts";
+import type { PlannerVoiceBrief } from "./planner-voice-brief.ts";
+export { plannerVoiceBriefFromPlan };
+export type { PlannerVoiceBrief };
+
 const RECORD_DETAIL_RENDER_VERSION = SURFACE_RENDER_CONTRACT_VERSION;
 const RECORD_DETAIL_DECISION_VERSION = "record-detail-decision-v0.1";
 const RECORD_DETAIL_POLICY_NAME = "deterministic_rule";
@@ -33,25 +38,6 @@ interface ExpressionPresentation {
   renderedPayload: Record<string, unknown>;
   visibleFieldPaths: string[];
   renderedTextFingerprint: string;
-}
-
-export interface PlannerVoiceBrief {
-  candidate_id: string;
-  semantic_key: string;
-  dimension: string;
-  canonical_text: string;
-  source_surface: "record_detail";
-  planner_version: string;
-  numbers: number[];
-  count_numbers: number[];
-  number_facts: Array<{
-    value: number;
-    meaning: string | null;
-    role: "count" | "measure";
-    evidence: PlannerEvidenceReference[];
-  }>;
-  evidence: PlannerEvidenceReference[];
-  claim_fingerprint: string;
 }
 
 interface DatabaseClient {
@@ -83,58 +69,64 @@ function finiteNumber(value: unknown): number | null {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
-function plannerNumberFacts(candidate: Record<string, unknown>): PlannerVoiceBrief["number_facts"] {
-  const numbers = Array.isArray(candidate.numbers) ? candidate.numbers : [];
-  return numbers.flatMap((rawNumber) => {
-    const descriptor = object(rawNumber);
-    const value = finiteNumber(Object.keys(descriptor).length > 0 ? descriptor.value : rawNumber);
-    if (value === null) return [];
-    const meaning = text(descriptor.meaning, 120) || null;
-    const explicitRole = text(descriptor.role, 40);
-    const role: "count" | "measure" = explicitRole === "count"
-      || /(?:count|occurrence|session|streak|consecutive)/i.test(meaning ?? "")
-      ? "count"
-      : "measure";
-    const evidence = Array.isArray(descriptor.evidence)
-      ? descriptor.evidence.filter((item): item is PlannerEvidenceReference => !!item && typeof item === "object")
-      : [];
-    return [{ value, meaning, role, evidence }];
-  });
-}
+/** Reuse the cloud Planner with only the formal expense evidence from this request. */
+export function buildLocalExpenseVoiceBrief(
+  currentFact: Record<string, unknown>,
+  input: unknown,
+): PlannerVoiceBrief | null {
+  if (currentFact.domain_key !== "expense") return null;
+  const packet = object(input);
+  if (typeof packet.day_complete !== "boolean" || !Array.isArray(packet.history) ||
+    packet.history.length === 0 || packet.history.length > 7) return null;
 
-export function plannerVoiceBriefFromPlan(plan: Record<string, unknown>): PlannerVoiceBrief | null {
-  if (plan.status !== "auto_planned") return null;
-  const renderPlan = object(object(plan.render_plans).record_detail);
-  const selected = Array.isArray(renderPlan.selected) ? renderPlan.selected : [];
-  const selection = selected.find((item) => text(object(item).selection_mode, 80) === "threshold");
-  if (!selection) return null;
-  const selectedItem = object(selection);
-  const candidateId = text(selectedItem.candidate_id, 200);
-  const candidates = Array.isArray(plan.candidates) ? plan.candidates : [];
-  const candidate = candidates.map(object).find((item) => text(item.candidate_id, 200) === candidateId);
-  if (!candidate) return null;
-  const claim = object(candidate.claim);
-  const semanticKey = text(claim.semantic_key, 200);
-  const canonicalText = text(selectedItem.canonical_text ?? claim.canonical_text, 1000);
-  if (!candidateId || !semanticKey || !canonicalText) return null;
-  const numberFacts = plannerNumberFacts(candidate);
-  const evidence = Array.isArray(candidate.evidence)
-    ? candidate.evidence.filter((item): item is PlannerEvidenceReference => !!item && typeof item === "object")
-    : [];
-  if (evidence.length === 0 || numberFacts.some((item) => item.evidence.length === 0)) return null;
-  return {
-    candidate_id: candidateId,
-    semantic_key: semanticKey,
-    dimension: text(candidate.dimension, 100),
-    canonical_text: canonicalText,
-    source_surface: "record_detail",
-    planner_version: text(plan.planner_version, 100) || EXPRESSION_PLANNER_VERSION,
-    numbers: numberFacts.map((item) => item.value),
-    count_numbers: numberFacts.filter((item) => item.role === "count").map((item) => item.value),
-    number_facts: numberFacts,
-    evidence,
-    claim_fingerprint: plannerClaimFingerprint(semanticKey, canonicalText),
+  const date = (value: unknown): string | null => {
+    if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
+    const instant = new Date(value);
+    return Number.isFinite(instant.getTime()) && instant.toISOString().slice(0, 10) === value ? value : null;
   };
+  const instant = (value: unknown): string | null =>
+    typeof value === "string" && value.length <= 48 &&
+      /T.*(?:Z|[+-]\d{2}:\d{2})$/.test(value) && Number.isFinite(Date.parse(value)) ? value : null;
+
+  function formalRow(row: Record<string, unknown>): ShadowExpenseTransaction | null {
+    const id = text(row.id, 200);
+    const merchant = text(row.merchant_name, 120);
+    const transactionDate = date(row.transaction_date);
+    const knownAt = instant(row.created_at);
+    const occurredAt = instant(row.occurred_at);
+    const amount = row.amount;
+    if (!id || !merchant || !transactionDate || !knownAt ||
+      (row.occurred_at != null && !occurredAt) ||
+      typeof amount !== "number" || !Number.isFinite(amount) || amount < 0 ||
+      !Number.isSafeInteger(Math.round(amount * 100))) return null;
+    return {
+      id, merchant_name: merchant, transaction_date: transactionDate,
+      created_at: knownAt, occurred_at: occurredAt, amount,
+      category: text(row.category, 40) || null, status: "done", type: "expense",
+    };
+  }
+  const current = formalRow({
+    ...currentFact, transaction_date: currentFact.record_date, created_at: packet.current_known_at,
+  });
+  if (!current) return null;
+  const firstDate = new Date(current.transaction_date);
+  firstDate.setUTCDate(firstDate.getUTCDate() - 30);
+  const earliest = firstDate.toISOString().slice(0, 10);
+  const ids = new Set([current.id]);
+  const transactions = [current];
+  for (const item of packet.history) {
+    const row = formalRow(object(item));
+    // Don't silently discard a malformed row from a complete day.
+    if (!row || ids.has(row.id) || row.transaction_date < earliest ||
+      row.transaction_date > current.transaction_date) return null;
+    ids.add(row.id);
+    transactions.push(row);
+  }
+  return plannerVoiceBriefFromPlan(buildExpressionShadowPlan({
+    transactions,
+    currentRecordId: current.id,
+    localExpenseEvidence: { completeDay: packet.day_complete },
+  }) as Record<string, unknown>);
 }
 
 const HISTORY_PAGE_SIZE = 500;

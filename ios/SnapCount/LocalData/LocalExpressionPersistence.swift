@@ -227,9 +227,12 @@ final class LocalExpressionPersistence {
 
     /// Persists a provider result without touching the Planner fallback. The
     /// raw prompt and raw provider response are never stored.
-    func persist(companion result: LocalCompanionResult, for detail: NativeRecordDetail) {
+    func persist(companion result: LocalCompanionResult, for detail: NativeRecordDetail, trace: ShortcutAITrace? = nil) {
         let settings = settingsProvider()
-        guard settings.companionEnabled else { return }
+        guard settings.companionEnabled else {
+            trace?.record("companion.storage=disabled")
+            return
+        }
         let message: String?
         if let candidate = result.companionMessage?.trimmingCharacters(in: .whitespacesAndNewlines),
            !candidate.isEmpty {
@@ -238,12 +241,16 @@ final class LocalExpressionPersistence {
             message = nil
         }
         let feedbackJSON = result.aiFeedback.flatMap(encode)
-        guard message != nil || feedbackJSON != nil else { return }
+        guard message != nil || feedbackJSON != nil else {
+            trace?.record("companion.storage=empty")
+            return
+        }
         do {
+            let changedRows: Int
             switch detail.kind {
             case "expense", "income":
                 let table = detail.kind == "expense" ? "local_expenses" : "local_income_records"
-                try database.writer.write { db in
+                changedRows = try database.writer.write { db in
                     try db.execute(
                         sql: """
                             UPDATE \(table)
@@ -255,6 +262,7 @@ final class LocalExpressionPersistence {
                             """,
                         arguments: [message, feedbackJSON, detail.rawId, detail.rawId]
                     )
+                    return db.changesCount
                 }
             case "data", "wallet":
                 var payload = detail.payload ?? [:]
@@ -268,24 +276,29 @@ final class LocalExpressionPersistence {
                 }
                 let payloadJSON = try LocalRecordCodec.encode(payload)
                 if detail.kind == "wallet" {
-                    try database.writer.write { db in
+                    changedRows = try database.writer.write { db in
                         try db.execute(
                             sql: "UPDATE local_wallet_snapshots SET payload_json = ? WHERE id = ? AND deleted_at IS NULL",
                             arguments: [payloadJSON, detail.rawId]
                         )
+                        return db.changesCount
                     }
                 } else {
-                    try database.writer.write { db in
+                    changedRows = try database.writer.write { db in
                         try db.execute(
                             sql: "UPDATE local_records SET payload_json = ? WHERE id = ? AND deleted_at IS NULL",
                             arguments: [payloadJSON, detail.rawId]
                         )
+                        return db.changesCount
                     }
                 }
             default:
+                trace?.record("companion.storage=unsupported")
                 return
             }
+            trace?.record(changedRows > 0 ? "companion.storage=saved" : "companion.storage=no_row")
         } catch {
+            trace?.record("companion.storage=failed")
             return
         }
     }
@@ -415,7 +428,7 @@ final class LocalExpressionPersistence {
             domainKey: detail.domainKey ?? detail.kind,
             now: now
         )
-        return LocalPlannerCandidateEngine.makeContext(
+        var context = LocalPlannerCandidateEngine.makeContext(
             for: detail,
             recentFacts: recentFacts,
             memoryContextJSON: memoryContextJSON,
@@ -425,6 +438,20 @@ final class LocalExpressionPersistence {
             now: now,
             timeZone: timeZone
         )
+        if let factReader,
+           let current = try? factReader.fact(profileID: profileID, id: detail.rawId, domainKey: context.currentFact.domainKey) {
+            let history = try? factReader.range(
+                profileID: profileID, from: "0001-01-01", to: current.businessDate,
+                domainKey: memoryEnabled ? nil : current.domainKey
+            ).facts
+            context.sharedCompanionPlan = LocalSharedCompanionPlanner.plan(
+                currentID: detail.rawId,
+                facts: history ?? [current],
+                includeHistory: history != nil,
+                includeRelatedRecords: memoryEnabled
+            )
+        }
+        return context
     }
 
     private func recentFormalFacts(

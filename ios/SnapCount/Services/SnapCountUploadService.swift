@@ -124,7 +124,8 @@ final class SnapCountUploadService {
         uploadToken: String? = nil,
         captureKind: String = "photo_library",
         filename: String = "native-recognition.jpg",
-        mimeType: String = "image/jpeg"
+        mimeType: String = "image/jpeg",
+        trace: ShortcutAITrace? = nil
     ) async throws -> Data {
         try await uploadImageResponse(
             data: data,
@@ -134,7 +135,8 @@ final class SnapCountUploadService {
             filename: filename,
             mimeType: mimeType,
             responseMode: "json",
-            operation: "recognize_only"
+            operation: "recognize_only",
+            trace: trace
         )
     }
 
@@ -143,14 +145,15 @@ final class SnapCountUploadService {
     func generateLocalExpression(
         currentFact: [String: Any],
         plannerCandidate: [String: Any]?,
-        recentFacts: [[String: Any]],
         localMemoryContext: [String: Any]?,
         expressionPreferences: [String: Any],
         clientLocalTime: String?,
         clientCapturedAt: String?,
         weekday: String?,
         recentCompanionLines: [String],
-        accessToken: String
+        accessToken: String,
+        sharedPlan: LocalSharedCompanionPlan? = nil,
+        trace: ShortcutAITrace? = nil
     ) async throws -> Data {
         let functionsURL = functionsURLOverride ?? AppConfig.supabaseFunctionsURL
         let anonKey = anonKeyOverride ?? AppConfig.supabaseAnonKey
@@ -170,8 +173,11 @@ final class SnapCountUploadService {
             "expression_preferences": expressionPreferences,
             "recent_companion_lines": Array(recentCompanionLines.prefix(5)),
         ]
-        if let plannerCandidate { body["planner_candidate"] = plannerCandidate }
-        if !recentFacts.isEmpty { body["recent_facts"] = Array(recentFacts.prefix(12)) }
+        if let sharedPlan {
+            body["shared_planner_brief"] = sharedPlan.brief as Any? ?? NSNull()
+        } else if let plannerCandidate {
+            body["planner_candidate"] = plannerCandidate
+        }
         if let localMemoryContext { body["local_memory_context"] = localMemoryContext }
         if let clientLocalTime { body["client_local_time"] = clientLocalTime }
         if let clientCapturedAt { body["client_captured_at"] = clientCapturedAt }
@@ -183,10 +189,19 @@ final class SnapCountUploadService {
         request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
-        let (responseData, response) = try await session.data(for: request)
+        trace?.record("text.request=started")
+        let responseData: Data
+        let response: URLResponse
+        do {
+            (responseData, response) = try await session.data(for: request)
+        } catch {
+            trace?.record("text.request=transport_failed")
+            throw error
+        }
         guard let http = response as? HTTPURLResponse else {
             throw SnapCountUploadServiceError.invalidResponse
         }
+        trace?.record("text.http=\(http.statusCode)")
         guard (200..<300).contains(http.statusCode) else {
             throw SnapCountUploadServiceError.requestFailed(
                 displayErrorMessage(from: responseData, fallback: String(data: responseData, encoding: .utf8) ?? "", statusCode: http.statusCode)
@@ -224,7 +239,8 @@ final class SnapCountUploadService {
         filename: String,
         mimeType: String,
         responseMode: String,
-        operation: String? = nil
+        operation: String? = nil,
+        trace: ShortcutAITrace? = nil
     ) async throws -> Data {
         let functionsURL = functionsURLOverride ?? AppConfig.supabaseFunctionsURL
         let anonKey = anonKeyOverride ?? AppConfig.supabaseAnonKey
@@ -271,12 +287,21 @@ final class SnapCountUploadService {
         request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
         request.httpBody = multipart.body
 
-        let (responseData, response) = try await session.data(for: request)
+        trace?.record("image.request=started")
+        let responseData: Data
+        let response: URLResponse
+        do {
+            (responseData, response) = try await session.data(for: request)
+        } catch {
+            trace?.record("image.request=transport_failed")
+            throw error
+        }
         guard let http = response as? HTTPURLResponse else {
             throw SnapCountUploadServiceError.invalidResponse
         }
 
         let text = String(data: responseData, encoding: .utf8) ?? ""
+        trace?.record("image.http=\(http.statusCode)")
         guard (200..<300).contains(http.statusCode) else {
             throw SnapCountUploadServiceError.requestFailed(
                 displayErrorMessage(from: responseData, fallback: text, statusCode: http.statusCode)
@@ -332,21 +357,19 @@ struct ShortcutUploadResult {
         route = payload.routePath
     }
 
-    /// Archived Shortcut outcome. Compose the companion + fixed receipt facts
-    /// once and reuse it for both the result card and the system notification.
     static func archived(
         notificationText: String,
         companionMessage: String?,
         feedback: NativeAIFeedback?
     ) -> ShortcutUploadResult {
-        let mergedText = expandedDisplayText(
-            baseText: notificationText,
+        let receipt = LocalIntakeNotificationText.archivedReceipt(
+            facts: notificationText,
             companionMessage: companionMessage,
-            feedback: feedback
+            feedback: feedback.map { LocalIntakeNotificationFeedback($0) }
         )
         return ShortcutUploadResult(
-            displayText: mergedText,
-            notificationText: mergedText,
+            displayText: receipt.displayText,
+            notificationText: receipt.notificationText,
             route: "records"
         )
     }

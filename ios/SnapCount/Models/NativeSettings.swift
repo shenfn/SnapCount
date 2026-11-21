@@ -6,6 +6,7 @@ import Foundation
 enum JieziReleaseCapabilities {
     static let monthlyAIQuestions = false
     static let cloudSync = false
+    static let historyMigration = false
     static let byok = false
 }
 

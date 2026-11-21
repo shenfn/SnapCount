@@ -12,6 +12,7 @@ struct TodayView: View {
     @State private var uploadMessageIsError = false
     @State private var showUploadResult = false
     @State private var intakeFeedback: NativeAIFeedback?
+    @State private var intakeReceipt: LocalIntakeReceipt?
     @State private var showIntakeResult = false
     @State private var intakeResultRoute: AppOverlay?
     @State private var showWidgetManager = false
@@ -188,7 +189,8 @@ struct TodayView: View {
                     showIntakeResult = false
                     if let route = intakeResultRoute { appState.presentedOverlay = route }
                 },
-                onDismiss: { showIntakeResult = false }
+                onDismiss: { showIntakeResult = false },
+                receipt: intakeReceipt
             )
             .presentationDetents([.medium])
             .presentationDragIndicator(.visible)
@@ -691,6 +693,7 @@ struct TodayView: View {
                 intakeResultRoute = .inbox
             }
             intakeFeedback = localOutcome.feedback
+            intakeReceipt = localOutcome.archivedReceipt
             uploadMessageIsError = false
             await appState.refreshLocalRecognitionProjection()
         } catch {

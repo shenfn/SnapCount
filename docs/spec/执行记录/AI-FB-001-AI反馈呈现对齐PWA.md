@@ -215,3 +215,11 @@ Windows 环境无法运行 XCTest（无 swiftc / Xcode），本轮基线以 GitH
 - TestFlight：run 41562044517（run_number 157），`UPLOAD SUCCEEDED`，
   Delivery UUID `30ab9a7e-a0b8-4cd0-8159-effe47591eb6`，
   IPA 内 `CFBundleVersion` 取的是 run id（与既往一致），TestFlight 里按长数字排序。
+
+## AI-FB-001-RECEIPT-ORDER
+
+11 月 12 日的快捷指令展开结果保留观察和建议。11 月 14 日合并通知文案和展开文案后，有陪伴主句时会跳过这两行。本轮在归档结果中保留事实与表达的独立字段。展开文本和 App 内弹层按事实、观察、建议排列。系统通知在 160 字内先保留交易和累计，再按空间加入整句观察及建议。待确认和失败态继续走原有入口。
+
+复验范围是首见商户、空或低置信度反馈、泛建议、长商户名称和幂等重传。固定样例首先复现了排列和掉行错误。
+
+本地 iPhone 17e / iOS 27.2 全量 XCTest 669/669 通过。

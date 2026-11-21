@@ -50,7 +50,7 @@ struct LoginView: View {
                     .frame(width: 110, height: 110)
                     .accessibilityHidden(true)
             }
-            Text("登录后同步快捷指令凭据，用截图和照片快速生成记录。")
+            Text("登录后，可开启照片和截图的自动识别。")
                 .font(.callout)
                 .foregroundStyle(JieziTheme.muted)
                 .fixedSize(horizontal: false, vertical: true)
@@ -152,7 +152,7 @@ struct LoginView: View {
                     .font(.footnote.weight(.semibold))
             }
             Toggle(isOn: $acceptedSensitiveData) {
-                Text("我同意芥子处理我主动提交的财务、睡眠等敏感数据。iOS 记录优先保存在本机，云端账户服务位于新加坡。启用 Hosted AI 时会另行确认数据发送范围。")
+                Text("我同意芥子处理我主动提交的财务、睡眠等敏感数据。记录优先保存在本机，云端账户服务位于新加坡。开启自动识别时，芥子会另行说明发送哪些数据并征求同意。")
                     .font(.footnote)
                     .foregroundStyle(JieziTheme.muted)
                     .fixedSize(horizontal: false, vertical: true)

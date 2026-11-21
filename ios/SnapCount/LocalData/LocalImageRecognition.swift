@@ -160,9 +160,29 @@ struct LocalImageIntakeOutcome: Equatable {
     var feedback: NativeAIFeedback? = nil
     /// 原始反馈置信度，用于在异步 Companion 接线时保持低置信度降级。
     var feedbackConfidence: Double? = nil
+    var receiptText: String? = nil
+    var companionMessage: String? = nil
+
+    var archivedReceipt: LocalIntakeReceipt? {
+        switch result {
+        case .staged, .financialPending: return nil
+        case .archived, .financialArchived:
+            guard let receiptText else { return nil }
+            return LocalIntakeNotificationText.archivedReceipt(
+                facts: receiptText,
+                companionMessage: companionMessage,
+                feedback: feedback.map { LocalIntakeNotificationFeedback($0, confidence: feedbackConfidence) }
+            )
+        }
+    }
 }
 
 final class LocalImageRecognitionUseCase {
+    private typealias NotificationContent = (
+        text: String, feedback: NativeAIFeedback?, confidence: Double?,
+        receiptText: String?, companionMessage: String?
+    )
+
     private let localRecordUseCase: LocalRecordUseCaseProtocol
     private let imageStore: LocalImageStore
     private let intakeRepository: LocalImageIntakeRepository
@@ -236,9 +256,13 @@ final class LocalImageRecognitionUseCase {
         for outcome: LocalRecordIntakeOutcome,
         provider: LocalCompanionProvider,
         settings: NativeUserSettings,
-        providerMode: LocalExpressionProviderMode
+        providerMode: LocalExpressionProviderMode,
+        trace: ShortcutAITrace? = nil
     ) async -> LocalCompanionResult? {
-        guard let expressionPersistence else { return nil }
+        guard let expressionPersistence else {
+            trace?.record("companion.skipped=persistence_unavailable")
+            return nil
+        }
         let detail: NativeRecordDetail
         let profileID: UUID
         switch outcome {
@@ -253,22 +277,31 @@ final class LocalImageRecognitionUseCase {
                 detail = LocalIncomeReadModel.detail(from: income, imageStore: imageStore)
                 profileID = income.profileID
             } else {
+                trace?.record("companion.skipped=record_unavailable")
                 return nil
             }
         case .staged, .financialPending:
+            trace?.record("companion.skipped=pending")
             return nil
         }
-        guard (detail.companionMessage ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-              let context = expressionPersistence.makeCompositionContext(
-                for: detail,
-                profileID: profileID,
-                settings: settings,
-                providerMode: providerMode
-              ),
-              let result = try? await provider.compose(context: context) else {
+        guard (detail.companionMessage ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            trace?.record("companion.skipped=already_saved")
             return nil
         }
-        expressionPersistence.persist(companion: result, for: detail)
+        guard let context = expressionPersistence.makeCompositionContext(
+            for: detail,
+            profileID: profileID,
+            settings: settings,
+            providerMode: providerMode
+        ) else {
+            trace?.record("companion.skipped=context_unavailable")
+            return nil
+        }
+        guard let result = try? await provider.compose(context: context) else {
+            trace?.record("companion.result=provider_failed")
+            return nil
+        }
+        expressionPersistence.persist(companion: result, for: detail, trace: trace)
         return result
     }
 
@@ -310,7 +343,9 @@ final class LocalImageRecognitionUseCase {
                         imageHash: imageHash,
                         notificationText: composed?.text,
                         feedback: composed?.feedback,
-                        feedbackConfidence: composed?.confidence
+                        feedbackConfidence: composed?.confidence,
+                        receiptText: composed?.receiptText,
+                        companionMessage: composed?.companionMessage
                     )
                 default:
                     // 已删除的财务事实按新图重新识别。
@@ -324,7 +359,9 @@ final class LocalImageRecognitionUseCase {
                     imageHash: imageHash,
                     notificationText: composed.text,
                     feedback: composed.feedback,
-                    feedbackConfidence: composed.confidence
+                    feedbackConfidence: composed.confidence,
+                    receiptText: composed.receiptText,
+                    companionMessage: composed.companionMessage
                 )
             }
             if let staging = try await localRecordUseCase.staging(id: "local-ai-\(imageHash)"),
@@ -348,7 +385,9 @@ final class LocalImageRecognitionUseCase {
                     imageHash: imageHash,
                     notificationText: composed.text,
                     feedback: composed.feedback,
-                    feedbackConfidence: composed.confidence
+                    feedbackConfidence: composed.confidence,
+                    receiptText: composed.receiptText,
+                    companionMessage: composed.companionMessage
                 )
             }
             if let staging = try await localRecordUseCase.staging(id: "local-ai-\(imageHash)"),
@@ -361,7 +400,9 @@ final class LocalImageRecognitionUseCase {
                     imageHash: imageHash,
                     notificationText: composed.text,
                     feedback: composed.feedback,
-                    feedbackConfidence: composed.confidence
+                    feedbackConfidence: composed.confidence,
+                    receiptText: composed.receiptText,
+                    companionMessage: composed.companionMessage
                 )
             }
         }
@@ -612,8 +653,8 @@ final class LocalImageRecognitionUseCase {
             let outcome: LocalRecordIntakeOutcome = autoArchive ? .financialArchived(id) : .financialPending(id)
             // PWA 判重命中时通知是固定两行（`index.ts:7321`），不参与 feedback 的三行拼装；
             // 「疑似重复」那条 ai_feedback 只用于待处理页与卡片。
-            let composed: (text: String, feedback: NativeAIFeedback?, confidence: Double?) = isDuplicate
-                ? (text: Self.duplicateNotificationText, feedback: NativeAIFeedback(payload: feedbackPayload), confidence: recognized.confidence)
+            let composed: NotificationContent = isDuplicate
+                ? (Self.duplicateNotificationText, NativeAIFeedback(payload: feedbackPayload), recognized.confidence, nil, nil)
                 : composeNotification(
                     domainKey: recognized.domainKey,
                     feedbackPayload: feedbackPayload,
@@ -634,7 +675,9 @@ final class LocalImageRecognitionUseCase {
                 imageHash: imageHash,
                 notificationText: composed.text,
                 feedback: composed.feedback,
-                feedbackConfidence: composed.confidence
+                feedbackConfidence: composed.confidence,
+                receiptText: composed.receiptText,
+                companionMessage: composed.companionMessage
             )
         }
         guard !recognized.domainKey.isEmpty,
@@ -708,7 +751,9 @@ final class LocalImageRecognitionUseCase {
             imageHash: imageHash,
             notificationText: composed.text,
             feedback: composed.feedback,
-            feedbackConfidence: composed.confidence
+            feedbackConfidence: composed.confidence,
+            receiptText: composed.receiptText,
+            companionMessage: composed.companionMessage
         )
     }
 
@@ -802,7 +847,7 @@ final class LocalImageRecognitionUseCase {
     private func composeNotification(
         for record: LocalRecord,
         profileID: UUID
-    ) -> (text: String, feedback: NativeAIFeedback?, confidence: Double?) {
+    ) -> NotificationContent {
         let payload = (try? LocalRecordCodec.decode(record.payloadJSON)) ?? [:]
         return composeNotification(
             domainKey: record.domainKey,
@@ -833,7 +878,7 @@ final class LocalImageRecognitionUseCase {
         isPending: Bool,
         profileID: UUID,
         dateKey: String
-    ) -> (text: String, feedback: NativeAIFeedback?, confidence: Double?) {
+    ) -> NotificationContent {
         var todaySpendMinor: Int64 = 0
         var todaySpendCount = 0
         var monthIncomeMinor: Int64 = 0
@@ -846,7 +891,7 @@ final class LocalImageRecognitionUseCase {
                 .reduce(0) { $0 + $1.amountMinor }
         }
         let feedback = NativeAIFeedback(payload: feedbackPayload)
-        let text = LocalIntakeNotificationText.compose(LocalIntakeNotificationInput(
+        let input = LocalIntakeNotificationInput(
             domainKey: domainKey,
             feedback: feedback,
             confidence: confidence,
@@ -859,8 +904,11 @@ final class LocalImageRecognitionUseCase {
             todaySpendCount: todaySpendCount,
             monthIncomeMinor: monthIncomeMinor,
             isPending: isPending
-        ))
-        return (text, feedback, confidence)
+        )
+        return (
+            LocalIntakeNotificationText.compose(input), feedback, confidence,
+            LocalIntakeNotificationText.fallbackText(input), companionMessage
+        )
     }
 
     private static func safeFailureMessage(for error: Error) -> String {
@@ -888,9 +936,11 @@ final class LocalImageRecognitionUseCase {
 final class HostedAIImageRecognitionProvider: LocalImageRecognitionProvider {
     private let uploadService: SnapCountUploadService
     private let decoder = JSONDecoder()
+    private let trace: ShortcutAITrace?
 
-    init(uploadService: SnapCountUploadService = SnapCountUploadService()) {
+    init(uploadService: SnapCountUploadService = SnapCountUploadService(), trace: ShortcutAITrace? = nil) {
         self.uploadService = uploadService
+        self.trace = trace
     }
 
     func recognize(_ request: LocalImageRecognitionRequest) async throws -> LocalRecognitionCandidate {
@@ -899,7 +949,8 @@ final class HostedAIImageRecognitionProvider: LocalImageRecognitionProvider {
             uploadToken: request.uploadToken,
             captureKind: request.captureKind,
             filename: request.filename,
-            mimeType: "image/jpeg"
+            mimeType: "image/jpeg",
+            trace: trace
         )
         let envelope = try decoder.decode(HostedAIRecognitionEnvelope.self, from: responseData)
         guard envelope.operation == "recognize_only", envelope.schemaVersion == "local-recognition-candidate-v1",

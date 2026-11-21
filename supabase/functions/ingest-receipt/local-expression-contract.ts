@@ -46,7 +46,11 @@ function canonical(value: unknown): string {
 
 /** Stable, non-secret audit fingerprint. */
 export function localExpressionFingerprint(value: unknown): string {
-  const bytes = new TextEncoder().encode(canonical(value));
+  const serialized = canonical(value);
+  // JavaScriptCore supplies ECMAScript but has no Web TextEncoder.
+  const bytes = typeof TextEncoder === "function"
+    ? new TextEncoder().encode(serialized)
+    : Uint8Array.from(unescape(encodeURIComponent(serialized)), (char) => char.charCodeAt(0));
   let hash = 0xcbf29ce484222325n;
   for (const byte of bytes) {
     hash ^= BigInt(byte);

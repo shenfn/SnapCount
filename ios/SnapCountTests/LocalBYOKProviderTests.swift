@@ -4,6 +4,74 @@ import XCTest
 @testable import SnapCount
 
 final class LocalBYOKProviderTests: XCTestCase {
+    func testLOCALAI003KTracesHostedSleepFromRecognitionToSavedCompanion() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let database = try LocalDatabase(databaseURL: directory.appendingPathComponent("local.sqlite"))
+        let repository = try LocalRecordRepository(database: database)
+        let imageStore = try LocalImageStore(rootDirectory: directory.appendingPathComponent("images"))
+        let records = LocalRecordUseCase(
+            profileStore: LocalProfileStore(database: database),
+            repository: repository,
+            imageStore: imageStore
+        )
+        let session = try makeStubSession()
+        defer { session.invalidateAndCancel() }
+        let service = SnapCountUploadService(session: session, functionsURL: "https://example.test/functions/v1", anonKey: "test-key")
+        var events: [String] = []
+        let trace = ShortcutAITrace { events.append($0) }
+        let recognition = LocalImageRecognitionUseCase(
+            localRecordUseCase: records,
+            imageStore: imageStore,
+            intakeRepository: LocalImageIntakeRepository(database: database),
+            provider: HostedAIImageRecognitionProvider(uploadService: service, trace: trace),
+            expressionPersistence: LocalExpressionPersistence(database: database) {
+                LocalExpressionSettings(companionEnabled: true, memoryEnabled: false)
+            }
+        )
+        BYOKURLProtocolStub.configure(statusCode: 200, responseData: Data(#"{"schema_version":"local-recognition-candidate-v1","operation":"recognize_only","candidate":{"id":"sleep-test","domain_key":"sleep","title":"睡眠记录","summary":"休息了 450 分钟","payload":{"sleep_minutes":450,"sleep_start_at":"2026-11-16T23:40:00+08:00","wake_at":"2026-11-17T07:10:00+08:00","rem_minutes":105},"confidence":0.99,"record_date":"2026-11-17","evidence_fields":["sleep_minutes"],"missing_fields":[]}}"#.utf8))
+        let image = try syntheticJPEG()
+        let outcome = try await recognition.ingest(imageData: image, captureKind: "screenshot", filename: "sleep.jpg", uploadToken: "synthetic-upload-token")
+        guard case .archived(let archived) = outcome.result else { return XCTFail("Sleep record did not archive") }
+
+        let provider = HostedAICompanionProvider(accessToken: "synthetic-access-token", service: service, trace: trace)
+        BYOKURLProtocolStub.configure(statusCode: 200, responseData: Data(#"{"ok":true,"data":{"companion_message":"昨晚睡了七个半小时。","ai_feedback":null,"planner_fallback_reason":"synthetic-private-reason","shared_planner_status":"accepted"}}"#.utf8))
+        let companion = await recognition.composeCompanion(
+            for: outcome.result, provider: provider, settings: NativeUserSettings(), providerMode: .hosted, trace: trace
+        )
+        XCTAssertEqual(companion?.companionMessage, "昨晚睡了七个半小时。")
+        let reread = try await records.record(id: archived.record.id)
+        let stored = try XCTUnwrap(reread)
+        XCTAssertEqual(LocalRecordReadModel.detail(from: stored, imageStore: imageStore).companionMessage, companion?.companionMessage)
+        let delivery = ShortcutUploadResult.archived(notificationText: "睡眠已记录", companionMessage: companion?.companionMessage, feedback: nil)
+        XCTAssertTrue(delivery.notificationBody.contains("昨晚睡了七个半小时。"))
+        XCTAssertTrue(events.contains("image.http=200"))
+        XCTAssertTrue(events.contains("text.http=200"))
+        XCTAssertTrue(events.contains("text.shared_planner=accepted"))
+        let request = try XCTUnwrap(BYOKURLProtocolStub.capturedBody)
+        let packet = try XCTUnwrap(JSONSerialization.jsonObject(with: request) as? [String: Any])
+        let candidate = try XCTUnwrap(packet["shared_planner_brief"] as? [String: Any])
+        XCTAssertTrue((candidate["semantic_key"] as? String)?.hasPrefix("sleep_") == true)
+        let current = try XCTUnwrap(packet["current_fact"] as? [String: Any])
+        let facts = try XCTUnwrap(current["payload_json"] as? [String: Any])
+        XCTAssertNotNil(facts["sleep_start_at"])
+        XCTAssertEqual(facts["rem_minutes"] as? Double, 105)
+        XCTAssertNil(packet["recent_facts"])
+        XCTAssertTrue(events.contains("text.server=planner_fallback"))
+        XCTAssertTrue(events.contains("text.content=companion"))
+        XCTAssertTrue(events.contains("companion.storage=saved"))
+        XCTAssertFalse(events.joined().contains("synthetic"))
+        XCTAssertFalse(events.joined().contains("七个半小时"))
+
+        let replay = try await recognition.ingest(imageData: image, captureKind: "screenshot", filename: "sleep.jpg", uploadToken: "synthetic-upload-token")
+        let duplicateCompanion = await recognition.composeCompanion(
+            for: replay.result, provider: provider, settings: NativeUserSettings(), providerMode: .hosted, trace: trace
+        )
+        XCTAssertNil(duplicateCompanion)
+        XCTAssertEqual(events.last, "companion.skipped=already_saved")
+        XCTAssertEqual(BYOKURLProtocolStub.capturedBodies.count, 1)
+    }
+
     func testLOCALAI003KHostedValidResponseUsesNormalizedFeedbackSchema() async throws {
         let session = try makeStubSession()
         BYOKURLProtocolStub.configure(
@@ -24,9 +92,12 @@ final class LocalBYOKProviderTests: XCTestCase {
 
     func testLOCALAI003KHostedNullLowConfidenceAndMalformedFeedback() async throws {
         let session = try makeStubSession()
+        var events: [String] = []
+        let trace = ShortcutAITrace { events.append($0) }
         let provider = HostedAICompanionProvider(
             accessToken: "test-access-token",
-            service: SnapCountUploadService(session: session, functionsURL: "https://example.test/functions/v1", anonKey: "test-key")
+            service: SnapCountUploadService(session: session, functionsURL: "https://example.test/functions/v1", anonKey: "test-key"),
+            trace: trace
         )
 
         BYOKURLProtocolStub.configure(statusCode: 200, responseData: Data(#"{"ok":true,"data":{"companion_message":"可选陪伴","ai_feedback":null}}"#.utf8))
@@ -36,6 +107,7 @@ final class LocalBYOKProviderTests: XCTestCase {
         BYOKURLProtocolStub.configure(statusCode: 200, responseData: Data(#"{"ok":true,"data":{"companion_message":"可选陪伴","ai_feedback":{"emotion_line":"低置信度","confidence":0.49}}}"#.utf8))
         let lowConfidenceResult = try await provider.compose(context: makeContext(providerMode: .hosted))
         XCTAssertNil(lowConfidenceResult.aiFeedback)
+        XCTAssertEqual(events.last, "text.content=companion")
 
         BYOKURLProtocolStub.configure(statusCode: 200, responseData: Data(#"{"ok":true,"data":{"companion_message":"可选陪伴","ai_feedback":{"confidence":0.9}}}"#.utf8))
         do {
@@ -44,6 +116,13 @@ final class LocalBYOKProviderTests: XCTestCase {
         } catch let error as QwenBYOKError {
             XCTAssertEqual(error, .invalidResponse)
         }
+        XCTAssertEqual(events.last, "text.response=content_rejected")
+
+        BYOKURLProtocolStub.configure(statusCode: 200, responseData: Data(#"{"ok":true,"data":{"companion_message":null,"ai_feedback":null,"error":"synthetic-provider-error"}}"#.utf8))
+        let emptyResult = try await provider.compose(context: makeContext(providerMode: .hosted))
+        XCTAssertNil(emptyResult.companionMessage)
+        XCTAssertEqual(Array(events.suffix(2)), ["text.server=generation_error", "text.content=empty"])
+        XCTAssertFalse(events.joined().contains("synthetic-provider-error"))
     }
 
     func testLOCALAI003KBYOKValidResponseUsesSameNormalizedSchema() async throws {

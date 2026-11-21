@@ -582,8 +582,11 @@ struct InboxScopeEmptyState: View {
 struct InboxIntakeBanner: View {
     let intakes: [LocalImageIntake]
     @Binding var expanded: Bool
+    let retryableCount: Int
+    let isRetryingBatch: Bool
     let dataFor: (LocalImageIntake) -> Data?
     let hasImage: (LocalImageIntake) -> Bool
+    let onRetryBatch: () -> Void
     let onRetry: (LocalImageIntake) -> Void
     let onManual: (LocalImageIntake) -> Void
     let onDiscard: (LocalImageIntake) -> Void
@@ -603,7 +606,7 @@ struct InboxIntakeBanner: View {
                         Text("\(intakes.count) 张图片没有识别完")
                             .font(.subheadline.weight(.semibold))
                             .foregroundStyle(JieziTheme.ink)
-                        Text(expanded ? "可以逐张重试、手动补录或丢弃" : "原图仍在本机，展开处理")
+                        Text(expanded ? "可重试、手动补录或丢弃" : "原图仍在本机，展开查看")
                             .font(.caption)
                             .foregroundStyle(JieziTheme.muted)
                     }
@@ -617,8 +620,20 @@ struct InboxIntakeBanner: View {
             }
             .buttonStyle(.plain)
 
+            if retryableCount > 1 {
+                Button(action: onRetryBatch) {
+                    Label("批量识别 \(retryableCount) 张", systemImage: "arrow.clockwise")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+                .tint(JieziTheme.brand)
+                .disabled(isRetryingBatch)
+                .padding(.horizontal, JieziSpacing.md)
+                .padding(.bottom, JieziSpacing.sm)
+            }
+
             if expanded {
-                VStack(spacing: 0) {
+                LazyVStack(spacing: 0) {
                     ForEach(intakes) { intake in
                         row(intake)
                         if intake.id != intakes.last?.id {
@@ -652,7 +667,7 @@ struct InboxIntakeBanner: View {
                     .lineLimit(2)
                 HStack(spacing: JieziSpacing.sm) {
                     if intake.status == .failed, hasImage(intake) {
-                        if intake.retryCount < 3 {
+                        if intake.canRetryRecognition {
                             Button("重试") { onRetry(intake) }
                                 .font(.caption.weight(.semibold))
                                 .buttonStyle(.borderedProminent)
@@ -676,6 +691,7 @@ struct InboxIntakeBanner: View {
                             .tint(.red)
                     }
                 }
+                .disabled(isRetryingBatch)
                 .padding(.top, 2)
             }
             Spacer(minLength: 0)

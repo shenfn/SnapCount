@@ -22,6 +22,29 @@ struct LocalImageIntake: Equatable, Identifiable {
     let updatedAt: Date
 
     var retryCount: Int { max(0, attemptCount - 1) }
+
+    var canRetryRecognition: Bool { status == .failed && retryCount < 3 }
+}
+
+enum LocalImageRetryResult {
+    case archived, needsReview, failed
+}
+
+struct LocalImageRetryBatch {
+    let total: Int
+    private(set) var archived = 0
+    private(set) var needsReview = 0
+    private(set) var failed = 0
+
+    var processed: Int { archived + needsReview + failed }
+
+    mutating func record(_ result: LocalImageRetryResult) {
+        switch result {
+        case .archived: archived += 1
+        case .needsReview: needsReview += 1
+        case .failed: failed += 1
+        }
+    }
 }
 
 final class LocalImageIntakeRepository {

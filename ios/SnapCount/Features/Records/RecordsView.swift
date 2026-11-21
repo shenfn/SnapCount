@@ -303,6 +303,7 @@ struct RecordDetailView: View {
     @State private var editDraft: NativeRecordEditDraft?
     @State private var universalEditDetail: NativeRecordDetail?
     @State private var showDeleteConfirm = false
+    @State private var loadedReference: String?
 
     private var detail: NativeRecordDetail? {
         appState.recordDetail(matching: reference)
@@ -433,12 +434,18 @@ struct RecordDetailView: View {
                         .padding(16)
                     }
                 }
-            } else if let message = appState.recordDetailMessage {
-                ContentUnavailableView(
-                    "无法读取记录",
-                    systemImage: "exclamationmark.triangle",
-                    description: Text(message)
-                )
+            } else if loadedReference == reference {
+                ContentUnavailableView {
+                    Label("无法读取记录", systemImage: "exclamationmark.triangle")
+                } description: {
+                    Text(appState.recordDetailMessage ?? "暂时无法打开这条记录，请重试。")
+                } actions: {
+                    Button("重新读取") {
+                        Task { await loadDetail(force: true) }
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(JieziTheme.brand)
+                }
             } else {
                 ProgressView("正在读取记录")
             }
@@ -471,7 +478,7 @@ struct RecordDetailView: View {
             }
         }
         .task(id: reference) {
-            await appState.loadRecordDetail(reference: reference)
+            await loadDetail()
         }
         .onDisappear {
             appState.deactivateRecordDetail(reference: reference)
@@ -524,6 +531,13 @@ struct RecordDetailView: View {
         } message: {
             Text("删除后会冲销关联账户流水。本机原图在没有其他记录引用后清理；清理失败可在收件箱重试。已上传的云副本受同步状态约束。")
         }
+    }
+
+    private func loadDetail(force: Bool = false) async {
+        loadedReference = nil
+        await appState.loadRecordDetail(reference: reference, force: force)
+        guard !Task.isCancelled else { return }
+        loadedReference = reference
     }
 
     private var unavailableImageView: some View {

@@ -3,6 +3,73 @@ import XCTest
 @testable import SnapCount
 
 final class LocalImageRecognitionTests: XCTestCase {
+    func testREC005BatchConfirmationUsesExistingFieldsAndLeavesDuplicatesPending() throws {
+        let context = try makeContext()
+        defer { cleanup(context) }
+        let repository = LocalPendingFinancialRepository(database: context.database)
+        let profile = try context.intakeRepository.activeProfile()
+        func stage(duplicate: Bool) throws -> LocalPendingFinancialRecord {
+            let id = UUID()
+            let record = LocalPendingFinancialRecord(
+                id: id, profileID: profile.id, amountMinor: 188, currency: "CNY",
+                merchantName: "示例商户", transactionDate: "2026-11-07", transactionTime: "19:09:00",
+                occurredAt: nil, createdAt: Date(), platform: "支付宝", category: "other",
+                paymentMethod: "?", reviewReason: duplicate ? "possible_duplicate" : nil
+            )
+            try repository.stage(record)
+            return try XCTUnwrap(repository.record(profileID: profile.id, id: id))
+        }
+        let bill = try stage(duplicate: false)
+        let duplicate = try stage(duplicate: true)
+        let fields = LocalPendingBatchFields(platform: "微信", category: "food", paymentMethod: "银行卡")
+        func item(_ source: LocalPendingFinancialRecord) -> LocalPendingBatchItem {
+            LocalPendingBatchItem(source: source, draft: NativePendingResolutionDraft(
+                detail: LocalPendingFinancialRepository.nativeDetail(source, imageStore: nil)))
+        }
+        XCTAssertNotNil(item(bill).reasonToReviewIndividually)
+        let ready = item(bill).fillingMissing(from: fields)
+        XCTAssertNil(ready.reasonToReviewIndividually)
+        XCTAssertEqual(ready.draft.platform, "支付宝")
+        XCTAssertEqual(ready.draft.category, "other")
+        XCTAssertEqual(ready.draft.paymentMethod, "银行卡")
+        XCTAssertNotNil(item(duplicate).fillingMissing(from: fields).reasonToReviewIndividually)
+        XCTAssertThrowsError(try repository.resolve(profileID: profile.id, pendingID: bill.id,
+            draft: ready.draft, expectedSource: duplicate))
+        _ = try repository.resolve(profileID: profile.id, pendingID: bill.id,
+                                   draft: ready.draft, expectedSource: bill)
+        XCTAssertThrowsError(try repository.resolve(profileID: profile.id, pendingID: bill.id,
+            draft: ready.draft, expectedSource: bill))
+        XCTAssertEqual(try repository.pending(profileID: profile.id).map(\.id), [duplicate.id])
+        let saved = try XCTUnwrap(LocalExpenseRepository(database: context.database).expense(id: bill.id))
+        XCTAssertEqual(saved.amountMinor, 188)
+        XCTAssertEqual(saved.transactionDate, "2026-11-07")
+        XCTAssertNil(saved.accountID)
+    }
+    func testREC009BatchOnlyOffersFailedImagesBelowRetryLimit() {
+        func intake(status: LocalImageIntakeStatus, attemptCount: Int) -> LocalImageIntake {
+            LocalImageIntake(id: "fixture", profileID: UUID(), captureKind: "photo",
+                filename: "demo.jpg", status: status, imagePath: "demo.jpg", imageHash: "demo",
+                failureMessage: nil, cleanupMessage: nil, attemptCount: attemptCount,
+                createdAt: .distantPast, updatedAt: .distantPast)
+        }
+        XCTAssertTrue(intake(status: .failed, attemptCount: 3).canRetryRecognition)
+        XCTAssertFalse(intake(status: .failed, attemptCount: 4).canRetryRecognition)
+        XCTAssertFalse(intake(status: .receiving, attemptCount: 1).canRetryRecognition)
+        XCTAssertFalse(intake(status: .completed, attemptCount: 1).canRetryRecognition)
+    }
+
+    func testREC009BatchCountsReviewAndFailureSeparatelyFromArchives() {
+        var batch = LocalImageRetryBatch(total: 4)
+        batch.record(.archived)
+        batch.record(.failed)
+        batch.record(.needsReview)
+        XCTAssertEqual(batch.archived, 1)
+        XCTAssertEqual(batch.needsReview, 1)
+        XCTAssertEqual(batch.failed, 1)
+        XCTAssertEqual(batch.processed, 3)
+        XCTAssertEqual(batch.total - batch.processed, 1)
+    }
+
     func testLOCALP1FOOD001HostedFoodPayloadArchivesWithoutDatabaseError() async throws {
         let context = try makeContext()
         defer { cleanup(context) }
@@ -86,7 +153,8 @@ final class LocalImageRecognitionTests: XCTestCase {
             domainKey: "expense", confidence: 0.92, payload: payload, missingFields: []))
         let recognition = LocalImageRecognitionUseCase(localRecordUseCase: context.useCase,
             imageStore: context.imageStore, intakeRepository: context.intakeRepository,
-            provider: provider, pendingRepository: pending)
+            provider: provider, pendingRepository: pending,
+            expenseRepository: try LocalExpenseRepository(database: context.database))
         let data = Data("financial-auto-archive".utf8)
         let outcome = try await recognition.ingest(imageData: data, captureKind: "screenshot", filename: "expense.jpg")
         guard case .financialArchived(let id) = outcome.result else {
@@ -97,6 +165,10 @@ final class LocalImageRecognitionTests: XCTestCase {
             .expenses(profileID: profile.id, monthKey: "2026-09")
         let archived = try XCTUnwrap(expenses.first { $0.id == id })
         XCTAssertEqual(archived.amountMinor, 2000)
+        XCTAssertEqual(outcome.archivedReceipt?.facts, [
+            "💸 -¥20.00 · 沈氏牛肉汤春波店 · food",
+            "今日已花 ¥20.00（1 笔）"
+        ])
         XCTAssertEqual(archived.merchantName, "沈氏牛肉汤春波店")
         XCTAssertEqual(archived.platform, "微信")
         XCTAssertEqual(archived.category, "food")
@@ -109,6 +181,7 @@ final class LocalImageRecognitionTests: XCTestCase {
         XCTAssertEqual(repeated.result, outcome.result)
         XCTAssertEqual(repeated.imageHash, outcome.imageHash)
         XCTAssertEqual(repeated.notificationText, outcome.notificationText)
+        XCTAssertEqual(repeated.archivedReceipt, outcome.archivedReceipt)
         XCTAssertEqual(repeated.feedback, outcome.feedback)
         XCTAssertNil(repeated.feedbackConfidence)
         XCTAssertEqual(outcome.feedbackConfidence, 0.92)

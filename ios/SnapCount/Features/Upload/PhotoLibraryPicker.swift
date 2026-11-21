@@ -4,8 +4,23 @@ import UIKit
 import UniformTypeIdentifiers
 
 struct PhotoLibraryPicker: UIViewControllerRepresentable {
+    let onSelection: () -> Void
     let onImageData: (Data) -> Void
     let onCancel: () -> Void
+
+    init(
+        onSelection: @escaping () -> Void,
+        onImageData: @escaping (Data) -> Void,
+        onCancel: @escaping () -> Void
+    ) {
+        self.onSelection = onSelection
+        self.onImageData = onImageData
+        self.onCancel = onCancel
+    }
+
+    init(onImageData: @escaping (Data) -> Void, onCancel: @escaping () -> Void) {
+        self.init(onSelection: {}, onImageData: onImageData, onCancel: onCancel)
+    }
 
     func makeUIViewController(context: Context) -> PHPickerViewController {
         var configuration = PHPickerConfiguration(photoLibrary: .shared())
@@ -21,14 +36,20 @@ struct PhotoLibraryPicker: UIViewControllerRepresentable {
     func updateUIViewController(_ uiViewController: PHPickerViewController, context: Context) {}
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(onImageData: onImageData, onCancel: onCancel)
+        Coordinator(onSelection: onSelection, onImageData: onImageData, onCancel: onCancel)
     }
 
     final class Coordinator: NSObject, PHPickerViewControllerDelegate {
+        private let onSelection: () -> Void
         private let onImageData: (Data) -> Void
         private let onCancel: () -> Void
 
-        init(onImageData: @escaping (Data) -> Void, onCancel: @escaping () -> Void) {
+        init(
+            onSelection: @escaping () -> Void,
+            onImageData: @escaping (Data) -> Void,
+            onCancel: @escaping () -> Void
+        ) {
+            self.onSelection = onSelection
             self.onImageData = onImageData
             self.onCancel = onCancel
         }
@@ -38,6 +59,8 @@ struct PhotoLibraryPicker: UIViewControllerRepresentable {
                 DispatchQueue.main.async { self.onCancel() }
                 return
             }
+
+            DispatchQueue.main.async { self.onSelection() }
 
             guard provider.hasItemConformingToTypeIdentifier(UTType.image.identifier) else {
                 DispatchQueue.main.async { self.onCancel() }

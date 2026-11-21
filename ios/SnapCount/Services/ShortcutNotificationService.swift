@@ -52,10 +52,14 @@ final class ShortcutNotificationService {
         await notifyUploadResult(result)
     }
 
-    func notifyUploadResult(_ result: ShortcutUploadResult) async {
-        guard ShortcutFeedbackPreferences.notificationsEnabled else { return }
+    func notifyUploadResult(_ result: ShortcutUploadResult, trace: ShortcutAITrace? = nil) async {
+        guard ShortcutFeedbackPreferences.notificationsEnabled else {
+            trace?.record("notification=disabled")
+            return
+        }
         let status = await authorizationStatus()
         guard status == .authorized || status == .provisional || status == .ephemeral else {
+            trace?.record("notification=permission_unavailable")
             return
         }
 
@@ -72,7 +76,12 @@ final class ShortcutNotificationService {
             content: content,
             trigger: UNTimeIntervalNotificationTrigger(timeInterval: 0.5, repeats: false)
         )
-        try? await center.add(request)
+        do {
+            try await center.add(request)
+            trace?.record("notification=enqueued")
+        } catch {
+            trace?.record("notification=enqueue_failed")
+        }
     }
 }
 

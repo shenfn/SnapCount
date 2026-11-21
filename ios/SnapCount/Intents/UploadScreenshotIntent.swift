@@ -33,8 +33,15 @@ struct UploadScreenshotIntent: AppIntent {
     }
 
     func perform() async throws -> some IntentResult & ReturnsValue<String> {
+        #if DEBUG
+        let trace: ShortcutAITrace? = ShortcutAITrace()
+        #else
+        let trace: ShortcutAITrace? = nil
+        #endif
+        trace?.record("shortcut=started")
         let trialID = await ShortcutTrialStore.shared.claim()
         guard let image else {
+            trace?.record("image=missing")
             if let trialID { await ShortcutTrialStore.shared.complete(id: trialID, outcome: .failed) }
             let message = "请把“转换后的图像”或上一部 JPEG 变量传给芥子。"
             return .result(value: message)
@@ -45,6 +52,7 @@ struct UploadScreenshotIntent: AppIntent {
                 let rawImageData = try await image.data(contentType: .image)
                 let imageData = try ImageUploadPreprocessor.jpegData(from: rawImageData)
                 let mode = LocalVisionModeStore().mode
+                trace?.record("vision.mode=\(mode.rawValue)")
                 let uploadToken: String?
                 if mode == .hosted {
                     uploadToken = try? KeychainStore.shared.string(for: KeychainKeys.uploadToken)
@@ -55,7 +63,7 @@ struct UploadScreenshotIntent: AppIntent {
                 var isRecognitionRequestCurrent: () -> Bool = { true }
                 switch mode {
                 case .disabled, .hosted:
-                    provider = HostedAIImageRecognitionProvider()
+                    provider = HostedAIImageRecognitionProvider(trace: trace)
                 case .byok:
                     let credentialStore = KeychainStore.shared
                     let apiKey = (try? credentialStore.string(for: KeychainKeys.byokQwenAPIKey)) ?? ""
@@ -74,6 +82,7 @@ struct UploadScreenshotIntent: AppIntent {
                 let trialOutcome: ShortcutTrialOutcome
                 do {
                     if mode == .disabled {
+                        trace?.record("companion.skipped=vision_disabled")
                         _ = try recognition.receiveForManual(
                             imageData: imageData, captureKind: "screenshot", filename: "shortcut-jpeg.jpg"
                         )
@@ -94,20 +103,22 @@ struct UploadScreenshotIntent: AppIntent {
                         switch outcome.result {
                         case .archived, .financialArchived:
                             trialOutcome = .archived
-                            let text = outcome.notificationText ?? "AI 识别结果已自动记录到本机。"
-                            var companionMessage: String?
+                            trace?.record("record=archived")
+                            let text = outcome.receiptText ?? "AI 识别结果已自动记录到本机。"
+                            var companionMessage = outcome.companionMessage
                             var deliveryFeedback = Self.normalizedShortcutFeedback(
                                 outcomeFeedback: outcome.feedback,
                                 outcomeConfidence: outcome.feedbackConfidence,
                                 composedResult: nil
                             )
-                            if let companionProvider = await companionProvider(for: mode) {
+                            if let companionProvider = await companionProvider(for: mode, trace: trace) {
                                 let providerMode: LocalExpressionProviderMode = mode == .hosted ? .hosted : .byok
                                 if let composed = await recognition.composeCompanion(
                                     for: outcome.result,
                                     provider: companionProvider,
                                     settings: localSettings,
-                                    providerMode: providerMode
+                                    providerMode: providerMode,
+                                    trace: trace
                                 ) {
                                     if let message = composed.companionMessage?.trimmingCharacters(in: .whitespacesAndNewlines),
                                        !message.isEmpty {
@@ -120,6 +131,7 @@ struct UploadScreenshotIntent: AppIntent {
                                     )
                                 }
                             }
+                            trace?.record("delivery.content=companion:\(companionMessage != nil),feedback:\(deliveryFeedback != nil)")
                             result = ShortcutUploadResult.archived(
                                 notificationText: text,
                                 companionMessage: companionMessage,
@@ -127,6 +139,8 @@ struct UploadScreenshotIntent: AppIntent {
                             )
                         case .staged, .financialPending:
                             trialOutcome = .staged
+                            trace?.record("record=needs_confirmation")
+                            trace?.record("companion.skipped=pending")
                             let text = outcome.notificationText ?? "AI 识别结果已保存到本地收件箱，请打开芥子确认。"
                             result = ShortcutUploadResult(
                                 displayText: ShortcutUploadResult.expandedDisplayText(
@@ -146,6 +160,7 @@ struct UploadScreenshotIntent: AppIntent {
                 } catch {
                     trialOutcome = .failed
                     let persisted = recognition.hasPersistedOriginal(imageData: imageData)
+                    trace?.record("record=intake_failed,image_saved:\(persisted)")
                     let failureMessage = LocalImageRecognitionFailureMessage.result(
                         for: error,
                         persisted: persisted
@@ -157,10 +172,12 @@ struct UploadScreenshotIntent: AppIntent {
                     )
                 }
                 if let trialID { await ShortcutTrialStore.shared.complete(id: trialID, outcome: trialOutcome) }
-                await ShortcutNotificationService.shared.notifyUploadResult(result)
+                await ShortcutNotificationService.shared.notifyUploadResult(result, trace: trace)
                 let value = ShortcutFeedbackPreferences.resultCardEnabled ? result.displayText : result.compactDisplayText
+                trace?.record("shortcut=result_returned")
                 return .result(value: value)
             } catch {
+                trace?.record("shortcut=setup_failed")
                 if let trialID { await ShortcutTrialStore.shared.complete(id: trialID, outcome: .failed) }
                 let message = "上传失败：\(error.localizedDescription)"
                 return .result(value: message)
@@ -172,12 +189,18 @@ struct UploadScreenshotIntent: AppIntent {
         return .result(value: message)
     }
 
-    private func companionProvider(for mode: LocalVisionMode) async -> LocalCompanionProvider? {
-        guard LocalUserSettingsStore().load().companionEnabled else { return nil }
+    private func companionProvider(for mode: LocalVisionMode, trace: ShortcutAITrace?) async -> LocalCompanionProvider? {
+        guard LocalUserSettingsStore().load().companionEnabled else {
+            trace?.record("companion.skipped=companion_disabled")
+            return nil
+        }
         switch mode {
         case .hosted:
-            guard let accessToken = await currentHostedAccessToken() else { return nil }
-            return HostedAICompanionProvider(accessToken: accessToken)
+            guard let accessToken = await currentHostedAccessToken(trace: trace) else {
+                trace?.record("companion.skipped=session_unavailable")
+                return nil
+            }
+            return HostedAICompanionProvider(accessToken: accessToken, trace: trace)
         case .byok:
             guard let apiKey = try? KeychainStore.shared.string(for: KeychainKeys.byokQwenAPIKey),
                   !apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
@@ -189,26 +212,33 @@ struct UploadScreenshotIntent: AppIntent {
 
     /// The Shortcut upload token is deliberately not accepted here. Hosted
     /// Companion composition requires the user's short-lived Supabase JWT.
-    private func currentHostedAccessToken() async -> String? {
+    private func currentHostedAccessToken(trace: ShortcutAITrace?) async -> String? {
         let keychain = KeychainStore.shared
         guard let json = try? keychain.string(for: KeychainKeys.authSession),
               let data = json.data(using: .utf8),
               let storedSession = try? JSONDecoder().decode(SupabaseAuthSession.self, from: data) else {
+            trace?.record("session=not_readable")
             return nil
         }
         if let expiration = storedSession.expirationEpoch,
            expiration > Int(Date().timeIntervalSince1970) + 60 {
+            trace?.record("session=valid")
             return storedSession.accessToken
         }
         guard let refreshToken = storedSession.refreshToken, !refreshToken.isEmpty,
               let refreshed = try? await SupabaseAuthService().refreshSession(refreshToken: refreshToken),
               let refreshedJSON = try? JSONEncoder().encode(refreshed),
               let refreshedText = String(data: refreshedJSON, encoding: .utf8) else {
+            trace?.record("session=refresh_unavailable")
             return nil
         }
         try? keychain.setString(refreshedText, for: KeychainKeys.authSession)
         guard let expiration = refreshed.expirationEpoch,
-              expiration > Int(Date().timeIntervalSince1970) else { return nil }
+              expiration > Int(Date().timeIntervalSince1970) else {
+            trace?.record("session=refreshed_but_expired")
+            return nil
+        }
+        trace?.record("session=refreshed")
         return refreshed.accessToken
     }
 }

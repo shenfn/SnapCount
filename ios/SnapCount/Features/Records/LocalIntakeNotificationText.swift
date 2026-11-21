@@ -60,6 +60,33 @@ struct LocalIntakeNotificationFeedback: Equatable {
     }
 }
 
+/// A saved record's facts and optional expression, in display order.
+struct LocalIntakeReceipt: Equatable {
+    let facts: [String]
+    let observation: String?
+    let suggestion: String?
+
+    var displayText: String {
+        (facts + [observation, suggestion].compactMap { $0 }).joined(separator: "\n")
+    }
+
+    var notificationText: String {
+        let limit = 160
+        let tail = facts.dropFirst().joined(separator: "\n")
+        let firstLineBudget = max(0, limit - (tail.isEmpty ? 0 : tail.count + 1))
+        let first = facts.first.map { String($0.prefix(firstLineBudget)) } ?? ""
+        let factText = LocalIntakeNotificationText.boundedNotificationText(
+            [first, tail].filter { !$0.isEmpty }.joined(separator: "\n")
+        )
+        var lines = factText.isEmpty ? [] : [factText]
+        for line in [observation, suggestion].compactMap({ $0 }) {
+            guard (lines + [line]).joined(separator: "\n").count <= limit else { break }
+            lines.append(line)
+        }
+        return lines.joined(separator: "\n")
+    }
+}
+
 /// 复刻 PWA 后端 ingest-receipt 的通知文案拼接：先算域 fallback，再叠 companion / AI 反馈。
 enum LocalIntakeNotificationText {
     static func compose(_ input: LocalIntakeNotificationInput) -> String {
@@ -71,10 +98,49 @@ enum LocalIntakeNotificationText {
         )
     }
 
-    /// Composes one delivery block for AppState, Shortcut and the in-app
-    /// result sheet. Fixed receipt facts are always retained after an
-    /// expression, while duplicate lines are removed in their first-seen
-    /// order.
+    static func archivedReceipt(
+        facts: String,
+        companionMessage: String?,
+        feedback: LocalIntakeNotificationFeedback?
+    ) -> LocalIntakeReceipt {
+        let factLines = uniqueNotificationLines(fallbackLines(facts))
+        let factKeys = Set(factLines.map(expressionKey))
+        let usableFeedback = feedback.flatMap { item in
+            item.confidence.map { $0 >= 0.5 } == false ? nil : item
+        }
+        let options = [usableFeedback?.emotionLine, companionMessage]
+            .compactMap { compactFeedbackText($0, max: 34) }
+            .filter { !factKeys.contains(expressionKey($0)) && !isReceiptAcknowledgement($0) }
+        let observation = options.first(where: mentionsFirstOccurrence) ?? options.first
+        let suggestion: String? = observation.flatMap { observation in
+            compactFeedbackText(usableFeedback?.utilityLine, max: 34).flatMap { line in
+                let key = expressionKey(line)
+                let boilerplate = ["账单清晰，心里有底就好", "保留这份节奏", "继续保持当前节奏"]
+                guard key != expressionKey(observation), !factKeys.contains(key),
+                      !key.hasPrefix("记得"), !key.hasPrefix("刚吃完记得"),
+                      !boilerplate.contains(key) else { return nil }
+                return line
+            }
+        }
+        return LocalIntakeReceipt(facts: factLines, observation: observation, suggestion: suggestion)
+    }
+
+    private static func expressionKey(_ text: String) -> String {
+        text.filter { !$0.isWhitespace }
+            .trimmingCharacters(in: CharacterSet(charactersIn: "。！？.!?"))
+    }
+
+    private static func isReceiptAcknowledgement(_ text: String) -> Bool {
+        let key = expressionKey(text)
+        guard !mentionsFirstOccurrence(key) else { return false }
+        return ["已归档", "已记录", "已记下", "记下了", "已入账"].contains(where: key.hasSuffix)
+    }
+
+    private static func mentionsFirstOccurrence(_ text: String) -> Bool {
+        text.contains("第一次") || text.contains("首次")
+    }
+
+    /// Compatibility for previews, pending records and legacy cloud payloads.
     static func merge(
         baseText: String?,
         companionMessage: String?,
@@ -148,7 +214,7 @@ enum LocalIntakeNotificationText {
 
     // MARK: - fallback
 
-    private static func fallbackText(_ input: LocalIntakeNotificationInput) -> String {
+    static func fallbackText(_ input: LocalIntakeNotificationInput) -> String {
         switch input.domainKey {
         case "income": return incomeFallback(input)
         case "expense": return expenseFallback(input)

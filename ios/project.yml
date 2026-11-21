@@ -31,6 +31,9 @@ targets:
         excludes:
           - Info.plist
           - Resources/Fonts
+          - Resources/LocalSharedCompanionPlanner.js
+      - path: SnapCount/Resources/LocalSharedCompanionPlanner.js
+        buildPhase: resources
       - path: SnapCount/Resources/Fonts
         type: folder
     info:
