@@ -7,6 +7,7 @@ struct SettingsView: View {
     @State private var showLogin = false
     @State private var showBindingPreview = false
     @State private var showDeleteAccountConfirmation = false
+    @State private var showsOnboarding = false
 
     var body: some View {
         ZStack {
@@ -83,7 +84,7 @@ struct SettingsView: View {
 
                 Section("使用帮助") {
                     Button {
-                        appState.presentOnboarding()
+                        showsOnboarding = true
                     } label: {
                         settingsRow(
                             "使用引导",
@@ -300,6 +301,9 @@ struct SettingsView: View {
             Button("取消", role: .cancel) {}
         } message: {
             Text("这会永久删除云端账户及其云端记录和原图。本机数据库、原图与导出的备份仍保留。")
+        }
+        .fullScreenCover(isPresented: $showsOnboarding) {
+            OnboardingFlowView(onClose: { showsOnboarding = false })
         }
         .sheet(isPresented: $showLogin) {
             NavigationStack { LoginView() }
@@ -1227,11 +1231,73 @@ private func asyncToggle(_ value: Bool, _ action: @escaping (Bool) async -> Void
     Binding(get: { value }, set: { newValue in Task { await action(newValue) } })
 }
 
+struct GuidePrivacyView: View {
+    @EnvironmentObject private var appState: AppState
+    @State private var showsLogin = false
+
+    var body: some View {
+        Form {
+            Section("本机记录") {
+                Text("记录优先保存在这台设备上，手动记录无需登录。")
+            }
+            Section("云端识别") {
+                if appState.isSignedIn {
+                    NavigationLink {
+                        VisionSettingsView()
+                    } label: {
+                        LabeledContent("图片识别", value: appState.localVisionMode == .disabled ? "关闭" : "开启")
+                    }
+                } else {
+                    Button("登录以设置图片识别") { showsLogin = true }
+                    if appState.localVisionMode != .disabled {
+                        Button("关闭图片识别") { appState.setLocalVisionMode(.disabled) }
+                    }
+                }
+                Text("开启后，芥子会在你提交图片时将其发给云端 AI。开启前会说明发送范围并征求你的同意。")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+            Section {
+                Toggle("AI 陪伴", isOn: asyncToggle(appState.userSettings.companionEnabled, appState.setCompanionEnabled))
+                Toggle("长期记忆", isOn: asyncToggle(appState.userSettings.companionMemoryEnabled, appState.setCompanionMemoryEnabled))
+                Text("开启长期记忆后，云端陪伴会参考同类记忆摘要和近期陪伴文案。关闭 AI 陪伴可停止后续陪伴生成。")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+            Section {
+                NavigationLink("隐私政策") { LegalDocumentView(kind: .privacy) }
+            }
+        }
+        .navigationTitle("隐私设置")
+        .navigationBarTitleDisplayMode(.inline)
+        .scrollContentBackground(.hidden)
+        .background(JieziTheme.pageBackground)
+        .sheet(isPresented: $showsLogin) {
+            NavigationStack {
+                LoginView()
+                    .toolbar {
+                        ToolbarItem(placement: .cancellationAction) {
+                            Button("关闭") { showsLogin = false }
+                        }
+                    }
+            }
+        }
+        .onChange(of: appState.isSignedIn) { _, signedIn in
+            if signedIn { showsLogin = false }
+        }
+    }
+}
+
 struct ShortcutSetupView: View {
     @EnvironmentObject private var appState: AppState
     @Environment(\.openURL) private var openURL
     @State private var setupMessage: String?
     @State private var showLogin = false
+    private let showsPrivacy: Bool
+
+    init(showsPrivacy: Bool = false) {
+        self.showsPrivacy = showsPrivacy
+    }
 
     var body: some View {
         List {
@@ -1276,6 +1342,15 @@ struct ShortcutSetupView: View {
                     }
                 }
             }
+            if showsPrivacy {
+                Section {
+                    NavigationLink {
+                        GuidePrivacyView()
+                    } label: {
+                        Label("隐私设置", systemImage: "hand.raised")
+                    }
+                }
+            }
         }
         .listStyle(.insetGrouped)
         .scrollContentBackground(.hidden)
@@ -1317,15 +1392,19 @@ struct ShortcutSetupView: View {
 }
 
 private struct ShortcutBindingView: View {
+    @State private var copiedSearchTerm: String?
+
     var body: some View {
         List {
             if UIDevice.current.userInterfaceIdiom == .phone {
                 Section("轻点背面") {
                     Text("设置 → 无障碍 → 触控 → 轻点背面。选两下或三下，再选刚添加的快捷指令。")
+                    copySearchTerm("轻点背面")
                     Link("查看 Apple 设置说明", destination: URL(string: "https://support.apple.com/zh-cn/111772")!)
                 }
                 Section {
                     Text("设置 → 操作按钮 → 快捷指令。选择刚添加的快捷指令。")
+                    copySearchTerm("操作按钮")
                     Link("查看 Apple 设置说明", destination: URL(string: "https://support.apple.com/zh-cn/guide/iphone/iphe89d61d66/ios")!)
                 } header: {
                     Text("操作按钮")
@@ -1334,12 +1413,22 @@ private struct ShortcutBindingView: View {
                 }
             }
             Section("共享菜单") {
-                Text("打开快捷指令的详细信息，开启「在共享表单中显示」。之后可从图片的共享菜单运行。")
-                Link("打开快捷指令", destination: URL(string: "shortcuts://")!)
+                Text("在支持接收图片的快捷指令详情中，开启「在共享表单中显示」。")
+                Link("前往快捷指令 App", destination: URL(string: "shortcuts://")!)
             }
         }
         .navigationTitle("绑定启动方式")
         .navigationBarTitleDisplayMode(.inline)
+    }
+
+    private func copySearchTerm(_ term: String) -> some View {
+        Button {
+            UIPasteboard.general.string = term
+            copiedSearchTerm = term
+        } label: {
+            Label(copiedSearchTerm == term ? "已复制，可到设置搜索" : "复制设置搜索词",
+                  systemImage: copiedSearchTerm == term ? "checkmark" : "doc.on.doc")
+        }
     }
 }
 

@@ -3,28 +3,35 @@ import SwiftUI
 struct OnboardingFlowView: View {
     @EnvironmentObject private var appState: AppState
     @State private var activeStep: OnboardingStep
+    private let onClose: (() -> Void)?
 
-    init(initialStep: OnboardingStep = .welcome) {
+    init(initialStep: OnboardingStep = .welcome, onClose: (() -> Void)? = nil) {
         _activeStep = State(initialValue: initialStep)
+        self.onClose = onClose
     }
 
     var body: some View {
-        Group {
+        NavigationStack {
             switch activeStep {
             case .welcome:
                 welcome
-            case .shortcuts:
-                NavigationStack {
-                    ShortcutSetupView()
-                        .toolbar {
+                    .toolbar {
+                        if let onClose {
                             ToolbarItem(placement: .cancellationAction) {
-                                Button("返回") { activeStep = .welcome }
-                            }
-                            ToolbarItem(placement: .confirmationAction) {
-                                Button("开始使用") { appState.finishOnboarding(skipped: false) }
+                                Button("关闭", action: onClose)
                             }
                         }
-                }
+                    }
+            case .shortcuts:
+                ShortcutSetupView(showsPrivacy: true)
+                    .toolbar {
+                        ToolbarItem(placement: .cancellationAction) {
+                            Button("返回") { activeStep = .welcome }
+                        }
+                        ToolbarItem(placement: .confirmationAction) {
+                            Button(onClose == nil ? "开始使用" : "完成") { finish(skipped: false) }
+                        }
+                    }
             }
         }
         .interactiveDismissDisabled()
@@ -49,6 +56,13 @@ struct OnboardingFlowView: View {
                     Label("记录优先保存在这台设备上，手动记录无需登录。", systemImage: "lock")
                         .font(JieziFont.caption)
                         .foregroundStyle(JieziTheme.muted)
+                    NavigationLink {
+                        GuidePrivacyView()
+                    } label: {
+                        Label("隐私设置", systemImage: "hand.raised")
+                            .frame(minHeight: 44)
+                    }
+                    .foregroundStyle(JieziTheme.brand)
                 }
                 .foregroundStyle(JieziTheme.ink)
                 .frame(maxWidth: 420, alignment: .leading)
@@ -63,7 +77,7 @@ struct OnboardingFlowView: View {
                     Text("设置快捷指令").frame(maxWidth: .infinity, minHeight: 44)
                 }
                 .buttonStyle(.borderedProminent)
-                Button("直接开始记录") { appState.finishOnboarding(skipped: true) }
+                Button(onClose == nil ? "直接开始记录" : "返回设置") { finish(skipped: true) }
                     .frame(minHeight: 44)
             }
             .tint(JieziTheme.brand)
@@ -71,6 +85,14 @@ struct OnboardingFlowView: View {
             .padding(JieziSpacing.lg)
             .frame(maxWidth: .infinity)
             .background(JieziScene.expense.surface)
+        }
+    }
+
+    private func finish(skipped: Bool) {
+        if let onClose {
+            onClose()
+        } else {
+            appState.finishOnboarding(skipped: skipped)
         }
     }
 }
