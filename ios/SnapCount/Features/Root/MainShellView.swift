@@ -9,6 +9,9 @@ struct MainShellView: View {
     @State private var showManualRecordSheet = false
     @State private var showCaptureOptions = false
     @State private var showPhotoLibraryPicker = false
+    @State private var photoLibraryDismissed = true
+    @State private var photoCaptureProgress: PhotoCaptureProgress?
+    @State private var photoReadFailed = false
     @State private var showCaptureResult = false
     @State private var captureMessage = ""
     @State private var captureFeedback: NativeAIFeedback?
@@ -17,6 +20,17 @@ struct MainShellView: View {
     @State private var captureIsError = false
     @State private var showsCalendar = false
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
+    private enum PhotoCaptureProgress {
+        case reading, recognizing
+
+        var title: String {
+            switch self {
+            case .reading: "正在读取照片…"
+            case .recognizing: "正在识别照片…"
+            }
+        }
+    }
 
     private var scene: JieziSceneTokens { JieziScene.tokens(for: appState.selectedDomain.rawValue) }
 
@@ -51,16 +65,32 @@ struct MainShellView: View {
         }
         .confirmationDialog("留下此刻", isPresented: $showCaptureOptions, titleVisibility: .visible) {
             Button("手动记录") { showManualRecordSheet = true }
-            Button("从相册选择") { showPhotoLibraryPicker = true }
+            Button("从相册选择", action: openPhotoLibrary)
             Button("取消", role: .cancel) {}
         }
-        .sheet(isPresented: $showPhotoLibraryPicker) {
-            PhotoLibraryPicker { data in
-                showPhotoLibraryPicker = false
-                Task { await recognizeCapturedImage(data) }
-            } onCancel: { showPhotoLibraryPicker = false }
+        .sheet(isPresented: $showPhotoLibraryPicker, onDismiss: { photoLibraryDismissed = true }) {
+            PhotoLibraryPicker(
+                onSelection: {
+                    photoCaptureProgress = .reading
+                    showPhotoLibraryPicker = false
+                },
+                onImageData: { data in
+                    photoCaptureProgress = .recognizing
+                    Task { await recognizeCapturedImage(data) }
+                },
+                onCancel: {
+                    showPhotoLibraryPicker = false
+                    if photoCaptureProgress == .reading {
+                        photoCaptureProgress = nil
+                        photoReadFailed = true
+                    }
+                }
+            )
         }
-        .sheet(isPresented: $showCaptureResult) {
+        .sheet(isPresented: Binding(
+            get: { showCaptureResult && photoLibraryDismissed },
+            set: { showCaptureResult = $0 }
+        )) {
             LocalIntakeResultSheet(
                 notificationText: captureMessage,
                 feedback: captureFeedback,
@@ -98,7 +128,14 @@ struct MainShellView: View {
                 }
             }
         }
-        .safeAreaInset(edge: .bottom, spacing: 0) { shellBottomBar }
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            VStack(spacing: 0) {
+                if photoCaptureProgress != nil || photoReadFailed {
+                    photoCaptureStatus
+                }
+                shellBottomBar
+            }
+        }
     }
 
     // MARK: - 域横滑（SHELL-001）
@@ -275,6 +312,37 @@ struct MainShellView: View {
         .buttonStyle(.plain)
     }
 
+    private var photoCaptureStatus: some View {
+        HStack(spacing: JieziSpacing.md) {
+            if let progress = photoCaptureProgress {
+                ProgressView()
+                    .tint(scene.accent)
+                    .accessibilityHidden(true)
+                Text(progress.title)
+                Spacer(minLength: 0)
+            } else {
+                Text("无法读取这张照片")
+                Spacer(minLength: 0)
+                Button("重新选择", action: openPhotoLibrary)
+                    .fontWeight(.semibold)
+                    .frame(minHeight: 44)
+            }
+        }
+        .font(JieziFont.subheadline)
+        .foregroundStyle(scene.foreground)
+        .padding(.horizontal, JieziSpacing.lg)
+        .frame(minHeight: 48)
+        .background(scene.surface, in: RoundedRectangle(cornerRadius: JieziRadius.md))
+        .padding(.horizontal, JieziPrototypeLayout.page_inset)
+        .accessibilityAddTraits(.updatesFrequently)
+    }
+
+    private func openPhotoLibrary() {
+        photoReadFailed = false
+        photoLibraryDismissed = false
+        showPhotoLibraryPicker = true
+    }
+
     private var addButton: some View {
         Button {
             showCaptureOptions = true
@@ -285,11 +353,13 @@ struct MainShellView: View {
                 .frame(width: JieziPrototypeLayout.add_button_size, height: JieziPrototypeLayout.add_button_size)
                 .background(JieziScene.expense.accent, in: Circle())
         }
+        .disabled(photoCaptureProgress != nil)
         .accessibilityLabel("留下此刻")
     }
 
     @MainActor
     private func recognizeCapturedImage(_ data: Data) async {
+        defer { photoCaptureProgress = nil }
         do {
             let token = appState.localVisionMode == .hosted
                 ? try? KeychainStore.shared.string(for: KeychainKeys.uploadToken)

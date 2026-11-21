@@ -101,23 +101,25 @@ struct SettingsView: View {
 
                 Section("数据管理") {
                     NavigationLink {
-                        HistoryMigrationView()
-                    } label: {
-                        settingsRow(
-                            "历史数据迁移",
-                            detail: "查看待核对材料并导出给 AI 分析",
-                            systemImage: "arrow.triangle.2.circlepath"
-                        )
-                    }
-                    NavigationLink {
                         DataExportView()
                     } label: {
                         settingsRow("数据导出", detail: "导出支出、收入和通用记录", systemImage: "square.and.arrow.up")
                     }
-                    NavigationLink {
-                        LocalHistoryMigrationView()
-                    } label: {
-                        settingsRow("历史云数据迁入本机", detail: "先只读预检，再确认恢复", systemImage: "icloud.and.arrow.down")
+                    if JieziReleaseCapabilities.historyMigration {
+                        NavigationLink {
+                            HistoryMigrationView()
+                        } label: {
+                            settingsRow(
+                                "历史数据迁移",
+                                detail: "查看待核对材料并导出给 AI 分析",
+                                systemImage: "arrow.triangle.2.circlepath"
+                            )
+                        }
+                        NavigationLink {
+                            LocalHistoryMigrationView()
+                        } label: {
+                            settingsRow("历史云数据迁入本机", detail: "先只读预检，再确认恢复", systemImage: "icloud.and.arrow.down")
+                        }
                     }
                 }
 
