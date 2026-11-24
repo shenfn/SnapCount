@@ -2,39 +2,142 @@ import SwiftUI
 import UIKit
 import UniformTypeIdentifiers
 
+enum SettingsSectionIdentifier: String, Equatable {
+    case profile
+    case aiAndShortcuts
+    case data
+    case privacy
+    case helpAndAbout
+    case accountActions
+}
+
+struct SettingsVisibilityPolicy: Equatable {
+    let isSignedIn: Bool
+    let visionMode: LocalVisionMode
+    let companionEnabled: Bool
+    let companionPersonaTitle: String
+    let hasDiagnostic: Bool
+
+    var sectionIdentifiers: [SettingsSectionIdentifier] {
+        var sections: [SettingsSectionIdentifier] = [
+            .profile,
+            .aiAndShortcuts,
+            .data,
+            .privacy,
+            .helpAndAbout
+        ]
+        if showsAccountActionsSection {
+            sections.append(.accountActions)
+        }
+        return sections
+    }
+
+    var showsAccountActionsSection: Bool { isSignedIn }
+    var showsSignOutAction: Bool { isSignedIn }
+    var showsDeleteCloudAccountAction: Bool { isSignedIn }
+    var showsCloudPrivacyRow: Bool { isSignedIn || visionMode == .hosted }
+    var showsHistoryMigrationRows: Bool { false }
+    var showsAppearanceSection: Bool { false }
+    var showsDiagnosticsRow: Bool { hasDiagnostic }
+    var showsVisionModelParameters: Bool { isSignedIn && visionMode == .hosted }
+    var isCompanionControlsDisabled: Bool { visionMode == .disabled }
+
+    var companionRowSubtitle: String {
+        if visionMode == .disabled {
+            return "未生效 · 需先开启图片识别"
+        }
+        return companionEnabled ? "已开启 · \(companionPersonaTitle)" : "已关闭"
+    }
+}
+
+struct VisionHostedActivationFlow: Equatable {
+    var showsNeedLoginAlert = false
+    var showsLoginSheet = false
+    var showsHostedConsentAlert = false
+    var pendingHostedConsentAfterLogin = false
+
+    mutating func requestHostedActivation(isSignedIn: Bool) {
+        if isSignedIn {
+            showsNeedLoginAlert = false
+            showsLoginSheet = false
+            pendingHostedConsentAfterLogin = false
+            showsHostedConsentAlert = true
+        } else {
+            showsHostedConsentAlert = false
+            showsLoginSheet = false
+            pendingHostedConsentAfterLogin = true
+            showsNeedLoginAlert = true
+        }
+    }
+
+    mutating func proceedToLogin() {
+        showsNeedLoginAlert = false
+        pendingHostedConsentAfterLogin = true
+        showsLoginSheet = true
+    }
+
+    mutating func handleLoginSheetDismissed(isSignedIn: Bool) {
+        showsLoginSheet = false
+        if isSignedIn && pendingHostedConsentAfterLogin {
+            pendingHostedConsentAfterLogin = false
+            showsHostedConsentAlert = true
+        } else {
+            pendingHostedConsentAfterLogin = false
+            showsHostedConsentAlert = false
+        }
+    }
+
+    @MainActor
+    mutating func confirmConsent(in appState: AppState) {
+        showsHostedConsentAlert = false
+        pendingHostedConsentAfterLogin = false
+        appState.setLocalVisionMode(.hosted)
+    }
+
+    mutating func cancel() {
+        showsNeedLoginAlert = false
+        showsLoginSheet = false
+        showsHostedConsentAlert = false
+        pendingHostedConsentAfterLogin = false
+    }
+}
+
 struct SettingsView: View {
     @EnvironmentObject private var appState: AppState
     @State private var showLogin = false
     @State private var showBindingPreview = false
     @State private var showDeleteAccountConfirmation = false
     @State private var showsOnboarding = false
+    @State private var showSignOutConfirmation = false
+
+    private var hasAnyDiagnostic: Bool {
+        appState.localStorageInitializationDiagnostic != nil
+            || appState.localProjectionRefreshDiagnostic != nil
+            || (JieziReleaseCapabilities.cloudSync && (appState.localSyncDiagnostic != nil || appState.localSyncFailureDiagnostic != nil))
+    }
+
+    private var visibilityPolicy: SettingsVisibilityPolicy {
+        SettingsVisibilityPolicy(
+            isSignedIn: appState.isSignedIn,
+            visionMode: appState.localVisionMode,
+            companionEnabled: appState.userSettings.companionEnabled,
+            companionPersonaTitle: optionTitle(NativeSettingsOptions.personas, appState.userSettings.companionPersona),
+            hasDiagnostic: hasAnyDiagnostic
+        )
+    }
 
     var body: some View {
         ZStack {
             JieziTheme.pageBackground.ignoresSafeArea()
             List {
+                // 1. 顶部账号卡
                 Section {
                     profileHeader
-                }
-
-                Section(JieziReleaseCapabilities.cloudSync ? "数据与同步" : "账户与存储") {
-                    LabeledContent("本机数据") {
-                        Text("保存在这台设备")
-                            .foregroundStyle(.secondary)
-                    }
-                    LabeledContent("登录状态") {
-                        Text(appState.isSignedIn ? "已登录" : "未登录")
-                            .foregroundStyle(.secondary)
-                    }
                     if JieziReleaseCapabilities.cloudSync {
                         LabeledContent("云同步") {
                             Text(syncStatusTitle)
                                 .foregroundStyle(.secondary)
                         }
-                        Text("普通同步范围：账户与消费；账户流水由本机消费投影维护。收入、四域记录、钱包快照、候选和还款不在此同步范围。‘已同步’不代表历史全量迁入或云本完全一致。")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
                         if canPreviewLocalBinding {
                             Button {
                                 Task {
@@ -70,42 +173,90 @@ struct SettingsView: View {
                             }
                         }
                     }
+                } footer: {
                     if !appState.isSignedIn {
-                        Button {
-                            showLogin = true
+                        Text("登录后可以使用 Hosted AI 识别截图和照片。")
+                    }
+                }
+
+                // 2. AI 与快捷记录
+                Section("AI 与快捷记录") {
+                    NavigationLink {
+                        VisionSettingsView()
+                    } label: {
+                        HStack(spacing: 12) {
+                            settingsRow(
+                                "图片识别",
+                                detail: appState.localVisionMode == .hosted
+                                    ? "Hosted AI · 截图和照片自动识别"
+                                    : "已关闭 · 图片保存在本机，手动整理",
+                                systemImage: "viewfinder"
+                            )
+                            Spacer(minLength: 4)
+                            if appState.localVisionMode != .hosted && !appState.isSignedIn {
+                                Text("需登录")
+                                    .font(.caption2.weight(.semibold))
+                                    .padding(.horizontal, 7)
+                                    .padding(.vertical, 3)
+                                    .background(JieziTheme.gold.opacity(0.28), in: Capsule())
+                                    .foregroundStyle(JieziTheme.ink)
+                            }
+                        }
+                    }
+                    NavigationLink {
+                        CompanionSettingsView()
+                    } label: {
+                        settingsRow(
+                            "AI 陪伴",
+                            detail: visibilityPolicy.companionRowSubtitle,
+                            systemImage: "quote.bubble"
+                        )
+                    }
+                    if JieziReleaseCapabilities.monthlyAIQuestions {
+                        NavigationLink {
+                            InsightSettingsView()
                         } label: {
-                            Label(
-                                JieziReleaseCapabilities.cloudSync ? "登录并管理云同步" : "登录以使用自动识别",
-                                systemImage: "person.crop.circle.badge.plus"
+                            settingsRow(
+                                "AI 联动分析",
+                                detail: optionTitle(NativeSettingsOptions.insightProviders, appState.userSettings.aiInsightProvider),
+                                systemImage: "chart.line.uptrend.xyaxis"
                             )
                         }
                     }
-                }
-
-                Section("使用帮助") {
-                    Button {
-                        showsOnboarding = true
+                    NavigationLink {
+                        ShortcutSetupView()
                     } label: {
                         settingsRow(
-                            "使用引导",
-                            detail: appState.onboardingStatusText,
-                            systemImage: "point.topleft.down.to.point.bottomright.curvepath"
+                            "快捷指令",
+                            detail: appState.localVisionMode == .disabled
+                                ? "截图会保存到本机待整理"
+                                : "截图发送后由 Hosted AI 识别",
+                            systemImage: "wand.and.stars"
                         )
                     }
-                    .buttonStyle(.plain)
                 }
 
-                Section("外观") {
-                    LabeledContent("应用场景", value: "随当前领域变化")
-                }
-
-                Section("数据管理") {
+                // 3. 数据
+                Section("数据") {
                     NavigationLink {
-                        DataExportView()
+                        DataExportView(mode: .backupAndRestore)
                     } label: {
-                        settingsRow("数据导出", detail: "导出支出、收入和通用记录", systemImage: "square.and.arrow.up")
+                        settingsRow(
+                            "备份与恢复",
+                            detail: "完整备份本机数据，换机时恢复",
+                            systemImage: "externaldrive.badge.timemachine"
+                        )
                     }
-                    if JieziReleaseCapabilities.historyMigration {
+                    NavigationLink {
+                        DataExportView(mode: .importAndExport)
+                    } label: {
+                        settingsRow(
+                            "导入与导出",
+                            detail: "导出记录表格，导入其他记账 App 数据",
+                            systemImage: "square.and.arrow.up"
+                        )
+                    }
+                    if visibilityPolicy.showsHistoryMigrationRows {
                         NavigationLink {
                             HistoryMigrationView()
                         } label: {
@@ -123,104 +274,77 @@ struct SettingsView: View {
                     }
                 }
 
-                Section("AI 能力") {
-                    NavigationLink {
-                        VisionSettingsView()
-                    } label: {
-                        settingsRow(
-                            "截图 / 拍照识别",
-                            detail: appState.localVisionMode == .disabled ? "未开启" : "已开启",
-                            systemImage: "viewfinder"
-                        )
-                    }
-                    NavigationLink {
-                        CompanionSettingsView()
-                    } label: {
-                        settingsRow(
-                            "AI 陪伴",
-                            detail: appState.userSettings.companionEnabled ? "已开启 · \(optionTitle(NativeSettingsOptions.personas, appState.userSettings.companionPersona))" : "已关闭",
-                            systemImage: "quote.bubble"
-                        )
-                    }
-                    if JieziReleaseCapabilities.monthlyAIQuestions {
+                // 4. 隐私
+                Section("隐私") {
+                    if visibilityPolicy.showsCloudPrivacyRow {
                         NavigationLink {
-                            InsightSettingsView()
+                            PrivacySettingsView()
                         } label: {
                             settingsRow(
-                                "AI 联动分析",
-                                detail: optionTitle(NativeSettingsOptions.insightProviders, appState.userSettings.aiInsightProvider),
-                                systemImage: "chart.line.uptrend.xyaxis"
+                                "云端识别数据与原图",
+                                detail: appState.userSettings.retentionDescription,
+                                systemImage: "icloud"
+                            )
+                        }
+                    }
+                    NavigationLink {
+                        LegalDocumentView(kind: .privacy)
+                    } label: {
+                        settingsRow("隐私政策", detail: "查看数据处理与隐私说明", systemImage: "hand.raised")
+                    }
+                    NavigationLink {
+                        LegalDocumentView(kind: .terms)
+                    } label: {
+                        settingsRow("服务协议", detail: "查看使用条款与服务边界", systemImage: "doc.text")
+                    }
+                }
+
+                // 5. 帮助与关于
+                Section("帮助与关于") {
+                    Button {
+                        showsOnboarding = true
+                    } label: {
+                        settingsRow(
+                            "使用引导",
+                            detail: appState.onboardingStatusText,
+                            systemImage: "point.topleft.down.to.point.bottomright.curvepath"
+                        )
+                    }
+                    .buttonStyle(.plain)
+
+                    LabeledContent("当前版本") {
+                        Text(versionLabel).foregroundStyle(.secondary)
+                    }
+
+                    if visibilityPolicy.showsDiagnosticsRow {
+                        NavigationLink {
+                            SettingsDiagnosticsView()
+                        } label: {
+                            settingsRow(
+                                "诊断信息",
+                                detail: diagnosticSummaryText,
+                                systemImage: "exclamationmark.triangle.fill"
                             )
                         }
                     }
                 }
 
-                Section("隐私与留存") {
-                    NavigationLink {
-                        PrivacySettingsView()
-                    } label: {
-                        settingsRow(
-                            "识别数据与原图",
-                            detail: appState.userSettings.retentionDescription,
-                            systemImage: "hand.raised"
-                        )
-                    }
-                }
-
-                Section("快捷指令") {
-                    NavigationLink {
-                        ShortcutSetupView()
-                    } label: {
-                        settingsRow(
-                            "快捷指令设置",
-                            detail: "添加拍照或截图快捷指令，设置启动方式",
-                            systemImage: "wand.and.stars"
-                        )
-                    }
-                    Toggle(isOn: Binding(
-                        get: { appState.shortcutNotificationsEnabled },
-                        set: { appState.setShortcutNotificationsEnabled($0) }
-                    )) {
-                        Label("上传完成通知", systemImage: "bell")
-                    }
-                    Toggle(isOn: Binding(
-                        get: { appState.shortcutResultCardEnabled },
-                        set: { appState.setShortcutResultCardEnabled($0) }
-                    )) {
-                        Label("快捷指令结果卡片", systemImage: "rectangle.on.rectangle")
-                    }
-                }
-
-                Section("关于") {
-                    LabeledContent("当前版本") {
-                        Text(versionLabel).foregroundStyle(.secondary)
-                    }
-                }
-
-                Section("账户与安全") {
-                    NavigationLink {
-                        LegalDocumentView(kind: .privacy)
-                    } label: {
-                        Label("隐私政策", systemImage: "hand.raised")
-                    }
-                    NavigationLink {
-                        LegalDocumentView(kind: .terms)
-                    } label: {
-                        Label("服务协议", systemImage: "doc.text")
-                    }
-                    Button(role: .destructive) {
-                        showDeleteAccountConfirmation = true
-                    } label: {
-                        Label("删除云端账户及云端数据", systemImage: "person.crop.circle.badge.xmark")
-                    }
-                    .disabled(appState.isDeletingAccount)
-                }
-
-                Section {
-                    Button(role: .destructive) {
-                        appState.signOut()
-                    } label: {
-                        Label("退出登录", systemImage: "rectangle.portrait.and.arrow.right")
+                // 底部账户操作（仅在已登录时显示）
+                if visibilityPolicy.showsAccountActionsSection {
+                    Section {
+                        Button(role: .destructive) {
+                            showSignOutConfirmation = true
+                        } label: {
+                            Label("退出登录", systemImage: "rectangle.portrait.and.arrow.right")
+                        }
+                        Button(role: .destructive) {
+                            showDeleteAccountConfirmation = true
+                        } label: {
+                            Label("删除云端账户及云端数据", systemImage: "person.crop.circle.badge.xmark")
+                        }
+                        .disabled(appState.isDeletingAccount)
+                    } footer: {
+                        Text("删除只影响云端账户和云端数据，本机记录不会被删除。")
                     }
                 }
 
@@ -241,51 +365,6 @@ struct SettingsView: View {
                             .foregroundStyle(message.contains("失败") || message.contains("无法") ? JieziTheme.coral : .secondary)
                     }
                 }
-                if JieziReleaseCapabilities.cloudSync,
-                   appState.localSyncDiagnostic != nil || appState.localSyncFailureDiagnostic != nil {
-                    Section("同步诊断") {
-                        if let diagnostic = appState.localSyncDiagnostic {
-                            Text(diagnostic.summary)
-                                .font(.footnote)
-                                .foregroundStyle(diagnostic.phase == .failed ? JieziTheme.coral : .secondary)
-                                .textSelection(.enabled)
-                        }
-                        if let diagnostic = appState.localSyncFailureDiagnostic {
-                            Text(diagnostic.userMessage)
-                                .font(.footnote)
-                                .foregroundStyle(diagnostic.resolution == nil ? JieziTheme.coral : .secondary)
-                            if let resolution = diagnostic.resolution {
-                                Text("恢复结果：\(resolution)")
-                                    .font(.caption).foregroundStyle(.secondary)
-                            }
-                            diagnosticDetails(diagnostic)
-                        }
-                    }
-                }
-                if let diagnostic = appState.localStorageInitializationDiagnostic {
-                    Section("本机存储诊断") {
-                        Text(diagnostic.userMessage)
-                            .font(.footnote)
-                            .foregroundStyle(diagnostic.resolution == nil ? JieziTheme.coral : .secondary)
-                        if let resolution = diagnostic.resolution {
-                            Text("恢复结果：\(resolution)")
-                                .font(.caption).foregroundStyle(.secondary)
-                        }
-                        diagnosticDetails(diagnostic)
-                    }
-                }
-                if let diagnostic = appState.localProjectionRefreshDiagnostic {
-                    Section("本机列表刷新诊断") {
-                        Text(diagnostic.userMessage)
-                            .font(.footnote)
-                            .foregroundStyle(diagnostic.resolution == nil ? JieziTheme.coral : .secondary)
-                        if let resolution = diagnostic.resolution {
-                            Text("恢复结果：\(resolution)")
-                                .font(.caption).foregroundStyle(.secondary)
-                        }
-                        diagnosticDetails(diagnostic)
-                    }
-                }
             }
             .scrollContentBackground(.hidden)
             .listStyle(.insetGrouped)
@@ -296,13 +375,25 @@ struct SettingsView: View {
         }
         .navigationTitle("设置")
         .toolbarBackground(JieziScene.expense.surface, for: .navigationBar)
-        .alert("永久删除账户？", isPresented: $showDeleteAccountConfirmation) {
+        .confirmationDialog(
+            "退出登录？",
+            isPresented: $showSignOutConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("退出登录", role: .destructive) {
+                appState.signOut()
+            }
+            Button("取消", role: .cancel) {}
+        } message: {
+            Text("退出后 Hosted AI 会关闭，本机记录不会删除。")
+        }
+        .alert("永久删除云端账户？", isPresented: $showDeleteAccountConfirmation) {
             Button("删除云端账户及云端数据", role: .destructive) {
                 Task { _ = await appState.deleteAccount() }
             }
             Button("取消", role: .cancel) {}
         } message: {
-            Text("这会永久删除云端账户及其云端记录和原图。本机数据库、原图与导出的备份仍保留。")
+            Text("这会永久删除云端账户及其云端记录和原图。本机数据库、原图与导出的备份仍会保留；删除后 Hosted AI 会关闭。")
         }
         .fullScreenCover(isPresented: $showsOnboarding) {
             OnboardingFlowView(onClose: { showsOnboarding = false })
@@ -332,6 +423,16 @@ struct SettingsView: View {
         }
     }
 
+    private var diagnosticSummaryText: String {
+        if let diagnostic = appState.localStorageInitializationDiagnostic {
+            return diagnostic.userMessage
+        }
+        if let diagnostic = appState.localProjectionRefreshDiagnostic {
+            return diagnostic.userMessage
+        }
+        return "点击查看与复制脱敏诊断"
+    }
+
     private var profileHeader: some View {
         HStack(spacing: 12) {
             Image(systemName: "person.crop.circle.fill")
@@ -340,12 +441,21 @@ struct SettingsView: View {
             VStack(alignment: .leading, spacing: 3) {
                 Text(appState.isSignedIn
                      ? (appState.currentUserEmail.isEmpty ? "已登录用户" : appState.currentUserEmail)
-                     : "本机用户")
+                     : "本机模式")
                     .font(.headline)
-                Text(appState.isSignedIn ? "云端身份可用" : "数据仅保存在此 iPhone")
+                Text(appState.isSignedIn ? "已登录 · 记录仍保存在本机" : "记录保存在此 iPhone，不登录也能用")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 8)
+            if !appState.isSignedIn {
+                Button("登录 / 注册") {
+                    showLogin = true
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+                .tint(JieziTheme.brand)
             }
         }
         .padding(.vertical, 5)
@@ -431,20 +541,89 @@ private func diagnosticDetails(_ diagnostic: LocalHistoryMigrationDiagnostic) ->
     }
 }
 
+struct SettingsDiagnosticsView: View {
+    @EnvironmentObject private var appState: AppState
+
+    var body: some View {
+        Form {
+            if JieziReleaseCapabilities.cloudSync,
+               appState.localSyncDiagnostic != nil || appState.localSyncFailureDiagnostic != nil {
+                Section("同步诊断") {
+                    if let diagnostic = appState.localSyncDiagnostic {
+                        Text(diagnostic.summary)
+                            .font(.footnote)
+                            .foregroundStyle(diagnostic.phase == .failed ? JieziTheme.coral : .secondary)
+                            .textSelection(.enabled)
+                    }
+                    if let diagnostic = appState.localSyncFailureDiagnostic {
+                        Text(diagnostic.userMessage)
+                            .font(.footnote)
+                            .foregroundStyle(diagnostic.resolution == nil ? JieziTheme.coral : .secondary)
+                        if let resolution = diagnostic.resolution {
+                            Text("恢复结果：\(resolution)")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                        diagnosticDetails(diagnostic)
+                    }
+                }
+            }
+            if let diagnostic = appState.localStorageInitializationDiagnostic {
+                Section("本机存储诊断") {
+                    Text(diagnostic.userMessage)
+                        .font(.footnote)
+                        .foregroundStyle(diagnostic.resolution == nil ? JieziTheme.coral : .secondary)
+                    if let resolution = diagnostic.resolution {
+                        Text("恢复结果：\(resolution)")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                    diagnosticDetails(diagnostic)
+                }
+            }
+            if let diagnostic = appState.localProjectionRefreshDiagnostic {
+                Section("本机列表刷新诊断") {
+                    Text(diagnostic.userMessage)
+                        .font(.footnote)
+                        .foregroundStyle(diagnostic.resolution == nil ? JieziTheme.coral : .secondary)
+                    if let resolution = diagnostic.resolution {
+                        Text("恢复结果：\(resolution)")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                    diagnosticDetails(diagnostic)
+                }
+            }
+        }
+        .navigationTitle("诊断信息")
+        .scrollContentBackground(.hidden)
+        .background(JieziTheme.pageBackground)
+        .tint(JieziTheme.brand)
+    }
+}
+
 struct VisionSettingsView: View {
     @EnvironmentObject private var appState: AppState
     @State private var byokAPIKeyInput = ""
     @State private var showDeleteBYOKConfirmation = false
-    @State private var showHostedConsent = false
+    @State private var hostedActivationFlow = VisionHostedActivationFlow()
+    @State private var isAdvancedExpanded = false
+
+    private var showsModelParameters: Bool {
+        SettingsVisibilityPolicy(
+            isSignedIn: appState.isSignedIn,
+            visionMode: appState.localVisionMode,
+            companionEnabled: appState.userSettings.companionEnabled,
+            companionPersonaTitle: "",
+            hasDiagnostic: false
+        ).showsVisionModelParameters
+    }
 
     var body: some View {
         Form {
-            Section("识别授权") {
+            Section("识别方式") {
                 Picker("图片识别", selection: Binding(
                     get: { appState.localVisionMode },
                     set: { mode in
                         if mode == .hosted, appState.localVisionMode != .hosted {
-                            showHostedConsent = true
+                            hostedActivationFlow.requestHostedActivation(isSignedIn: appState.isSignedIn)
                         } else {
                             appState.setLocalVisionMode(mode)
                         }
@@ -488,29 +667,113 @@ struct VisionSettingsView: View {
                     }
                 }
             }
-            #if DEBUG
-            Section("当前链路") {
-                LabeledContent("截图") {
-                    Text(routeSummary(forPhoto: false)).foregroundStyle(.secondary)
+            if showsModelParameters {
+                Section("高级") {
+                    DisclosureGroup(isExpanded: $isAdvancedExpanded) {
+                        LabeledContent("截图链路") {
+                            Text(routeSummary(forPhoto: false)).foregroundStyle(.secondary)
+                        }
+                        LabeledContent("拍照链路") {
+                            Text(routeSummary(forPhoto: true)).foregroundStyle(.secondary)
+                        }
+                        Picker(
+                            "截图识别",
+                            selection: Binding(
+                                get: { appState.userSettings.screenshotVisionPrimary },
+                                set: { value in Task { await appState.setVisionProvider(value, forPhoto: false) } }
+                            )
+                        ) {
+                            ForEach(NativeSettingsOptions.visionProviders) { option in
+                                Text(option.title).tag(option.id)
+                            }
+                        }
+                        Picker(
+                            "拍照识别",
+                            selection: Binding(
+                                get: { appState.userSettings.photoVisionPrimary },
+                                set: { value in Task { await appState.setVisionProvider(value, forPhoto: true) } }
+                            )
+                        ) {
+                            ForEach(NativeSettingsOptions.visionProviders) { option in
+                                Text(option.title).tag(option.id)
+                            }
+                        }
+                        Picker(
+                            "截图 Qwen 模型",
+                            selection: Binding(
+                                get: { currentModel(forPhoto: false) },
+                                set: { value in Task { await appState.setQwenModel(value, forPhoto: false) } }
+                            )
+                        ) {
+                            ForEach(NativeSettingsOptions.qwenModels) { option in
+                                Text(option.title).tag(option.id)
+                            }
+                        }
+                        Toggle(
+                            "截图思考模式",
+                            isOn: asyncToggle(currentThinking(forPhoto: false)) {
+                                await appState.setQwenThinking($0, forPhoto: false)
+                            }
+                        )
+                        Picker(
+                            "拍照 Qwen 模型",
+                            selection: Binding(
+                                get: { currentModel(forPhoto: true) },
+                                set: { value in Task { await appState.setQwenModel(value, forPhoto: true) } }
+                            )
+                        ) {
+                            ForEach(NativeSettingsOptions.qwenModels) { option in
+                                Text(option.title).tag(option.id)
+                            }
+                        }
+                        Toggle(
+                            "拍照思考模式",
+                            isOn: asyncToggle(currentThinking(forPhoto: true)) {
+                                await appState.setQwenThinking($0, forPhoto: true)
+                            }
+                        )
+                    } label: {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("模型参数")
+                            Text("截图 / 拍照使用的模型与思考模式")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
                 }
-                LabeledContent("拍照") {
-                    Text(routeSummary(forPhoto: true)).foregroundStyle(.secondary)
+                Section("识别规则") {
+                    Text("支付、收入、余额和账单按截图链路处理；明确来自相机或判断为真实食物照片时按拍照链路处理。")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
                 }
             }
-            providerSection(title: "截图识别", selection: appState.userSettings.screenshotVisionPrimary, forPhoto: false)
-            providerSection(title: "拍照识别", selection: appState.userSettings.photoVisionPrimary, forPhoto: true)
-            qwenSection(title: "截图 Qwen 参数", forPhoto: false)
-            qwenSection(title: "拍照 Qwen 参数", forPhoto: true)
-            Section("识别规则") {
-                Text("支付、收入、余额和账单按截图链路处理；明确来自相机或判断为真实食物照片时按拍照链路处理。")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-            }
-            #endif
         }
-        .alert("允许云端 AI 处理这些数据？", isPresented: $showHostedConsent) {
-            Button("同意并启用") { appState.setLocalVisionMode(.hosted) }
-            Button("取消", role: .cancel) {}
+        .alert("使用 Hosted AI 需要登录", isPresented: $hostedActivationFlow.showsNeedLoginAlert) {
+            Button("去登录") {
+                hostedActivationFlow.proceedToLogin()
+            }
+            Button("取消", role: .cancel) {
+                hostedActivationFlow.cancel()
+            }
+        } message: {
+            Text("Hosted AI 通过云端服务识别图片，需要登录账号。本机记录不受影响，不登录也能继续手动记录。")
+        }
+        .sheet(
+            isPresented: $hostedActivationFlow.showsLoginSheet,
+            onDismiss: {
+                hostedActivationFlow.handleLoginSheetDismissed(isSignedIn: appState.isSignedIn)
+            }
+        ) {
+            NavigationStack { LoginView() }
+                .environmentObject(appState)
+        }
+        .alert("允许 Hosted AI 处理这些数据？", isPresented: $hostedActivationFlow.showsHostedConsentAlert) {
+            Button("同意并启用") {
+                hostedActivationFlow.confirmConsent(in: appState)
+            }
+            Button("取消", role: .cancel) {
+                hostedActivationFlow.cancel()
+            }
         } message: {
             Text("你提交识别的照片和截图会经芥子在新加坡的服务发给阿里云百炼（中国内地）。开启陪伴文案时，当前记录、部分近期同类记录（可能含金额、饮食、运动或睡眠信息）和表达偏好也会发送。开启长期记忆时，还会发送同类记忆摘要和近期陪伴文案。结果保存在本机。你可以随时在这里关闭。")
         }
@@ -528,41 +791,6 @@ struct VisionSettingsView: View {
             Button("取消", role: .cancel) {}
         } message: {
             Text("只删除此设备 Keychain 中的副本。若要彻底停用，请另到供应商控制台撤销 Key。")
-        }
-    }
-
-    private func providerSection(title: String, selection: String, forPhoto: Bool) -> some View {
-        Section(title) {
-            ForEach(NativeSettingsOptions.visionProviders) { option in
-                Button {
-                    Task { await appState.setVisionProvider(option.id, forPhoto: forPhoto) }
-                } label: {
-                    optionRow(option, selected: selection == option.id)
-                }
-                .buttonStyle(.plain)
-            }
-        }
-    }
-
-    private func qwenSection(title: String, forPhoto: Bool) -> some View {
-        Section(title) {
-            ForEach(NativeSettingsOptions.qwenModels) { option in
-                Button {
-                    Task { await appState.setQwenModel(option.id, forPhoto: forPhoto) }
-                } label: {
-                    optionRow(option, selected: currentModel(forPhoto: forPhoto) == option.id)
-                }
-                .buttonStyle(.plain)
-            }
-            Toggle(
-                forPhoto ? "拍照思考模式" : "截图思考模式",
-                isOn: asyncToggle(currentThinking(forPhoto: forPhoto)) {
-                    await appState.setQwenThinking($0, forPhoto: forPhoto)
-                }
-            )
-            Text(forPhoto ? "开启后更重质量，速度可能变慢。" : "关闭可减少截图识别耗时。")
-                .font(.footnote)
-                .foregroundStyle(.secondary)
         }
     }
 
@@ -587,27 +815,51 @@ struct CompanionSettingsView: View {
     @EnvironmentObject private var appState: AppState
     @State private var customNote = ""
 
+    private var isVisionDisabled: Bool {
+        appState.localVisionMode == .disabled
+    }
+
     var body: some View {
         Form {
+            if isVisionDisabled {
+                Section {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("AI 陪伴需要先开启图片识别。")
+                            .font(.subheadline)
+                        NavigationLink {
+                            VisionSettingsView()
+                        } label: {
+                            Text("去开启")
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(JieziTheme.brand)
+                        }
+                    }
+                    .padding(.vertical, 4)
+                }
+            }
             Section {
                 Toggle("陪伴文案", isOn: asyncToggle(appState.userSettings.companionEnabled, appState.setCompanionEnabled))
+                    .disabled(isVisionDisabled)
                 Toggle("长期记忆", isOn: asyncToggle(appState.userSettings.companionMemoryEnabled, appState.setCompanionMemoryEnabled))
+                    .disabled(isVisionDisabled || !appState.userSettings.companionEnabled)
                 Text("使用 Hosted 陪伴时，当前记录和部分近期同类记录会发给阿里云百炼。开启长期记忆后，还会附上同类记忆摘要和近期陪伴文案。关闭长期记忆会停止读取和发送这两项，近期同类记录仍可用于生成文案。要停止云端生成，可关闭陪伴文案或 Hosted AI。")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             }
-            optionSection("语气", options: NativeSettingsOptions.personas, selected: appState.userSettings.companionPersona, action: appState.setCompanionPersona)
-            optionSection("记忆强度", options: NativeSettingsOptions.memoryStrengths, selected: appState.userSettings.companionMemoryStrength, action: appState.setCompanionMemoryStrength)
-            optionSection("表达方式", options: NativeSettingsOptions.expressionStyles, selected: appState.userSettings.companionExpressionStyle, action: appState.setCompanionExpressionStyle)
-            Section("专属指令") {
-                TextField("例如：少提体重，饭点温和一点", text: $customNote, axis: .vertical)
-                    .lineLimit(2...4)
-                    .onChange(of: customNote) { _, value in
-                        if value.count > 80 { customNote = String(value.prefix(80)) }
-                    }
-                Text("\(customNote.count)/80").font(.caption).foregroundStyle(.secondary)
-                Button("保存专属指令") { Task { await appState.setCompanionCustomNote(customNote) } }
-                    .disabled(customNote == appState.userSettings.companionCustomNote)
+            if !isVisionDisabled && appState.userSettings.companionEnabled {
+                optionSection("语气", options: NativeSettingsOptions.personas, selected: appState.userSettings.companionPersona, action: appState.setCompanionPersona)
+                optionSection("记忆强度", options: NativeSettingsOptions.memoryStrengths, selected: appState.userSettings.companionMemoryStrength, action: appState.setCompanionMemoryStrength)
+                optionSection("表达方式", options: NativeSettingsOptions.expressionStyles, selected: appState.userSettings.companionExpressionStyle, action: appState.setCompanionExpressionStyle)
+                Section("专属指令") {
+                    TextField("例如：少提体重，饭点温和一点", text: $customNote, axis: .vertical)
+                        .lineLimit(2...4)
+                        .onChange(of: customNote) { _, value in
+                            if value.count > 80 { customNote = String(value.prefix(80)) }
+                        }
+                    Text("\(customNote.count)/80").font(.caption).foregroundStyle(.secondary)
+                    Button("保存专属指令") { Task { await appState.setCompanionCustomNote(customNote) } }
+                        .disabled(customNote == appState.userSettings.companionCustomNote)
+                }
             }
         }
         .navigationTitle("AI 陪伴")
@@ -1029,7 +1281,30 @@ struct LocalHistoryMigrationView: View {
     }
 }
 
+enum DataExportViewMode: Equatable {
+    case all
+    case backupAndRestore
+    case importAndExport
+
+    var navigationTitle: String {
+        switch self {
+        case .all: return "数据导出"
+        case .backupAndRestore: return "备份与恢复"
+        case .importAndExport: return "导入与导出"
+        }
+    }
+
+    var showsBackupSection: Bool {
+        self == .all || self == .backupAndRestore
+    }
+
+    var showsExportAndImportSections: Bool {
+        self == .all || self == .importAndExport
+    }
+}
+
 struct DataExportView: View {
+    var mode: DataExportViewMode = .all
     @EnvironmentObject private var appState: AppState
     @State private var request = NativeDataExportRequest()
     @State private var exportedFile: NativeExportedFile?
@@ -1045,67 +1320,73 @@ struct DataExportView: View {
 
     var body: some View {
         Form {
-            Section("导出内容") {
-                Picker("内容", selection: $request.content) {
-                    ForEach(NativeExportContent.allCases) { Text($0.title).tag($0) }
+            if mode.showsExportAndImportSections {
+                Section("导出内容") {
+                    Picker("内容", selection: $request.content) {
+                        ForEach(NativeExportContent.allCases) { Text($0.title).tag($0) }
+                    }
+                    Picker("时间范围", selection: $request.range) {
+                        ForEach(NativeExportRange.allCases) { Text($0.title).tag($0) }
+                    }
+                    Picker("文件格式", selection: $request.format) {
+                        ForEach(NativeExportFormat.allCases) { Text($0.title).tag($0) }
+                    }
+                    Toggle("包含完整 payload", isOn: $request.includeFullPayload)
+                    Toggle("包含本地图片", isOn: $request.includeImages)
                 }
-                Picker("时间范围", selection: $request.range) {
-                    ForEach(NativeExportRange.allCases) { Text($0.title).tag($0) }
+                Section {
+                    Button {
+                        Task { exportedFile = await appState.exportData(request) }
+                    } label: {
+                        if appState.isExportingData { ProgressView().frame(maxWidth: .infinity) }
+                        else { Label("生成导出文件", systemImage: "square.and.arrow.up").frame(maxWidth: .infinity) }
+                    }
+                    .disabled(appState.isExportingData)
                 }
-                Picker("文件格式", selection: $request.format) {
-                    ForEach(NativeExportFormat.allCases) { Text($0.title).tag($0) }
-                }
-                Toggle("包含完整 payload", isOn: $request.includeFullPayload)
-                Toggle("包含本地图片", isOn: $request.includeImages)
             }
-            Section {
-                Button {
-                    Task { exportedFile = await appState.exportData(request) }
-                } label: {
-                    if appState.isExportingData { ProgressView().frame(maxWidth: .infinity) }
-                    else { Label("生成导出文件", systemImage: "square.and.arrow.up").frame(maxWidth: .infinity) }
-                }
-                .disabled(appState.isExportingData)
-            }
-            Section("完整本地备份") {
-                Text("上方普通导出不包含账户流水、钱包快照和候选；完整恢复请使用本节备份。备份包含本机业务事实、账户流水、待处理图片和历史状态，不包含登录、同步授权或 API Key；缺失图片时会失败。")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                Button {
-                    Task { exportedFile = await appState.exportCompleteLocalBackup() }
-                } label: {
-                    Label("导出可恢复备份", systemImage: "externaldrive.badge.timemachine")
-                }
-                .disabled(appState.isExportingData)
-                Button {
-                    isShowingBackupImporter = true
-                } label: {
-                    if appState.isImportingLocalBackup { ProgressView() }
-                    else { Label("恢复本地备份", systemImage: "arrow.down.doc") }
-                }
-                .disabled(appState.isImportingLocalBackup)
-                if let message = appState.settingsMessage {
-                    Text(message)
+            if mode.showsBackupSection {
+                Section("完整本地备份") {
+                    Text("包含全部本机记录、账户流水、待处理图片和历史状态，不包含登录、同步授权或 API Key；缺失图片时会失败。")
                         .font(.caption)
-                        .foregroundStyle(message.contains("失败") ? JieziTheme.coral : JieziTheme.mint)
+                        .foregroundStyle(.secondary)
+                    Button {
+                        Task { exportedFile = await appState.exportCompleteLocalBackup() }
+                    } label: {
+                        Label("创建备份文件", systemImage: "externaldrive.badge.timemachine")
+                    }
+                    .disabled(appState.isExportingData)
+                    Button {
+                        isShowingBackupImporter = true
+                    } label: {
+                        if appState.isImportingLocalBackup { ProgressView() }
+                        else { Label("从备份恢复", systemImage: "arrow.down.doc") }
+                    }
+                    .disabled(appState.isImportingLocalBackup)
+                    if let message = appState.settingsMessage {
+                        Text(message)
+                            .font(.caption)
+                            .foregroundStyle(message.contains("失败") ? JieziTheme.coral : JieziTheme.mint)
+                    }
                 }
             }
-            Section("通用记账导入") {
-                Text("支持常见平台导出的 CSV。数据只写入本机，不绑定账户、不上传云端。")
-                    .font(.caption).foregroundStyle(.secondary)
-                Button { isShowingGenericImporter = true } label: {
-                    if appState.isImportingGenericData { ProgressView() }
-                    else { Label("导入 CSV 记账数据", systemImage: "arrow.down.doc") }
-                }
-                .disabled(appState.isImportingGenericData)
-                if let message = appState.settingsMessage {
-                    Text(message)
-                        .font(.caption)
-                        .foregroundStyle(message.contains("失败") ? JieziTheme.coral : JieziTheme.mint)
+            if mode.showsExportAndImportSections {
+                Section("通用记账导入") {
+                    Text("支持常见平台导出的 CSV。先预览，确认后再写入本机，不绑定账户、不上传云端。")
+                        .font(.caption).foregroundStyle(.secondary)
+                    Button { isShowingGenericImporter = true } label: {
+                        if appState.isImportingGenericData { ProgressView() }
+                        else { Label("导入其他记账 App 数据", systemImage: "arrow.down.doc") }
+                    }
+                    .disabled(appState.isImportingGenericData)
+                    if let message = appState.settingsMessage {
+                        Text(message)
+                            .font(.caption)
+                            .foregroundStyle(message.contains("失败") ? JieziTheme.coral : JieziTheme.mint)
+                    }
                 }
             }
         }
-        .navigationTitle("数据导出")
+        .navigationTitle(mode.navigationTitle)
         .scrollContentBackground(.hidden)
         .background(JieziTheme.pageBackground)
         .tint(JieziTheme.brand)
@@ -1303,6 +1584,22 @@ struct ShortcutSetupView: View {
 
     var body: some View {
         List {
+            if !showsPrivacy {
+                Section("通知") {
+                    Toggle(isOn: Binding(
+                        get: { appState.shortcutNotificationsEnabled },
+                        set: { appState.setShortcutNotificationsEnabled($0) }
+                    )) {
+                        Label("上传完成通知", systemImage: "bell")
+                    }
+                    Toggle(isOn: Binding(
+                        get: { appState.shortcutResultCardEnabled },
+                        set: { appState.setShortcutResultCardEnabled($0) }
+                    )) {
+                        Label("快捷指令结果卡片", systemImage: "rectangle.on.rectangle")
+                    }
+                }
+            }
             Section("添加记录方式") {
                 ForEach(ShortcutTemplateKind.allCases) { template in
                     Button {

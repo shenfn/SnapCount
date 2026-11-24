@@ -133,7 +133,7 @@ final class AppState: ObservableObject {
     @Published var aiInsightMessage: String?
     @Published var aiInsightIsCached = false
     @Published var userSettings = NativeUserSettings()
-    @Published var localVisionMode = LocalVisionModeStore().mode
+    @Published var localVisionMode: LocalVisionMode
     @Published var hasBYOKAPIKey = (try? KeychainStore.shared.string(for: KeychainKeys.byokQwenAPIKey))?.isEmpty == false
     @Published var settingsMessage: String?
     @Published var isLoadingSettings = false
@@ -227,7 +227,7 @@ final class AppState: ObservableObject {
     private let sessionProvider: NativeSessionProvider?
     private let expressionPlanAcknowledgementSleep: NativeSleepProvider
     private let keychain = KeychainStore.shared
-    private let localVisionModeStore = LocalVisionModeStore()
+    private let localVisionModeStore: LocalVisionModeStore
     private let localUserSettingsStore: LocalUserSettingsStore
     private var lastDashboardRefreshAt: Date?
     private var recordDetailCache: [String: NativeRecordDetail] = [:]
@@ -299,6 +299,7 @@ final class AppState: ObservableObject {
         localSyncRunner: LocalSyncRunner? = nil,
         onboardingProgressStore: OnboardingProgressStore = OnboardingProgressStore(),
         sessionProvider: NativeSessionProvider? = nil,
+        localVisionModeStore: LocalVisionModeStore = LocalVisionModeStore(),
         localUserSettingsStore: LocalUserSettingsStore = LocalUserSettingsStore(),
         historyMigrationDiagnosticStore: LocalHistoryMigrationDiagnosticStore? = nil,
         historyUnresolvedRepository: LocalHistoryUnresolvedRepository? = nil,
@@ -398,6 +399,8 @@ final class AppState: ObservableObject {
         self.localSyncRunner = localSyncRunner ?? Self.defaultLocalSyncRunner()
         self.onboardingProgressStore = onboardingProgressStore
         self.sessionProvider = sessionProvider
+        self.localVisionModeStore = localVisionModeStore
+        self.localVisionMode = localVisionModeStore.mode
         self.localUserSettingsStore = localUserSettingsStore
         self.userSettings = localUserSettingsStore.load()
         self.expressionPlanAcknowledgementSleep = expressionPlanAcknowledgementSleep
@@ -431,8 +434,8 @@ final class AppState: ObservableObject {
                 manualRecordMessage = diagnostic?.userMessage ?? "本地数据初始化失败；原始错误已隐藏。"
             }
             await restoreAuthentication()
+            reconcileLocalVisionModeWithAuthentication()
             if !isSignedIn {
-                presentedOverlay = .records
                 await loadRecordMonth(Self.currentMonthKey, force: true)
             }
             isBootstrapping = false
@@ -1530,6 +1533,10 @@ final class AppState: ObservableObject {
     }
 
     func setLocalVisionMode(_ mode: LocalVisionMode) {
+        if mode == .hosted, !isSignedIn {
+            settingsMessage = "使用 Hosted AI 需要先登录账号。"
+            return
+        }
         if mode == .byok, !JieziReleaseCapabilities.byok {
             settingsMessage = "BYOK 将在后续版本开放。"
             return
@@ -1540,6 +1547,14 @@ final class AppState: ObservableObject {
         }
         localVisionModeStore.save(mode)
         localVisionMode = mode
+    }
+
+    func reconcileLocalVisionModeWithAuthentication() {
+        guard !isSignedIn else { return }
+        if localVisionMode == .hosted || localVisionModeStore.mode == .hosted {
+            localVisionModeStore.save(.disabled)
+            localVisionMode = .disabled
+        }
     }
 
     func saveBYOKAPIKey(_ apiKey: String) -> Bool {
@@ -6592,6 +6607,9 @@ final class AppState: ObservableObject {
                 onboardingProgressStore.mark(completion, for: .device)
             }
             isOnboardingPresented = false
+            if !shouldDeferOnboardingForExternalRoute {
+                presentedOverlay = .none
+            }
             return
         }
 
@@ -6610,6 +6628,9 @@ final class AppState: ObservableObject {
             onboardingProgressStore.linkDeviceProgress(toAccount: currentUserId)
         }
         isOnboardingPresented = false
+        if !shouldDeferOnboardingForExternalRoute {
+            presentedOverlay = .none
+        }
     }
 
     var onboardingScope: OnboardingProgressScope {
@@ -6711,6 +6732,7 @@ final class AppState: ObservableObject {
     }
 
     private func invalidateSession(message: String) {
+        let wasUsingHostedVision = localVisionMode == .hosted || localVisionModeStore.mode == .hosted
         disableLocalSync()
         try? keychain.remove(KeychainKeys.authSession)
         try? keychain.remove(KeychainKeys.uploadToken)
@@ -6720,9 +6742,20 @@ final class AppState: ObservableObject {
         currentUserEmail = ""
         hasUploadToken = false
         shortcutCredentialMessage = nil
+        if wasUsingHostedVision {
+            localVisionModeStore.save(.disabled)
+            localVisionMode = .disabled
+        }
         resetUserScopedState()
         refreshLocalSyncState()
-        presentedOverlay = .records
+        if wasUsingHostedVision {
+            settingsMessage = "已退出登录，Hosted AI 已关闭；本机记录保留。"
+        } else if message.isEmpty {
+            settingsMessage = "已退出登录；本机记录保留。"
+        }
+        if presentedOverlay != .settings {
+            presentedOverlay = .none
+        }
         Task { await RemoteImageRepository.shared.clear() }
         authMessage = message
         authMessageIsError = !message.isEmpty
