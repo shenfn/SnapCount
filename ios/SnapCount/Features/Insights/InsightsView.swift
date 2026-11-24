@@ -37,12 +37,14 @@ struct InsightsView: View {
             JieziTheme.pageBackground.ignoresSafeArea()
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
-                    Picker("报告视图", selection: $mode) {
-                        ForEach(availableModes) { item in
-                            Text(item.title).tag(item)
+                    if availableModes.count > 1 {
+                        Picker("报告视图", selection: $mode) {
+                            ForEach(availableModes) { item in
+                                Text(item.title).tag(item)
+                            }
                         }
+                        .pickerStyle(.segmented)
                     }
-                    .pickerStyle(.segmented)
 
                     if mode == .report || !JieziReleaseCapabilities.monthlyAIQuestions {
                         MonthlyReportContent(initialMonthKey: initialMonthKey, initialDomainKey: initialDomainKey)

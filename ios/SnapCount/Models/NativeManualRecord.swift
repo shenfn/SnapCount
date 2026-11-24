@@ -124,6 +124,9 @@ struct NativeManualRecordDraft {
     var accountId: String?
     var primaryValueText = ""
     var dimension = ""
+    var sleepUsesTimeRange = false
+    var sleepBedOffsetMinutes = 210   // 23:30 (相对 20:00)
+    var sleepWakeOffsetMinutes = 675  // 07:15 (相对 20:00)
     var walletRecordKind = "cash_snapshot"
     var walletAccountType = "wechat"
     var walletDueDate = ""
@@ -296,6 +299,17 @@ struct NativeManualRecordDraft {
         if domainKey == "sleep" {
             payload["sleep_minutes"] = AnyCodable(Int(value.rounded()))
             payload["sleep_hours"] = AnyCodable((value / 60 * 100).rounded() / 100)
+            if sleepUsesTimeRange {
+                let range = JieziSleepRibbonMath.isoTimestamps(
+                    dateKey: dateKey,
+                    bedOffset: sleepBedOffsetMinutes,
+                    wakeOffset: sleepWakeOffsetMinutes
+                )
+                payload["sleep_start_at"] = AnyCodable(range.startISO)
+                payload["wake_at"] = AnyCodable(range.wakeISO)
+                payload["sleep_minutes"] = AnyCodable(range.durationMinutes)
+                payload["sleep_hours"] = AnyCodable((Double(range.durationMinutes) / 60 * 100).rounded() / 100)
+            }
         }
         if domainKey == "wallet" {
             payload["record_kind"] = AnyCodable(walletRecordKind)

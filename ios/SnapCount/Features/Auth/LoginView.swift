@@ -2,6 +2,7 @@ import SwiftUI
 
 struct LoginView: View {
     @EnvironmentObject private var appState: AppState
+    @Environment(\.dismiss) private var dismiss
     @State private var email = ""
     @State private var password = ""
     @State private var mode: AuthMode = .signIn
@@ -26,6 +27,14 @@ struct LoginView: View {
                 .padding(.bottom, 32)
             }
             .scrollDismissesKeyboard(.interactively)
+        }
+        .toolbar {
+            ToolbarItem(placement: .cancellationAction) {
+                Button("取消") { dismiss() }
+            }
+        }
+        .onChange(of: appState.isSignedIn) { _, signedIn in
+            if signedIn { dismiss() }
         }
         .sheet(item: $legalDocument) { document in
             NavigationStack { LegalDocumentView(kind: document) }

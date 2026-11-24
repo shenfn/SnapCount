@@ -438,6 +438,14 @@ final class AppState: ObservableObject {
             if !isSignedIn {
                 await loadRecordMonth(Self.currentMonthKey, force: true)
             }
+            if recordMonthMessages[Self.currentMonthKey] == nil,
+               let resolved = try? historyMigrationDiagnosticStore?.resolveLatest(
+                   operation: "local-write-refresh",
+                   outcome: "本机列表已重新加载就绪。",
+                   expectedAccountID: currentUserId.isEmpty ? nil : currentUserId
+               ) {
+                localProjectionRefreshDiagnostic = resolved
+            }
             isBootstrapping = false
             await refreshNotificationPermissionStatus()
             presentOnboardingIfNeeded()
@@ -1311,7 +1319,7 @@ final class AppState: ObservableObject {
         }
         if pendingLocalRefreshMonths.isEmpty {
             localProjectionRefreshMessage = nil
-            if wasMonthPending,
+            if wasMonthPending || (localProjectionRefreshDiagnostic != nil && localProjectionRefreshDiagnostic?.resolution == nil),
                let diagnostic = try? historyMigrationDiagnosticStore?.resolveLatest(
                    operation: "local-write-refresh",
                    outcome: "本机列表已刷新；原保存操作未重放。",

@@ -164,11 +164,13 @@ struct MainShellView: View {
                 .accessibilityElement(children: .ignore)
                 .accessibilityLabel("芥子")
 
-                Button { appState.presentedOverlay = .settings } label: {
-                    syncStatusIcon.frame(minHeight: 44)
+                if JieziReleaseCapabilities.cloudSync {
+                    Button { appState.presentedOverlay = .settings } label: {
+                        syncStatusIcon.frame(minHeight: 44)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityHint("查看同步设置")
                 }
-                .buttonStyle(.plain)
-                .accessibilityHint("查看同步设置")
 
                 Spacer()
 

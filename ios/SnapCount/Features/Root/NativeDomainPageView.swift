@@ -295,6 +295,12 @@ struct NativeDomainPageContent: View {
                         clockLabel: clockLabel,
                         recordValue: recordValue,
                         onOpenEntry: { appState.openDayRecord($0.record) },
+                        imageURLProvider: { record in
+                            if let url = await appState.thumbnailImageURL(for: record, force: false) {
+                                return url
+                            }
+                            return detail(for: record)?.imageURL
+                        },
                         selectedEntryID: $selectedTimelineEntryID
                     )
                     Text(selectedEntry.map { "当前选中 · \(clockLabel($0.minute)) · \(selectedEntries.count)笔" } ?? "按住时间轴拖动选择一笔")
@@ -719,18 +725,43 @@ struct NativeDomainPageContent: View {
                 Chart(values) { value in
                     BarMark(xStart: .value("入睡", value.startMinute), xEnd: .value("醒来", value.endMinute),
                             y: .value("记录", value.id), height: .fixed(16))
-                        .foregroundStyle(scene.dataAccent)
+                        .foregroundStyle(
+                            LinearGradient(
+                                colors: [scene.dataAccent, scene.accent],
+                                startPoint: .leading,
+                                endPoint: .trailing
+                            )
+                        )
                         .cornerRadius(8)
                         .accessibilityLabel("\(value.startDateKey) 入睡 \(NativeSleepTimelineAxis.label(for: value.startMinute))，\(value.endDateKey) 醒来 \(NativeSleepTimelineAxis.label(for: value.endMinute))，共 \(formatted(value.durationMinutes))")
+
+                    PointMark(x: .value("入睡时间点", value.startMinute), y: .value("记录", value.id))
+                        .symbolSize(70)
+                        .foregroundStyle(scene.dataAccent)
+                        .annotation(position: .top, spacing: 4) {
+                            Text("☾ \(NativeSleepTimelineAxis.label(for: value.startMinute))")
+                                .font(JieziFont.caption2.monospacedDigit().weight(.semibold))
+                                .foregroundStyle(scene.foreground)
+                        }
+
+                    PointMark(x: .value("醒来时间点", value.endMinute), y: .value("记录", value.id))
+                        .symbolSize(70)
+                        .foregroundStyle(scene.accent)
+                        .annotation(position: .top, spacing: 4) {
+                            Text("☼ \(NativeSleepTimelineAxis.label(for: value.endMinute))")
+                                .font(JieziFont.caption2.monospacedDigit().weight(.semibold))
+                                .foregroundStyle(scene.foreground)
+                        }
+
                     if let bedtime = model.sleep?.bedtime.median {
                         RuleMark(x: .value("平时入睡", bedtime))
-                            .foregroundStyle(scene.accent.opacity(0.8))
-                            .lineStyle(StrokeStyle(lineWidth: 1.5, dash: [4, 4]))
+                            .foregroundStyle(scene.accent.opacity(0.65))
+                            .lineStyle(StrokeStyle(lineWidth: 1.2, dash: [4, 4]))
                     }
                     if let wake = model.sleep?.wake.median {
                         RuleMark(x: .value("平时醒来", wake))
-                            .foregroundStyle(scene.accent.opacity(0.8))
-                            .lineStyle(StrokeStyle(lineWidth: 1.5, dash: [4, 4]))
+                            .foregroundStyle(scene.accent.opacity(0.65))
+                            .lineStyle(StrokeStyle(lineWidth: 1.2, dash: [4, 4]))
                     }
                 }
                 .chartYAxis(.hidden)
@@ -744,7 +775,7 @@ struct NativeDomainPageContent: View {
                     }
                 }
                 .chartXScale(domain: bounds)
-                .frame(height: CGFloat(max(1, values.count)) * 32 + 30)
+                .frame(height: CGFloat(max(1, values.count)) * 44 + 34)
                 ForEach(values) { value in
                     VStack(alignment: .leading, spacing: 4) {
                         Text("入睡 \(value.startDateKey) \(NativeSleepTimelineAxis.label(for: value.startMinute))")

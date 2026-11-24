@@ -111,9 +111,9 @@ struct SettingsView: View {
     @State private var showSignOutConfirmation = false
 
     private var hasAnyDiagnostic: Bool {
-        appState.localStorageInitializationDiagnostic != nil
-            || appState.localProjectionRefreshDiagnostic != nil
-            || (JieziReleaseCapabilities.cloudSync && (appState.localSyncDiagnostic != nil || appState.localSyncFailureDiagnostic != nil))
+        (appState.localStorageInitializationDiagnostic?.resolution == nil && appState.localStorageInitializationDiagnostic != nil)
+            || (appState.localProjectionRefreshDiagnostic?.resolution == nil && appState.localProjectionRefreshDiagnostic != nil)
+            || (JieziReleaseCapabilities.cloudSync && (appState.localSyncDiagnostic?.phase == .failed || (appState.localSyncFailureDiagnostic != nil && appState.localSyncFailureDiagnostic?.resolution == nil)))
     }
 
     private var visibilityPolicy: SettingsVisibilityPolicy {
