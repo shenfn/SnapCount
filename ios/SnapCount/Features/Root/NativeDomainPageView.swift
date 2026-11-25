@@ -303,8 +303,20 @@ struct NativeDomainPageContent: View {
                         },
                         selectedEntryID: $selectedTimelineEntryID
                     )
-                    Text(selectedEntry.map { "当前选中 · \(clockLabel($0.minute)) · \(selectedEntries.count)笔" } ?? "按住时间轴拖动选择一笔")
-                        .font(JieziFont.caption2).foregroundStyle(scene.muted)
+                    HStack {
+                        Text(selectedEntry.map { "当前选中 · \(clockLabel($0.minute)) · \(selectedEntries.count)笔" } ?? "按住时间轴拖动选择一笔")
+                            .font(JieziFont.caption2).foregroundStyle(scene.muted)
+                        Spacer()
+                        if selectedEntry != nil {
+                            Button("收起") {
+                                JieziHaptics.tap()
+                                selectedTimelineEntryID = nil
+                            }
+                            .font(JieziFont.caption2.weight(.semibold))
+                            .foregroundStyle(scene.accent)
+                            .buttonStyle(.plain)
+                        }
+                    }
                 }
                 ForEach(selectedEntries) { entry in
                     recordRow(entry.record, timeLabel: clockLabel(entry.minute))

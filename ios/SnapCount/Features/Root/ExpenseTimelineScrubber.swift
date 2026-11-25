@@ -54,31 +54,6 @@ enum NativeExpenseTimelineSelection {
             return left.id < right.id
         }
     }
-
-    /// 拖动时在密集/同分钟簇内按触点相对偏移顺序切换，避免永远卡在同一笔
-    static func entryForScrub(
-        in entries: [NativeTimelineEntry],
-        locationX: Double,
-        width: Double,
-        domain: ClosedRange<Int>
-    ) -> NativeTimelineEntry? {
-        guard !entries.isEmpty, locationX.isFinite, width.isFinite, width > 0 else { return nil }
-        guard let minute = minute(for: locationX, width: width, domain: domain) else { return nil }
-        guard let nearest = nearestEntry(in: entries, to: minute) else { return nil }
-
-        // 找出距离最近点 ±10 分钟内挤在一起的同簇记录，按横向微位移顺序挑选
-        let cluster = entries
-            .filter { abs($0.minute - nearest.minute) <= 10 }
-            .sorted { $0.minute != $1.minute ? $0.minute < $1.minute : $0.id < $1.id }
-        guard cluster.count > 1 else { return nearest }
-
-        let span = max(1.0, Double(domain.upperBound - domain.lowerBound))
-        let centerX = Double(nearest.minute - domain.lowerBound) / span * width
-        let clusterHalfWidth = min(max(Double(cluster.count) * 14.0, 22.0), 64.0)
-        let ratio = min(max((locationX - (centerX - clusterHalfWidth)) / (clusterHalfWidth * 2.0), 0), 0.9999)
-        let idx = min(max(Int(ratio * Double(cluster.count)), 0), cluster.count - 1)
-        return cluster[idx]
-    }
 }
 
 struct ExpenseTimelineScrubber: View {
@@ -164,7 +139,7 @@ struct ExpenseTimelineScrubber: View {
                         Color.clear
                             .contentShape(Rectangle())
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
-                            .simultaneousGesture(scrubGesture(width: width))
+                            .highPriorityGesture(scrubGesture(width: width))
                             .accessibilityElement()
                             .accessibilityLabel("消费时间轴")
                             .accessibilityValue(selectedAccessibilityValue)
@@ -289,6 +264,19 @@ struct ExpenseTimelineScrubber: View {
                 .disabled(entryIndex(entry) >= entries.count - 1)
                 .accessibilityLabel("下一笔记录")
             }
+
+            Button {
+                JieziHaptics.tap()
+                selectedEntryID = nil
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundStyle(scene.surface.opacity(0.72))
+                    .frame(width: 22, height: 28)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("关闭选中记录")
         }
         .foregroundStyle(scene.surface)
         .frame(height: 44)
@@ -321,7 +309,9 @@ struct ExpenseTimelineScrubber: View {
     }
 
     private func scrubGesture(width: CGFloat) -> some Gesture {
-        DragGesture(minimumDistance: 0, coordinateSpace: .local)
+        let inset: CGFloat = 8
+        let usable = max(width - inset * 2, 1)
+        return DragGesture(minimumDistance: 0, coordinateSpace: .local)
             .onChanged { value in
                 if gestureAxis == nil {
                     let dx = abs(value.translation.width)
@@ -331,16 +321,38 @@ struct ExpenseTimelineScrubber: View {
                 }
                 guard gestureAxis == .horizontal else { return }
                 isScrubbing = true
-                guard let minute = NativeExpenseTimelineSelection.minute(for: value.location.x, width: width, domain: domain),
+                guard let minute = NativeExpenseTimelineSelection.minute(
+                    for: Double(value.location.x - inset),
+                    width: Double(usable),
+                    domain: domain
+                ),
                       let entry = NativeExpenseTimelineSelection.nearestEntry(in: entries, to: minute) else { return }
                 if selectedEntryID != entry.id {
                     selectedEntryID = entry.id
                     JieziHaptics.tap()
                 }
             }
-            .onEnded { _ in
+            .onEnded { value in
+                let wasTap = gestureAxis == nil && max(abs(value.translation.width), abs(value.translation.height)) < 4
                 gestureAxis = nil
                 isScrubbing = false
+                if wasTap {
+                    guard let minute = NativeExpenseTimelineSelection.minute(
+                        for: Double(value.location.x - inset),
+                        width: Double(usable),
+                        domain: domain
+                    ),
+                          let entry = NativeExpenseTimelineSelection.nearestEntry(in: entries, to: minute) else {
+                        selectedEntryID = nil
+                        return
+                    }
+                    if selectedEntryID == entry.id {
+                        selectedEntryID = nil
+                    } else {
+                        selectedEntryID = entry.id
+                    }
+                    JieziHaptics.tap()
+                }
             }
     }
 

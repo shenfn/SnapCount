@@ -134,6 +134,7 @@ struct JieziInertialRuler: View {
     let midStep: Double
     let scene: JieziSceneTokens
     let unitLabel: String
+    var onScrubbingChanged: ((Bool) -> Void)? = nil
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var continuousValue: Double = 0
@@ -152,13 +153,14 @@ struct JieziInertialRuler: View {
                 drawRuler(in: &context, size: size, currentValue: isDragging || inertiaTask != nil ? continuousValue : value)
             }
             .contentShape(Rectangle())
-            .gesture(
+            .highPriorityGesture(
                 DragGesture(minimumDistance: 2)
                     .onChanged { drag in
                         inertiaTask?.cancel()
                         inertiaTask = nil
                         if !isDragging {
                             isDragging = true
+                            onScrubbingChanged?(true)
                             continuousValue = clamp(value)
                             lastDragX = drag.location.x
                             lastDragTime = Date.timeIntervalSinceReferenceDate
@@ -178,6 +180,7 @@ struct JieziInertialRuler: View {
                     .onEnded { _ in
                         isDragging = false
                         lastDragX = nil
+                        onScrubbingChanged?(false)
                         startInertia()
                     }
             )
@@ -325,6 +328,7 @@ struct JieziSleepNightRibbon: View {
     @Binding var bedOffset: Int
     @Binding var wakeOffset: Int
     let scene: JieziSceneTokens
+    var onScrubbingChanged: ((Bool) -> Void)? = nil
 
     @State private var activeKnob: Knob?
 
@@ -385,7 +389,7 @@ struct JieziSleepNightRibbon: View {
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .contentShape(Rectangle())
-                .gesture(
+                .highPriorityGesture(
                     DragGesture(minimumDistance: 0)
                         .onChanged { drag in
                             let localX = drag.location.x - horizontalInset
@@ -393,6 +397,7 @@ struct JieziSleepNightRibbon: View {
                                 let dBed = abs(drag.location.x - x1)
                                 let dWake = abs(drag.location.x - x2)
                                 activeKnob = dBed <= dWake ? .bed : .wake
+                                onScrubbingChanged?(true)
                             }
                             let snapped = JieziSleepRibbonMath.snappedOffset(for: localX, width: trackWidth)
                             switch activeKnob {
@@ -414,7 +419,10 @@ struct JieziSleepNightRibbon: View {
                                 break
                             }
                         }
-                        .onEnded { _ in activeKnob = nil }
+                        .onEnded { _ in
+                            activeKnob = nil
+                            onScrubbingChanged?(false)
+                        }
                 )
             }
             .frame(height: 62)

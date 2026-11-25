@@ -22,6 +22,8 @@ struct ManualRecordSheet: View {
     @State private var foodGrams: Int = 150
     @State private var foodGramsInput = "150"
     @State private var accumulatedFoodParts: [String] = []
+    @State private var isInstrumentDragging = false
+    @State private var lastInstrumentDragEndTime: TimeInterval = 0
 
     private let stagingRecord: NativeStagingRecord?
     private let preserveInboxNavigation: Bool
@@ -300,6 +302,7 @@ struct ManualRecordSheet: View {
                     bottomDomainRail
                 }
             }
+            .simultaneousGesture(horizontalDomainSwipeGesture)
         }
         .preferredColorScheme(isDarkScene ? .dark : .light)
         .task {
@@ -805,7 +808,8 @@ struct ManualRecordSheet: View {
                                 draft.primaryValueText = "\(max(30, $0 - draft.sleepBedOffsetMinutes))"
                             }
                         ),
-                        scene: scene
+                        scene: scene,
+                        onScrubbingChanged: handleInstrumentScrubbing
                     )
                 } else {
                     JieziInertialRuler(
@@ -815,7 +819,8 @@ struct ManualRecordSheet: View {
                         majorStep: 60,
                         midStep: 30,
                         scene: scene,
-                        unitLabel: "分钟"
+                        unitLabel: "分钟",
+                        onScrubbingChanged: handleInstrumentScrubbing
                     )
                     quickPresetRow([("6h", 360), ("7h", 420), ("7.5h", 450), ("8h", 480), ("9h", 540)])
                 }
@@ -856,7 +861,8 @@ struct ManualRecordSheet: View {
                     majorStep: 200,
                     midStep: 100,
                     scene: scene,
-                    unitLabel: "千卡"
+                    unitLabel: "千卡",
+                    onScrubbingChanged: handleInstrumentScrubbing
                 )
 
                 quickPresetRow([("轻食", 300), ("日常", 540), ("丰盛", 850), ("聚餐", 1200)])
@@ -1085,7 +1091,8 @@ struct ManualRecordSheet: View {
                     majorStep: 30,
                     midStep: 15,
                     scene: scene,
-                    unitLabel: "分钟"
+                    unitLabel: "分钟",
+                    onScrubbingChanged: handleInstrumentScrubbing
                 )
 
                 quickPresetRow([("15m", 15), ("30m", 30), ("45m", 45), ("60m", 60), ("90m", 90)])
@@ -1140,7 +1147,8 @@ struct ManualRecordSheet: View {
                     majorStep: 30,
                     midStep: 15,
                     scene: scene,
-                    unitLabel: "分钟"
+                    unitLabel: "分钟",
+                    onScrubbingChanged: handleInstrumentScrubbing
                 )
 
                 quickPresetRow([("15m", 15), ("30m", 30), ("45m", 45), ("60m", 60), ("90m", 90)])
@@ -1372,6 +1380,32 @@ struct ManualRecordSheet: View {
         case .sport: return "Exercise"
         case .reading: return "Reading"
         }
+    }
+
+    private func handleInstrumentScrubbing(_ active: Bool) {
+        isInstrumentDragging = active
+        if !active {
+            lastInstrumentDragEndTime = Date.timeIntervalSinceReferenceDate
+        }
+    }
+
+    private var horizontalDomainSwipeGesture: some Gesture {
+        DragGesture(minimumDistance: 28, coordinateSpace: .local)
+            .onEnded { value in
+                guard canSwitchDomainFreely,
+                      !isInstrumentDragging,
+                      Date.timeIntervalSinceReferenceDate - lastInstrumentDragEndTime > 0.15 else {
+                    return
+                }
+                let dx = value.translation.width
+                let dy = value.translation.height
+                guard abs(dx) >= 54, abs(dx) > abs(dy) * 1.5 else { return }
+                let all = AppDomain.allCases
+                guard let currentIndex = all.firstIndex(of: activeAppDomain) else { return }
+                let nextIndex = dx < 0 ? currentIndex + 1 : currentIndex - 1
+                guard all.indices.contains(nextIndex) else { return }
+                switchEntryDomain(to: all[nextIndex])
+            }
     }
 
     private func switchEntryDomain(to domain: AppDomain) {
