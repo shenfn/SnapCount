@@ -541,3 +541,24 @@ Deno.test("EXP-004 separate item quantities never become a decimal amount", () =
   assert(parsed.length === 2 && parsed[0] === 6 && parsed[1] === 8, "separate quantities must stay separate");
   assert(!result.ok, "separate quantities must not be authorized by a 6.8 yuan record amount");
 });
+
+Deno.test("validateModelTone allows single-record numbers from recentFactsJson while still blocking fabricated counts", () => {
+  const recentFactsJson = JSON.stringify([
+    { domain_key: "sleep", record_date: "2026-11-24", payload: { sleep_minutes: 390, sleep_hours: 6.5 } },
+  ]);
+  const allowedContrast = validateModelTone(
+    ["昨晚只睡了6.5小时，今晚补了8.2小时。"],
+    JSON.stringify({ record_type: "sleep", payload: { sleep_hours: 8.2 } }),
+    [],
+    recentFactsJson,
+  );
+  assert(allowedContrast.ok, `single-record contrast from recentFactsJson should pass: ${allowedContrast.violations.join(" | ")}`);
+
+  const fabricatedCount = validateModelTone(
+    ["这周已经连续3天早睡了。"],
+    JSON.stringify({ record_type: "sleep", payload: { sleep_hours: 8.2 } }),
+    [],
+    recentFactsJson,
+  );
+  assert(!fabricatedCount.ok, "fabricated count claims must remain blocked even when recentFactsJson is present");
+});

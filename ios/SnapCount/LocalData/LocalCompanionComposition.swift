@@ -54,6 +54,7 @@ final class HostedAICompanionProvider: LocalCompanionProvider {
             currentFact: Self.factPayload(context.currentFact),
             plannerCandidate: Self.plannerPayload(selected, fact: context.currentFact),
             localMemoryContext: LocalCompanionCompositionSupport.jsonObject(context.memoryContextJSON) as? [String: Any],
+            recentFacts: Self.recentFactsPayload(for: context),
             expressionPreferences: Self.preferencesPayload(context.expressionPreferences),
             clientLocalTime: context.clientLocalTime,
             clientCapturedAt: context.clientCapturedAt,
@@ -105,6 +106,17 @@ final class HostedAICompanionProvider: LocalCompanionProvider {
             trace?.record("text.response=content_rejected")
             throw QwenBYOKError.invalidResponse
         }
+    }
+
+    /// Only sends compact same-domain recent episodes when local memory is
+    /// explicitly enabled, preserving the memory privacy gate.
+    static func recentFactsPayload(for context: LocalExpressionContext, limit: Int = 6) -> [[String: Any]]? {
+        guard context.memoryContextJSON != nil, limit > 0 else { return nil }
+        let items = context.recentFacts
+            .filter { $0.domainKey == context.currentFact.domainKey && $0.id != context.currentFact.id }
+            .prefix(limit)
+            .map(Self.factPayload)
+        return items.isEmpty ? nil : items
     }
 
     static func factPayload(_ fact: LocalExpressionFact) -> [String: Any] {

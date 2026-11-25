@@ -48,8 +48,9 @@ final class LocalAIIntegrationRegressionTests: XCTestCase {
         let evidence = try XCTUnwrap(candidate["evidence"] as? [[String: Any]])
         XCTAssertTrue(evidence.contains { $0["reference"] as? String == prior.id.uuidString })
         XCTAssertNil(packet["expense_evidence"])
-        XCTAssertNil(packet["recent_facts"])
-        XCTAssertFalse(String(decoding: body, as: UTF8.self).contains("无关商户"))
+        let sentRecentFacts = try XCTUnwrap(packet["recent_facts"] as? [[String: Any]])
+        XCTAssertEqual(sentRecentFacts.count, 6)
+        XCTAssertTrue(sentRecentFacts.allSatisfy { ($0["id"] as? String) != current.id.uuidString })
     }
 
     func testHostedLocalExpressionRoundTripPersistsTheBoundedPacket() async throws {
@@ -102,8 +103,9 @@ final class LocalAIIntegrationRegressionTests: XCTestCase {
         let currentFact = try XCTUnwrap(packet["current_fact"] as? [String: Any])
         XCTAssertEqual(currentFact["id"] as? String, current.id.uuidString)
         let candidate = try XCTUnwrap(packet["shared_planner_brief"] as? [String: Any])
-        // An equal import timestamp cannot contribute a past observation.
-        XCTAssertNil(packet["recent_facts"])
+        // Same-domain recent episodes are sent in bounded form when memory is enabled.
+        let recentFacts = try XCTUnwrap(packet["recent_facts"] as? [[String: Any]])
+        XCTAssertEqual(recentFacts.compactMap { $0["id"] as? String }, [older.id.uuidString])
         XCTAssertNil(packet["planner_candidate"])
         XCTAssertNotNil(packet["local_memory_context"] as? [String: Any])
         XCTAssertEqual((packet["expression_preferences"] as? [String: Any])?["persona"] as? String, "observer")

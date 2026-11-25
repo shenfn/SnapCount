@@ -392,4 +392,47 @@ final class LocalExpressionContextTests: XCTestCase {
 
         XCTAssertEqual(context.clientLocalTime, "2026-11-15 11:00")
     }
+
+    func testHostedRecentFactsPayloadRespectsMemoryGateAndDomainFilter() {
+        let current = LocalExpressionFact(
+            id: "cur-1", domainKey: "expense", title: "甬上嫂子家", summary: "¥15.24",
+            recordDate: "2026-11-25", recordTime: "12:10", amount: 15.24, category: "food"
+        )
+        let recentSameDomain = (1...7).map { idx in
+            LocalExpressionFact(
+                id: "exp-\(idx)", domainKey: "expense", title: "杀猪粉\(idx)", summary: "¥18",
+                recordDate: "2026-11-24", recordTime: "12:00", amount: 18, category: "food"
+            )
+        }
+        let crossDomain = LocalExpressionFact(
+            id: "sleep-1", domainKey: "sleep", title: "睡眠", summary: "6.5 小时",
+            recordDate: "2026-11-24", recordTime: "07:30", amount: nil, category: nil
+        )
+        let allRecent = [current, crossDomain] + recentSameDomain
+
+        let withMemory = LocalExpressionContext(
+            currentFact: current,
+            recentFacts: allRecent,
+            memoryContextJSON: #"{"facts":[]}"#,
+            plannerCandidates: [],
+            providerMode: .hosted
+        )
+        let payload = HostedAICompanionProvider.recentFactsPayload(for: withMemory)
+        XCTAssertEqual(payload?.count, 6)
+        let firstID = payload?.first?["id"] as? String
+        XCTAssertEqual(firstID, "exp-1")
+        let allSameDomainAndNotCurrent = payload?.allSatisfy { item in
+            (item["domain_key"] as? String) == "expense" && (item["id"] as? String) != "cur-1"
+        }
+        XCTAssertEqual(allSameDomainAndNotCurrent, true)
+
+        let withoutMemory = LocalExpressionContext(
+            currentFact: current,
+            recentFacts: allRecent,
+            memoryContextJSON: nil,
+            plannerCandidates: [],
+            providerMode: .hosted
+        )
+        XCTAssertNil(HostedAICompanionProvider.recentFactsPayload(for: withoutMemory))
+    }
 }

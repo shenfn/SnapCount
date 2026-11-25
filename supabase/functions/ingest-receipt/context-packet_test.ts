@@ -624,3 +624,24 @@ Deno.test("timing deltas and unit roles remain directionally strict", () => {
     selectedCandidates: [amount],
   }) === amount.semantic_key, "currency symbols and grouped digits must remain grounded");
 });
+
+Deno.test("buildContextPacket includes bounded same-domain recent_facts and derives sleep_hours", () => {
+  const sleepPacket = buildContextPacket({
+    domainKey: "sleep",
+    recordFacts: { domain_key: "sleep", payload: { sleep_minutes: 490 } },
+    signals: [],
+    recentFacts: [
+      { domain_key: "expense", title: "杀猪粉", amount: 18 },
+      { domain_key: "sleep", record_date: "2026-11-24", title: "睡眠", payload_json: { sleep_minutes: 390 } },
+    ],
+  });
+  assert(sleepPacket.recent_facts?.length === 1, "only same-domain recent_facts should be included");
+  assert(sleepPacket.recent_facts?.[0].payload?.sleep_hours === 6.5, "sleep_minutes should derive 1-decimal sleep_hours");
+
+  const emptyPacket = buildContextPacket({
+    domainKey: "expense",
+    recordFacts: { domain_key: "expense", amount: 15.24 },
+    signals: [],
+  });
+  assert(emptyPacket.recent_facts === undefined, "recent_facts should be omitted when absent");
+});

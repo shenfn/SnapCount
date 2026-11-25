@@ -3941,6 +3941,7 @@ async function generateVoiceFeedback(opts: {
   recentCompanionLines?: string[];
   memory?: Record<string, unknown> | null;
   localMemoryContext?: unknown;
+  recentFacts?: Record<string, unknown>[];
   textProvider: ProviderConfig | null;
   plannerBrief?: PlannerVoiceBrief | null;
   plannerFallbackReason?: string | null;
@@ -3973,6 +3974,7 @@ async function generateVoiceFeedback(opts: {
       : {}),
     memory: opts.memory ?? null,
     localMemoryContext: opts.localMemoryContext ?? null,
+    recentFacts: opts.recentFacts ?? null,
     expressionPreferences: {
       persona: opts.persona ?? null,
       memory_strength: opts.memoryStrength ?? null,
@@ -4019,6 +4021,9 @@ async function generateVoiceFeedback(opts: {
     const normalized = normalizeFeedbackPayload(parsed, opts.domainKey, opts.timingSignal);
     const candidateCount = normalized.companion_candidates.length;
     // Voice 层可以忠实转述已核实信号；数字和统计口径仍由信号白名单闭环约束。
+    const recentFactsJson = contextPacket.recent_facts?.length
+      ? JSON.stringify(contextPacket.recent_facts)
+      : undefined;
     const check = validateModelTone(
       [
         ...normalized.companion_candidates,
@@ -4029,6 +4034,7 @@ async function generateVoiceFeedback(opts: {
       ],
       JSON.stringify(recordFacts),
       signals,
+      recentFactsJson,
     );
     const bad = new Set(check.badIndexes);
     const candidateEntries = normalized.companion_candidates
@@ -5645,6 +5651,7 @@ Deno.serve(async (req) => {
           recentCompanionLines,
           memory: null,
           localMemoryContext: normalizedAction.localMemoryContext,
+          recentFacts: normalizedAction.recentFacts,
           textProvider,
           plannerBrief,
           plannerFallbackReason,

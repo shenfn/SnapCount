@@ -146,6 +146,7 @@ final class SnapCountUploadService {
         currentFact: [String: Any],
         plannerCandidate: [String: Any]?,
         localMemoryContext: [String: Any]?,
+        recentFacts: [[String: Any]]? = nil,
         expressionPreferences: [String: Any],
         clientLocalTime: String?,
         clientCapturedAt: String?,
@@ -179,6 +180,9 @@ final class SnapCountUploadService {
             body["planner_candidate"] = plannerCandidate
         }
         if let localMemoryContext { body["local_memory_context"] = localMemoryContext }
+        if let recentFacts, !recentFacts.isEmpty {
+            body["recent_facts"] = Array(recentFacts.prefix(6))
+        }
         if let clientLocalTime { body["client_local_time"] = clientLocalTime }
         if let clientCapturedAt { body["client_captured_at"] = clientCapturedAt }
         if let weekday { body["weekday"] = weekday }

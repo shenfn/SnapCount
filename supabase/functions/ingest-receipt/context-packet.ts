@@ -54,6 +54,20 @@ export interface LocalMemoryContextEntry {
   confidence: number;
 }
 
+export interface RecentFactEpisode {
+  domain_key: string;
+  record_date?: string;
+  record_time?: string;
+  occurred_at?: string;
+  title?: string;
+  merchant_name?: string;
+  source_name?: string;
+  category?: string;
+  amount?: number;
+  summary?: string;
+  payload?: Record<string, unknown>;
+}
+
 export interface ContextPacket {
   packet_version: "context-packet-v2";
   record_facts: Record<string, unknown>;
@@ -67,6 +81,7 @@ export interface ContextPacket {
     entity_key: string | null;
   }>;
   local_memory_context: LocalMemoryContextEntry[];
+  recent_facts?: RecentFactEpisode[];
   expression_preferences: Record<string, unknown>;
   recent_expression_context: string[];
   trace: {
@@ -298,6 +313,82 @@ export function selectSemanticContext(
   return normalizeSemanticMemories(memory).filter((item) => isRelevant(item, domainKey, recordFacts)).slice(0, limit);
 }
 
+const MAX_RECENT_EPISODES = 6;
+const RECENT_EPISODE_PAYLOAD_STRING_KEYS = [
+  "meal_type", "sport_type", "book_name", "category", "income_category",
+  "merchant_name", "source_name", "sleep_start_at", "wake_at", "quality_level",
+];
+const RECENT_EPISODE_PAYLOAD_NUMBER_KEYS = [
+  "sleep_hours", "sleep_minutes", "quality_score", "duration_minutes", "duration_min",
+  "distance_km", "total_calorie_kcal", "reading_minutes", "daily_goal_minutes", "progress_percent",
+];
+
+export function normalizeRecentFactsForPacket(
+  value: unknown,
+  domainKey: string,
+): RecentFactEpisode[] {
+  if (!Array.isArray(value)) return [];
+  const allowedDomains = new Set(["expense", "income", "food", "sleep", "sport", "reading", "wallet"]);
+  if (!allowedDomains.has(domainKey)) return [];
+  const episodes: RecentFactEpisode[] = [];
+  for (const raw of value) {
+    if (!isRecord(raw)) continue;
+    const itemDomain = stringValue(raw.domain_key) ?? domainKey;
+    if (itemDomain !== domainKey) continue;
+    const episode: RecentFactEpisode = { domain_key: itemDomain };
+    const recordDate = stringValue(raw.record_date);
+    if (recordDate) episode.record_date = recordDate.slice(0, 32);
+    const recordTime = stringValue(raw.record_time);
+    if (recordTime) episode.record_time = recordTime.slice(0, 32);
+    const occurredAt = stringValue(raw.occurred_at);
+    if (occurredAt) episode.occurred_at = occurredAt.slice(0, 64);
+    const title = stringValue(raw.title);
+    if (title) episode.title = title.slice(0, 80);
+    const merchant = stringValue(raw.merchant_name);
+    if (merchant) episode.merchant_name = merchant.slice(0, 80);
+    const source = stringValue(raw.source_name);
+    if (source) episode.source_name = source.slice(0, 80);
+    const category = stringValue(raw.category);
+    if (category) episode.category = category.slice(0, 60);
+    const amount = numberValue(raw.amount);
+    if (amount !== null) episode.amount = amount;
+    const summary = stringValue(raw.summary);
+    if (summary) episode.summary = summary.slice(0, 140);
+    const rawPayload = isRecord(raw.payload_json) ? raw.payload_json : (isRecord(raw.payload) ? raw.payload : null);
+    if (rawPayload) {
+      const payload: Record<string, unknown> = {};
+      for (const key of RECENT_EPISODE_PAYLOAD_STRING_KEYS) {
+        const s = stringValue(rawPayload[key]);
+        if (s) payload[key] = s.slice(0, 80);
+      }
+      for (const key of RECENT_EPISODE_PAYLOAD_NUMBER_KEYS) {
+        const n = numberValue(rawPayload[key]);
+        if (n !== null) payload[key] = n;
+      }
+      // Provide 1-decimal sleep_hours alongside sleep_minutes so natural
+      // hour expressions (e.g. "6.5小时") match the numeric allowlist.
+      if (domainKey === "sleep" && payload.sleep_hours === undefined && typeof payload.sleep_minutes === "number") {
+        payload.sleep_hours = Math.round((payload.sleep_minutes / 60) * 10) / 10;
+      }
+      const dishes = Array.isArray(rawPayload.dishes) ? rawPayload.dishes : (Array.isArray(rawPayload.food_items) ? rawPayload.food_items : null);
+      if (dishes && dishes.length > 0) {
+        const names = dishes
+          .slice(0, 5)
+          .map((item) => typeof item === "string" ? stringValue(item) : (isRecord(item) ? stringValue(item.name ?? item.dish_name ?? item.food_name) : null))
+          .filter((name): name is string => !!name)
+          .map((name) => name.slice(0, 40));
+        if (names.length > 0) payload.dishes = names;
+      }
+      if (Object.keys(payload).length > 0) episode.payload = payload;
+    }
+    if (episode.title || episode.merchant_name || episode.summary || episode.amount !== undefined || episode.payload) {
+      episodes.push(episode);
+    }
+    if (episodes.length >= MAX_RECENT_EPISODES) break;
+  }
+  return episodes;
+}
+
 export function buildContextPacket(input: {
   domainKey: string;
   recordFacts: Record<string, unknown>;
@@ -305,6 +396,7 @@ export function buildContextPacket(input: {
   selectedCandidates?: ContextPacketCandidate[];
   memory?: Record<string, unknown> | null;
   localMemoryContext?: unknown;
+  recentFacts?: Record<string, unknown>[] | null;
   expressionPreferences?: Record<string, unknown>;
   recentExpressionContext?: string[];
   fallbackReason?: string | null;
@@ -337,6 +429,7 @@ export function buildContextPacket(input: {
       || (Array.isArray(candidate.evidence) && candidate.evidence.length > 0
         && candidate.claim_fingerprint)
   );
+  const recentEpisodes = normalizeRecentFactsForPacket(input.recentFacts, input.domainKey);
   const packetCore = {
     packet_version: "context-packet-v2" as const,
     record_facts: input.recordFacts,
@@ -350,6 +443,7 @@ export function buildContextPacket(input: {
       entity_key: item.entityKey,
     })),
     local_memory_context: normalizeLocalMemoryContext(input.localMemoryContext, input.domainKey),
+    ...(recentEpisodes.length > 0 ? { recent_facts: recentEpisodes } : {}),
     expression_preferences: input.expressionPreferences ?? {},
     recent_expression_context: (input.recentExpressionContext ?? []).slice(0, 5),
   };

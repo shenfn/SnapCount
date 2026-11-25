@@ -25,7 +25,8 @@ const PAYLOAD_STRING_FIELDS = new Set([
 const PAYLOAD_NUMBER_FIELDS = new Set([
   "amount", "amount_minor", "balance_minor", "snapshot_balance_minor", "sleep_hours", "sleep_minutes",
   "quality_score", "deep_sleep_minutes", "light_sleep_minutes", "rem_minutes", "awake_minutes",
-  "duration_minutes", "duration_min", "distance_km", "total_calorie_kcal", "reading_minutes", "progress_percent",
+  "duration_minutes", "duration_min", "distance_km", "total_calorie_kcal", "reading_minutes",
+  "daily_goal_minutes", "progress_percent",
 ]);
 const CURRENT_FACT_STRING_FIELDS = new Set([
   "id", "domain_key", "title", "summary", "merchant_name", "platform", "category", "payment_method",

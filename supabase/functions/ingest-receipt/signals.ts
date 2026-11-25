@@ -1134,6 +1134,7 @@ export function validateVoiceNumbers(
   generatedTexts: Array<string | null | undefined>,
   signals: DomainSignal[],
   recordFactsJson: string,
+  recentFactsJson?: string,
 ): NumberValidationResult {
   const allowed = new Set<string>();
   const countAllowed = new Set<string>();
@@ -1146,6 +1147,12 @@ export function validateVoiceNumbers(
     for (const n of extractDigitNumbers(s.fact)) addNum(n);
   }
   for (const n of extractDigitNumbers(recordFactsJson)) addNum(n);
+  // Single-record numbers from verified recent_facts (e.g. last night's sleep
+  // hours or yesterday's spend) may be referenced for contrast, while count
+  // expressions ("第X次/连续X天") still strictly require countAllowed signals.
+  if (recentFactsJson) {
+    for (const n of extractDigitNumbers(recentFactsJson)) addNum(n);
+  }
 
   const violations: string[] = [];
   const badIndexes: number[] = [];
@@ -1186,9 +1193,10 @@ export function validateModelTone(
   generatedTexts: Array<string | null | undefined>,
   recordFactsJson: string,
   signals: DomainSignal[] = [],
+  recentFactsJson?: string,
 ): NumberValidationResult {
   // 旧链路不传 signals 时仍保持严格模式；信号 Voice 层传入已核实信号后，允许忠实转述其数字和口径。
-  const numericCheck = validateVoiceNumbers(generatedTexts, signals, recordFactsJson);
+  const numericCheck = validateVoiceNumbers(generatedTexts, signals, recordFactsJson, recentFactsJson);
   const violations = [...numericCheck.violations];
   const badIndexes = new Set(numericCheck.badIndexes);
 
