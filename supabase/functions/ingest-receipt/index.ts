@@ -4013,6 +4013,7 @@ async function generateVoiceFeedback(opts: {
       signals: signals.map((s) => ({ kind: s.kind, fact: s.fact })),
       contextPacket,
       persona: opts.persona ?? null,
+      memoryStrength: opts.memoryStrength ?? null,
       expressionStyle: opts.expressionStyle ?? null,
       customNote: opts.customNote ?? null,
       recentCompanionLines: opts.recentCompanionLines ?? [],

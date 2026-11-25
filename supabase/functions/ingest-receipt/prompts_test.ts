@@ -177,3 +177,19 @@ Deno.test("feedback prompt keeps time context when a frozen packet exists", () =
   assert(prompt.includes("发生时间是描述记录何时发生的唯一优先依据"), "feedback prompt must share event-time priority rules");
   assert(prompt.includes("发生时间缺失时，上传时间作为本条表达的参考时间"), "feedback prompt must share upload-time fallback");
 });
+
+Deno.test("voice prompt uses full persona, honors memoryStrength, and bans internal jargon and cliches", () => {
+  const prompt = buildVoicePrompt({
+    domainKey: "sleep",
+    recordFacts: { domain_key: "sleep", payload: { sleep_hours: 8.67 } },
+    signals: [],
+    persona: "sharp",
+    memoryStrength: "bold",
+    expressionStyle: "kaomoji",
+  });
+
+  assert(prompt.includes("你是用户毒舌但精准的损友"), "voice prompt must use full persona definition");
+  assert(prompt.includes("记忆引用强度：强"), "voice prompt must reflect memoryStrength");
+  assert(prompt.includes("严禁出现“已选候选”“候选”"), "voice prompt must forbid leaking internal planner jargon");
+  assert(prompt.includes("严禁客服腔、鸡汤总结和空泛叮嘱"), "voice prompt must explicitly ban generic cliche filler");
+});
