@@ -86,10 +86,6 @@ struct ExpenseTimelineScrubber: View {
         selectedEntryID.flatMap { id in entries.first { $0.id == id } }
     }
 
-    private var isZoomed: Bool {
-        domain.lowerBound > 0 || domain.upperBound < NativeExpenseTimelineSelection.minutesPerDay
-    }
-
     var body: some View {
         VStack(spacing: 6) {
             GeometryReader { proxy in
@@ -163,17 +159,6 @@ struct ExpenseTimelineScrubber: View {
             }
             .font(JieziFont.caption2.monospacedDigit())
             .foregroundStyle(scene.muted)
-
-            if isZoomed {
-                HStack(spacing: 4) {
-                    Image(systemName: "scope")
-                        .font(.system(size: 10))
-                    Text("已聚焦 \(formatTickLabel(domain.lowerBound))–\(formatTickLabel(domain.upperBound)) 区间，便于区分相邻记录")
-                }
-                .font(JieziFont.caption2)
-                .foregroundStyle(scene.muted.opacity(0.85))
-                .frame(maxWidth: .infinity, alignment: .leading)
-            }
         }
         .task(id: selectedEntryID) {
             previewImageURL = nil

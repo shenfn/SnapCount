@@ -244,16 +244,14 @@ struct NativeDomainPageContent: View {
         let missingTime = expenses.filter { !locatedReferences.contains($0.reference) }
         let maximum = isDrillDown ? max(model.timeline.compactMap(\.cumulativeAmount).max() ?? 0,
                                         model.timeline.compactMap(\.amount).max() ?? 0, 1) : 1
-        return VStack(alignment: .leading, spacing: 12) {
+        return VStack(alignment: .leading, spacing: 10) {
             Text(isDrillDown ? "金额 · 按时间" : "时间分布").font(JieziType.cardTitle)
-            Text("\(expenses.count)笔支出 · \(model.timeline.count)笔有时间 · \(missingTime.count)笔时间未知")
-                .font(JieziFont.caption2).foregroundStyle(scene.muted).fixedSize(horizontal: false, vertical: true)
             if isDrillDown {
-                Text("柱为单笔支出，虚线为图中支出累计；时间来源见选中记录。")
+                Text("柱为单笔支出，虚线为图中支出累计。")
                     .font(JieziFont.caption2).foregroundStyle(scene.muted)
             }
             if minutes.isEmpty {
-                Text("暂无可定位的时间；时间未知的记录可在下方展开。")
+                Text("暂无可定位的时间。")
                     .font(JieziFont.caption).foregroundStyle(scene.muted)
             } else {
                 if isDrillDown {
@@ -320,10 +318,7 @@ struct NativeDomainPageContent: View {
                 }
                 ForEach(selectedEntries) { entry in
                     recordRow(entry.record, timeLabel: clockLabel(entry.minute))
-                    Text("时间来源：\(entry.timeSourceLabel)").font(JieziFont.caption2).foregroundStyle(scene.muted)
                 }
-                Text("发生时间优先；缺失时使用标明来源的记录或上传时间，补录时间不代表消费发生时间。")
-                    .font(JieziFont.caption2).foregroundStyle(scene.muted)
             }
             if !missingTime.isEmpty {
                 DisclosureGroup("时间未知 · \(missingTime.count)笔") {
@@ -891,6 +886,7 @@ struct NativeDomainPageContent: View {
                             .foregroundStyle(scene.foreground)
                             .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 1)
                             .minimumScaleFactor(0.68)
+                            .padding(.top, 2)
                     HStack(alignment: .firstTextBaseline) {
                         Text(model.secondaryLabel)
                             .font(JieziFont.caption)

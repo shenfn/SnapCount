@@ -504,9 +504,22 @@ struct MainShellView: View {
         }
     }
 
-    /// 覆盖层没有 Tab 栏兜底，左上角必须始终有关闭门禁（§15 导航门禁不可删）。
+    /// 覆盖层没有 Tab 栏兜底，左上角必须始终有关闭门禁（§15 导航门禁不可删）；
+    /// 同时允许在根页从屏幕左边缘向右滑动退出，单手更顺手且不干扰页内横向手势。
     private func overlayRoot(@ViewBuilder content: () -> some View) -> some View {
         content()
+            .simultaneousGesture(
+                DragGesture(minimumDistance: 24, coordinateSpace: .global)
+                    .onEnded { value in
+                        guard value.startLocation.x <= 32,
+                              value.translation.width > 72,
+                              value.translation.width > abs(value.translation.height) * 1.5 else {
+                            return
+                        }
+                        JieziHaptics.tap()
+                        appState.presentedOverlay = .none
+                    }
+            )
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     Button {

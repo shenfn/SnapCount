@@ -6,6 +6,7 @@ struct RecordsView: View {
     @State private var selectedKind: NativeDayRecordKind = .all
     @State private var selectedMonthKey: String
     @State private var showManualRecordSheet = false
+    @State private var collapsedDateKeys: Set<String> = []
 
     private var effectiveKind: NativeDayRecordKind { selectedKind }
     private var query: NativeRecordQuery { NativeRecordQuery(monthKey: selectedMonthKey, kind: selectedKind) }
@@ -82,26 +83,22 @@ struct RecordsView: View {
                         )
                     } else {
                         ForEach(groups) { group in
+                            let isCollapsed = collapsedDateKeys.contains(group.dateKey)
                             VStack(alignment: .leading, spacing: JieziSpacing.sm) {
-                                dayHeader(group)
+                                dayHeader(group, isCollapsed: isCollapsed)
 
-                                VStack(spacing: 0) {
-                                    ForEach(Array(group.records.enumerated()), id: \.element.id) { index, item in
-                                        NavigationLink(value: NativeRecordRoute(reference: item.reference)) {
-                                            recordRow(item, showDivider: index < group.records.count - 1)
+                                if !isCollapsed {
+                                    VStack(spacing: 0) {
+                                        ForEach(Array(group.records.enumerated()), id: \.element.id) { index, item in
+                                            timelineRecordRow(item, isLast: index == group.records.count - 1)
                                         }
-                                        .buttonStyle(.plain)
                                     }
+                                    .padding(.top, 2)
                                 }
-                                .background(
-                                    palette.paper.opacity(0.82),
-                                    in: RoundedRectangle(cornerRadius: JieziRadius.Semantic.card, style: .continuous)
-                                )
-                                .overlay {
-                                    RoundedRectangle(cornerRadius: JieziRadius.Semantic.card, style: .continuous)
-                                        .stroke(palette.brand.opacity(0.10), lineWidth: 1)
-                                }
-                                .jieziShadow(JieziShadows.sm(palette))
+                            }
+                            if group.id != groups.last?.id {
+                                Divider()
+                                    .overlay(palette.brand.opacity(0.08))
                             }
                         }
                     }
@@ -169,19 +166,58 @@ struct RecordsView: View {
         .font(.subheadline.weight(.semibold))
     }
 
-    private func dayHeader(_ group: NativeDayRecordGroup) -> some View {
-        ViewThatFits(in: .horizontal) {
-            HStack(alignment: .firstTextBaseline, spacing: JieziSpacing.sm) {
-                dayIdentity(group.dateKey)
-                Spacer(minLength: JieziSpacing.sm)
-                daySummary(group)
+    private func dayHeader(_ group: NativeDayRecordGroup, isCollapsed: Bool) -> some View {
+        Button {
+            JieziHaptics.tap()
+            withAnimation(.spring(response: 0.28, dampingFraction: 0.86)) {
+                if isCollapsed {
+                    collapsedDateKeys.remove(group.dateKey)
+                } else {
+                    collapsedDateKeys.insert(group.dateKey)
+                }
             }
-            VStack(alignment: .leading, spacing: JieziSpacing.xs) {
-                dayIdentity(group.dateKey)
-                daySummary(group)
+        } label: {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(alignment: .firstTextBaseline, spacing: JieziSpacing.sm) {
+                    dayIdentity(group.dateKey)
+                    Spacer(minLength: JieziSpacing.sm)
+                    HStack(spacing: 4) {
+                        Text("\(group.records.count) 条")
+                            .font(JieziFont.caption.monospacedDigit())
+                        Image(systemName: "chevron.down")
+                            .font(.system(size: 10, weight: .semibold))
+                            .rotationEffect(.degrees(isCollapsed ? -90 : 0))
+                    }
+                    .foregroundStyle(palette.muted)
+                }
+
+                let pills = daySummaryPills(group)
+                if !pills.isEmpty {
+                    ScrollView(.horizontal) {
+                        HStack(spacing: 6) {
+                            ForEach(pills) { pill in
+                                HStack(spacing: 5) {
+                                    Circle()
+                                        .fill(pill.tint)
+                                        .frame(width: 5.5, height: 5.5)
+                                    Text(pill.text)
+                                        .font(JieziFont.caption2.weight(.medium).monospacedDigit())
+                                        .foregroundStyle(pill.tint)
+                                }
+                                .padding(.horizontal, 9)
+                                .padding(.vertical, 4)
+                                .background(pill.tint.opacity(0.11), in: Capsule())
+                            }
+                        }
+                    }
+                    .scrollIndicators(.hidden)
+                }
             }
+            .padding(.horizontal, JieziSpacing.xs)
+            .contentShape(Rectangle())
         }
-        .padding(.horizontal, JieziSpacing.xs)
+        .buttonStyle(.plain)
+        .accessibilityHint(isCollapsed ? "点击展开这一天的记录" : "点击折叠这一天的记录")
     }
 
     private func dayIdentity(_ dateKey: String) -> some View {
@@ -195,26 +231,149 @@ struct RecordsView: View {
         }
     }
 
-    private func daySummary(_ group: NativeDayRecordGroup) -> some View {
-        Text(daySummaryText(group))
-            .font(JieziFont.caption)
-            .foregroundStyle(palette.muted)
-            .lineLimit(1)
-            .minimumScaleFactor(0.75)
+    private struct DaySummaryPill: Identifiable {
+        let id: String
+        let text: String
+        let tint: Color
     }
 
-    private func recordRow(_ item: NativeDayRecord, showDivider: Bool) -> some View {
-        JieziRecordRow(
-            palette: palette,
-            systemImage: item.systemImage,
-            iconTint: domainColor(for: item.domainKey ?? item.kind.rawValue),
-            title: item.title,
-            subtitle: item.subtitle,
-            value: item.value,
-            timeLabel: item.timeLabel ?? "上传时间未知",
-            valueTint: valueColor(for: item.kind),
-            showDivider: showDivider
+    private func daySummaryPills(_ group: NativeDayRecordGroup) -> [DaySummaryPill] {
+        guard effectiveKind == .all else { return [] }
+        let summary = NativeHomeInsightAnalytics.dailySummary(
+            on: group.dateKey,
+            from: appState.reportSnapshot(monthKey: selectedMonthKey)
         )
+        var pills: [DaySummaryPill] = []
+        if summary.expense > 0 {
+            pills.append(DaySummaryPill(id: "expense", text: "支出 \(money(summary.expense))", tint: palette.coral))
+        }
+        if summary.income > 0 {
+            pills.append(DaySummaryPill(id: "income", text: "收入 \(money(summary.income))", tint: palette.brand))
+        }
+        let nonFinancialDomains: [(NativeDayRecordKind, String, String)] = [
+            (.sleep, "睡眠", "条"),
+            (.food, "饮食", "餐"),
+            (.sport, "运动", "次"),
+            (.reading, "阅读", "条"),
+        ]
+        for (kind, label, unit) in nonFinancialDomains {
+            let count = group.records.filter { $0.kind == kind }.count
+            if count > 0 {
+                pills.append(DaySummaryPill(
+                    id: kind.rawValue,
+                    text: "\(label) \(count)\(unit)",
+                    tint: domainColor(for: kind.rawValue)
+                ))
+            }
+        }
+        return pills
+    }
+
+    private func timelineRecordRow(_ item: NativeDayRecord, isLast: Bool) -> some View {
+        let domainKey = item.domainKey ?? item.kind.rawValue
+        let tint = domainColor(for: domainKey)
+        let parsedTime = parsedTimelineClock(item.timeLabel)
+        let isRichDomain = item.kind == .sleep || item.kind == .food || item.kind == .sport || item.kind == .reading
+
+        return HStack(alignment: .top, spacing: 8) {
+            Text(parsedTime.text)
+                .font(JieziFont.caption2.monospacedDigit().weight(parsedTime.isInferred ? .regular : .semibold))
+                .foregroundStyle(parsedTime.isInferred ? palette.muted.opacity(0.75) : palette.brand)
+                .frame(width: 38, alignment: .trailing)
+                .padding(.top, 12)
+
+            VStack(spacing: 0) {
+                Circle()
+                    .fill(tint)
+                    .frame(width: 7, height: 7)
+                    .padding(.top, 15)
+                if !isLast {
+                    Rectangle()
+                        .fill(palette.brand.opacity(0.14))
+                        .frame(width: 1.5)
+                        .frame(maxHeight: .infinity)
+                        .padding(.top, 4)
+                }
+            }
+            .frame(width: 10)
+
+            NavigationLink(value: NativeRecordRoute(reference: item.reference)) {
+                HStack(alignment: .center, spacing: 10) {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(item.title)
+                            .font(.subheadline.weight(isRichDomain ? .semibold : .medium))
+                            .foregroundStyle(palette.ink)
+                            .lineLimit(1)
+                        let subtitle = localizedSubtitle(item.subtitle)
+                        if !subtitle.isEmpty {
+                            Text(subtitle)
+                                .font(JieziFont.caption)
+                                .foregroundStyle(palette.muted)
+                                .lineLimit(1)
+                        }
+                    }
+
+                    Spacer(minLength: 8)
+
+                    if !item.value.isEmpty {
+                        Text(item.value)
+                            .font(.subheadline.weight(.semibold).monospacedDigit())
+                            .foregroundStyle(isRichDomain ? tint : valueColor(for: item.kind))
+                            .lineLimit(1)
+                    }
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 11)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(
+                    isRichDomain ? tint.opacity(0.10) : palette.paper.opacity(0.88),
+                    in: RoundedRectangle(cornerRadius: 16, style: .continuous)
+                )
+                .overlay {
+                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        .stroke(isRichDomain ? tint.opacity(0.18) : palette.brand.opacity(0.09), lineWidth: 1)
+                }
+                .padding(.bottom, isLast ? 2 : 8)
+            }
+            .buttonStyle(.plain)
+        }
+    }
+
+    private func parsedTimelineClock(_ raw: String?) -> (text: String, isInferred: Bool) {
+        guard let raw = raw?.trimmingCharacters(in: .whitespacesAndNewlines), !raw.isEmpty else {
+            return ("--:--", true)
+        }
+        if raw.hasPrefix("上传 ") {
+            let trimmed = String(raw.dropFirst(3)).trimmingCharacters(in: .whitespacesAndNewlines)
+            return (trimmed.isEmpty ? "--:--" : trimmed, true)
+        }
+        return (raw, false)
+    }
+
+    private func localizedSubtitle(_ raw: String) -> String {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return "" }
+        let map: [String: String] = [
+            "other": "其他",
+            "food": "餐饮",
+            "transport": "交通",
+            "shopping": "购物",
+            "entertainment": "娱乐",
+            "housing": "居住",
+            "medical": "医疗",
+            "education": "教育",
+            "life": "生活",
+            "salary": "工资",
+            "bonus": "奖金",
+            "investment": "理财",
+            "transfer": "转账",
+            "refund": "退款",
+            "reimbursement": "报销",
+        ]
+        if let mapped = map[trimmed.lowercased()] {
+            return mapped
+        }
+        return trimmed
     }
 
     private func dayTitle(_ dateKey: String) -> String {
@@ -225,23 +384,6 @@ struct RecordsView: View {
     private func weekdayTitle(_ dateKey: String) -> String {
         guard let date = Self.dateFormatter.date(from: dateKey) else { return "" }
         return Self.weekdayFormatter.string(from: date)
-    }
-
-    private func daySummaryText(_ group: NativeDayRecordGroup) -> String {
-        guard effectiveKind == .all else {
-            return "\(group.records.count) 条"
-        }
-        // Use the same merged local/remote projection as the rows. The
-        // dashboard summary may still reflect only the last cloud refresh.
-        let summary = NativeHomeInsightAnalytics.dailySummary(
-            on: group.dateKey,
-            from: appState.reportSnapshot(monthKey: selectedMonthKey)
-        )
-        var parts: [String] = []
-        if summary.expense > 0 { parts.append("支出 \(money(summary.expense))") }
-        if summary.income > 0 { parts.append("收入 \(money(summary.income))") }
-        if parts.isEmpty { parts.append("\(group.records.count) 条") }
-        return parts.joined(separator: " · ")
     }
 
     private func domainColor(for domain: String) -> Color {
