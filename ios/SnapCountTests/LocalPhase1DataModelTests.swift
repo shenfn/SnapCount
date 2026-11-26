@@ -1149,11 +1149,11 @@ final class LocalPhase1DataModelTests: XCTestCase {
 
         XCTAssertEqual(month.facts.map(\.reference), [
             "data/\(activeSportID.uuidString)",
-            "expense/\(expenseID.uuidString)",
-            "income/\(incomeID.uuidString)"
+            "income/\(incomeID.uuidString)",
+            "expense/\(expenseID.uuidString)"
         ])
-        XCTAssertEqual(month.facts.map(\.domainKey), ["sport", "expense", "income"])
-        XCTAssertEqual(month.facts.map(\.kind), [.record, .expense, .income])
+        XCTAssertEqual(month.facts.map(\.domainKey), ["sport", "income", "expense"])
+        XCTAssertEqual(month.facts.map(\.kind), [.record, .income, .expense])
         XCTAssertEqual(month.facts.last?.payloadJSON.contains("amount_minor"), true)
         XCTAssertFalse(month.facts.contains { $0.id == deletedReadingID })
         let stagingRecords = try await useCase.stagingRecords()
