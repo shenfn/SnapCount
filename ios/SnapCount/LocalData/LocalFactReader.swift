@@ -405,8 +405,8 @@ final class LocalFactReader {
         if lhs.businessDate != rhs.businessDate {
             return lhs.businessDate > rhs.businessDate
         }
-        let lhsTime = lhs.recordTime ?? ""
-        let rhsTime = rhs.recordTime ?? ""
+        let lhsTime = NativeLocalDate.effectiveClockSortKey(recordTime: lhs.recordTime, fallbackDate: lhs.createdAt)
+        let rhsTime = NativeLocalDate.effectiveClockSortKey(recordTime: rhs.recordTime, fallbackDate: rhs.createdAt)
         if lhsTime != rhsTime {
             return lhsTime > rhsTime
         }

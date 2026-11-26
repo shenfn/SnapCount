@@ -154,8 +154,10 @@ enum LocalFactReadModel {
     }
 
     private static func isNewer(_ lhs: LocalFact, _ rhs: LocalFact) -> Bool {
-        if lhs.recordTime != rhs.recordTime {
-            return (lhs.recordTime ?? "") > (rhs.recordTime ?? "")
+        let lhsTime = NativeLocalDate.effectiveClockSortKey(recordTime: lhs.recordTime, fallbackDate: lhs.createdAt)
+        let rhsTime = NativeLocalDate.effectiveClockSortKey(recordTime: rhs.recordTime, fallbackDate: rhs.createdAt)
+        if lhsTime != rhsTime {
+            return lhsTime > rhsTime
         }
         if lhs.createdAt != rhs.createdAt {
             return lhs.createdAt > rhs.createdAt

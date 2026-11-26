@@ -205,14 +205,21 @@ enum NativeLocalDate {
         return "上传 \(timeKey(uploadedAt))"
     }
 
-    /// 时间列的排序键：真实发生时刻排前，上传时间兜底排后，无时间排最后。
-    /// 兜底行拿的是上传时刻，不能当成「这笔钱几点花的」插进时间轴中间。
+    /// 时间列的排序键：统一按有效时刻（发生时刻优先，缺失则用上传时刻兜底）倒序排，无时间排最后。
     static func listTimeSortKey(_ label: String?) -> String {
         guard let label else { return "" }
         if label.hasPrefix("上传 ") {
-            return "0" + (clockKey(String(label.dropFirst(3))) ?? "")
+            return clockKey(String(label.dropFirst(3))) ?? ""
         }
-        return "1" + (clockKey(label) ?? "")
+        return clockKey(label) ?? ""
+    }
+
+    /// 本机事实的当天有效排序时刻（HH:mm）：有发生时刻用发生时刻，否则用记录创建时间兜底。
+    static func effectiveClockSortKey(recordTime: String?, fallbackDate: Date) -> String {
+        if let clock = clockKey(recordTime) {
+            return clock
+        }
+        return timeKey(fallbackDate)
     }
 
     static func financeOccurredAt(dateKey: String, timeKey: String?) -> String? {

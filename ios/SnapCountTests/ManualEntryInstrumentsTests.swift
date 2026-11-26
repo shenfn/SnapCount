@@ -168,4 +168,17 @@ final class ManualEntryInstrumentsTests: XCTestCase {
         XCTAssertEqual(overflow?.grams, JieziFoodCalorieEstimator.maxGrams)
         XCTAssertNil(JieziFoodCalorieEstimator.estimate(query: "不存在的神秘料理XYZ"))
     }
+
+    func testSameDayTimeSortKeyOrdersByEffectiveClockAcrossEventAndUploadTimes() {
+        let labels = ["08:28", "上传 17:18", "上传 10:30", "12:41", nil]
+        let sorted = labels.sorted { NativeLocalDate.listTimeSortKey($0) > NativeLocalDate.listTimeSortKey($1) }
+        XCTAssertEqual(sorted, ["上传 17:18", "12:41", "上传 10:30", "08:28", nil])
+
+        let afternoon = ISO8601DateFormatter().date(from: "2026-11-25T17:18:00+08:00")!
+        let morningKey = NativeLocalDate.effectiveClockSortKey(recordTime: "08:28", fallbackDate: afternoon)
+        let fallbackKey = NativeLocalDate.effectiveClockSortKey(recordTime: nil, fallbackDate: afternoon)
+        XCTAssertEqual(morningKey, "08:28")
+        XCTAssertEqual(fallbackKey, "17:18")
+        XCTAssertGreaterThan(fallbackKey, morningKey)
+    }
 }
