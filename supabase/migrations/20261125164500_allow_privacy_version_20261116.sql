@@ -1,4 +1,6 @@
--- Allow iOS 1.0/1.1 privacy policy version 2026-11-16 in auth signup trigger.
+-- Enforce valid YYYY-MM-DD date format and minimum legal consent version
+-- floor (>= 2026-07-19) instead of hardcoding a fixed enum list, so future
+-- privacy/terms version bumps cannot break new user registration.
 create or replace function public.handle_new_user()
 returns trigger
 language plpgsql
@@ -16,9 +18,12 @@ begin
     or legal_at !~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}T'
     or sensitive_at is null
     or sensitive_at !~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}T'
-    or submitted_terms_version is distinct from '2026-07-19'
+    or submitted_terms_version is null
+    or submitted_terms_version !~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'
+    or submitted_terms_version < '2026-07-19'
     or submitted_privacy_version is null
-    or submitted_privacy_version not in ('2026-07-19', '2026-07-22', '2026-11-16')
+    or submitted_privacy_version !~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'
+    or submitted_privacy_version < '2026-07-19'
   then
     raise exception 'current terms, privacy, and sensitive data consent are required';
   end if;

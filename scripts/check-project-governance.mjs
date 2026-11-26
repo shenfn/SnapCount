@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { execFileSync } from 'node:child_process'
 import path from 'node:path'
 
@@ -66,6 +66,56 @@ if (branch && branch !== 'main') {
     warnings.push(`历史分支命名仍为 ${branch}，新任务不得继续使用 codex/ 前缀`)
   } else if (!valid) {
     errors.push(`分支名不符合规范：${branch}；新分支应使用 feature/、fix/、refactor/、docs/、test/、chore/ 或 release/ 前缀`)
+  }
+}
+
+// Legal consent version parity check: iOS LegalDocuments vs public HTML vs latest handle_new_user() migration.
+const legalSwiftFile = path.join(root, 'ios/SnapCount/Models/LegalDocuments.swift')
+const privacyHtmlFile = path.join(root, 'public/privacy.html')
+const termsHtmlFile = path.join(root, 'public/terms.html')
+const migrationsDir = path.join(root, 'supabase/migrations')
+if (existsSync(legalSwiftFile) && existsSync(migrationsDir)) {
+  const legalSwift = readFileSync(legalSwiftFile, 'utf8')
+  const versionMatch = legalSwift.match(
+    /var\s+version:\s*String\s*\{\s*self\s*==\s*\.privacy\s*\?\s*"(\d{4}-\d{2}-\d{2})"\s*:\s*"(\d{4}-\d{2}-\d{2})"\s*\}/,
+  )
+  if (!versionMatch) {
+    errors.push('无法从 ios/SnapCount/Models/LegalDocuments.swift 解析 privacy/terms 版本号（须为 YYYY-MM-DD）')
+  } else {
+    const [, iosPrivacyVersion, iosTermsVersion] = versionMatch
+    if (existsSync(privacyHtmlFile) && !readFileSync(privacyHtmlFile, 'utf8').includes(iosPrivacyVersion)) {
+      errors.push(`public/privacy.html 缺少与 iOS 一致的隐私政策版本 ${iosPrivacyVersion}`)
+    }
+    if (existsSync(termsHtmlFile) && !readFileSync(termsHtmlFile, 'utf8').includes(iosTermsVersion)) {
+      errors.push(`public/terms.html 缺少与 iOS 一致的服务协议版本 ${iosTermsVersion}`)
+    }
+    const handleNewUserFiles = readdirSync(migrationsDir)
+      .filter((name) => name.endsWith('.sql'))
+      .sort()
+      .filter((name) => /create\s+or\s+replace\s+function\s+public\.handle_new_user\s*\(/i.test(
+        readFileSync(path.join(migrationsDir, name), 'utf8'),
+      ))
+    if (handleNewUserFiles.length === 0) {
+      errors.push('未找到 public.handle_new_user() 迁移定义')
+    } else {
+      const latestSql = readFileSync(path.join(migrationsDir, handleNewUserFiles[handleNewUserFiles.length - 1]), 'utf8')
+      const privacyFloor = latestSql.match(/submitted_privacy_version\s*<\s*'(\d{4}-\d{2}-\d{2})'/i)?.[1]
+      const termsFloor = latestSql.match(/submitted_terms_version\s*<\s*'(\d{4}-\d{2}-\d{2})'/i)?.[1]
+      if (privacyFloor) {
+        if (iosPrivacyVersion < privacyFloor) {
+          errors.push(`iOS privacy_version (${iosPrivacyVersion}) 低于 handle_new_user 最低版本门槛 (${privacyFloor})`)
+        }
+      } else if (!latestSql.includes(`'${iosPrivacyVersion}'`)) {
+        errors.push(`最新 handle_new_user() 迁移未允许 iOS privacy_version (${iosPrivacyVersion})`)
+      }
+      if (termsFloor) {
+        if (iosTermsVersion < termsFloor) {
+          errors.push(`iOS terms_version (${iosTermsVersion}) 低于 handle_new_user 最低版本门槛 (${termsFloor})`)
+        }
+      } else if (!latestSql.includes(`'${iosTermsVersion}'`)) {
+        errors.push(`最新 handle_new_user() 迁移未允许 iOS terms_version (${iosTermsVersion})`)
+      }
+    }
   }
 }
 
