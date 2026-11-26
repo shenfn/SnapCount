@@ -388,7 +388,7 @@ struct RecordDetailView: View {
                             ForEach(Array(feedbackCards.enumerated()), id: \.offset) { _, feedback in
                                 NativeAIFeedbackCard(
                                     feedback: feedback,
-                                    reviewable: feedback.isReviewable,
+                                    reviewable: JieziReleaseCapabilities.expressionFeedbackReview && feedback.isReviewable,
                                     reviewState: appState.recordFeedbackState,
                                     exposureState: appState.recordExpressionPlanExposureState,
                                     onRetryExposure: {
@@ -709,7 +709,7 @@ struct RecordDetailView: View {
                     NativeAIFeedbackCard(
                         feedback: interactionFeedback,
                         reviewOnly: true,
-                        reviewable: interactionFeedback.isReviewable,
+                        reviewable: JieziReleaseCapabilities.expressionFeedbackReview && interactionFeedback.isReviewable,
                         reviewState: appState.recordFeedbackState,
                         exposureState: appState.recordExpressionPlanExposureState,
                         onRetryExposure: {

@@ -2013,7 +2013,7 @@ private struct PendingExpenseResolutionView: View {
                                 NativeAIFeedbackCard(
                                     feedback: feedback,
                                     compact: true,
-                                    reviewable: feedback.isReviewable,
+                                    reviewable: JieziReleaseCapabilities.expressionFeedbackReview && feedback.isReviewable,
                                     reviewState: appState.recordFeedbackState,
                                     exposureState: appState.recordExpressionPlanExposureState,
                                     onRetryExposure: {
@@ -2192,7 +2192,7 @@ private struct PendingExpenseResolutionView: View {
                         feedback: interactionFeedback,
                         compact: true,
                         reviewOnly: true,
-                        reviewable: interactionFeedback.isReviewable,
+                        reviewable: JieziReleaseCapabilities.expressionFeedbackReview && interactionFeedback.isReviewable,
                         reviewState: appState.recordFeedbackState,
                         exposureState: appState.recordExpressionPlanExposureState,
                         onRetryExposure: {

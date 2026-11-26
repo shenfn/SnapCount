@@ -8,6 +8,7 @@ enum JieziReleaseCapabilities {
     static let cloudSync = false
     static let historyMigration = false
     static let byok = false
+    static let expressionFeedbackReview = false
 }
 
 struct NativeUserSettings: Equatable {
