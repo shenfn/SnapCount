@@ -1,12 +1,20 @@
 import SwiftUI
+import ImageIO
+import UIKit
 
 struct RecordsView: View {
     @EnvironmentObject private var appState: AppState
     @EnvironmentObject private var themeManager: JieziThemeManager
+    @AppStorage("records.showThumbnails") private var showThumbnails = true
     @State private var selectedKind: NativeDayRecordKind = .all
     @State private var selectedMonthKey: String
     @State private var showManualRecordSheet = false
     @State private var collapsedDateKeys: Set<String> = []
+    @State private var dayKindFilters: [String: NativeDayRecordKind] = [:]
+    @State private var dockFrameStore = RecordDockFrameStore()
+    @State private var dockDragY: CGFloat?
+    @State private var dockActiveRecordID: String?
+    @State private var dockPreviewImage: UIImage?
 
     private var effectiveKind: NativeDayRecordKind { selectedKind }
     private var query: NativeRecordQuery { NativeRecordQuery(monthKey: selectedMonthKey, kind: selectedKind) }
@@ -82,15 +90,21 @@ struct RecordsView: View {
                             message: "截图识别或手动记录后，会按日期出现在这里。"
                         )
                     } else {
+                        let monthDetails: [String: NativeRecordDetail] = showThumbnails ? monthDetailMap() : [:]
                         ForEach(groups) { group in
                             let isCollapsed = collapsedDateKeys.contains(group.dateKey)
+                            let visibleRecords = filteredDayRecords(for: group)
                             VStack(alignment: .leading, spacing: JieziSpacing.sm) {
-                                dayHeader(group, isCollapsed: isCollapsed)
+                                dayHeader(group, isCollapsed: isCollapsed, visibleCount: visibleRecords.count)
 
                                 if !isCollapsed {
-                                    VStack(spacing: 0) {
-                                        ForEach(Array(group.records.enumerated()), id: \.element.id) { index, item in
-                                            timelineRecordRow(item, isLast: index == group.records.count - 1)
+                                    LazyVStack(spacing: 0) {
+                                        ForEach(Array(visibleRecords.enumerated()), id: \.element.id) { index, item in
+                                            timelineRecordRow(
+                                                item,
+                                                detail: monthDetails[item.reference] ?? monthDetails[NativeRecordReference(item.reference).canonicalValue],
+                                                isLast: index == visibleRecords.count - 1
+                                            )
                                         }
                                     }
                                     .padding(.top, 2)
@@ -109,11 +123,25 @@ struct RecordsView: View {
             }
             .scrollIndicators(.hidden)
             .refreshable { await appState.loadRecordMonth(selectedMonthKey, force: true) }
+
+            dockMagnifierOverlay
         }
+        .coordinateSpace(name: "records-dock-space")
         .navigationTitle("记录")
         .toolbarBackground(JieziScene.expense.surface, for: .navigationBar)
         .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
+            ToolbarItemGroup(placement: .topBarTrailing) {
+                Button {
+                    JieziHaptics.tap()
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        showThumbnails.toggle()
+                        if !showThumbnails { clearDockPreview() }
+                    }
+                } label: {
+                    Label(showThumbnails ? "隐藏缩略图" : "显示缩略图", systemImage: showThumbnails ? "photo.fill" : "photo")
+                }
+                .accessibilityLabel(showThumbnails ? "隐藏记录缩略图" : "显示记录缩略图")
+
                 Button {
                     showManualRecordSheet = true
                 } label: {
@@ -125,6 +153,10 @@ struct RecordsView: View {
             RecordDetailView(reference: route.reference)
         }
         .onChange(of: availableKinds) { kinds in if !kinds.contains(selectedKind) { selectedKind = .all } }
+        .onChange(of: selectedKind) { _ in dayKindFilters.removeAll() }
+        .task(id: dockActiveRecordID) {
+            await loadDockPreviewImage(for: dockActiveRecordID)
+        }
         .task(id: prefetchKey) {
             appState.prefetchRecordDetails(groups.flatMap(\.records).map(\.reference))
         }
@@ -166,23 +198,31 @@ struct RecordsView: View {
         .font(.subheadline.weight(.semibold))
     }
 
-    private func dayHeader(_ group: NativeDayRecordGroup, isCollapsed: Bool) -> some View {
-        Button {
-            JieziHaptics.tap()
-            withAnimation(.spring(response: 0.28, dampingFraction: 0.86)) {
-                if isCollapsed {
-                    collapsedDateKeys.remove(group.dateKey)
-                } else {
-                    collapsedDateKeys.insert(group.dateKey)
+    private func filteredDayRecords(for group: NativeDayRecordGroup) -> [NativeDayRecord] {
+        guard effectiveKind == .all, let activeDayKind = dayKindFilters[group.dateKey] else {
+            return group.records
+        }
+        return group.records.filter { $0.kind == activeDayKind }
+    }
+
+    private func dayHeader(_ group: NativeDayRecordGroup, isCollapsed: Bool, visibleCount: Int) -> some View {
+        let activeDayKind = dayKindFilters[group.dateKey]
+        return VStack(alignment: .leading, spacing: 6) {
+            Button {
+                JieziHaptics.tap()
+                withAnimation(.spring(response: 0.28, dampingFraction: 0.86)) {
+                    if isCollapsed {
+                        collapsedDateKeys.remove(group.dateKey)
+                    } else {
+                        collapsedDateKeys.insert(group.dateKey)
+                    }
                 }
-            }
-        } label: {
-            VStack(alignment: .leading, spacing: 6) {
+            } label: {
                 HStack(alignment: .firstTextBaseline, spacing: JieziSpacing.sm) {
                     dayIdentity(group.dateKey)
                     Spacer(minLength: JieziSpacing.sm)
                     HStack(spacing: 4) {
-                        Text("\(group.records.count) 条")
+                        Text("\(visibleCount) 条")
                             .font(JieziFont.caption.monospacedDigit())
                         Image(systemName: "chevron.down")
                             .font(.system(size: 10, weight: .semibold))
@@ -190,34 +230,55 @@ struct RecordsView: View {
                     }
                     .foregroundStyle(palette.muted)
                 }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityHint(isCollapsed ? "点击展开这一天的记录" : "点击折叠这一天的记录")
 
-                let pills = daySummaryPills(group)
-                if !pills.isEmpty {
-                    ScrollView(.horizontal) {
-                        HStack(spacing: 6) {
-                            ForEach(pills) { pill in
+            let pills = daySummaryPills(group)
+            if !pills.isEmpty {
+                ScrollView(.horizontal) {
+                    HStack(spacing: 6) {
+                        ForEach(pills) { pill in
+                            let isSelected = activeDayKind == pill.kind
+                            let isDimmed = activeDayKind != nil && !isSelected
+                            Button {
+                                JieziHaptics.tap()
+                                withAnimation(.spring(response: 0.25, dampingFraction: 0.85)) {
+                                    if isSelected {
+                                        dayKindFilters.removeValue(forKey: group.dateKey)
+                                    } else {
+                                        dayKindFilters[group.dateKey] = pill.kind
+                                        collapsedDateKeys.remove(group.dateKey)
+                                    }
+                                }
+                            } label: {
                                 HStack(spacing: 5) {
                                     Circle()
-                                        .fill(pill.tint)
+                                        .fill(isSelected ? Color.white : pill.tint)
                                         .frame(width: 5.5, height: 5.5)
                                     Text(pill.text)
                                         .font(JieziFont.caption2.weight(.medium).monospacedDigit())
-                                        .foregroundStyle(pill.tint)
+                                        .foregroundStyle(isSelected ? Color.white : pill.tint)
                                 }
                                 .padding(.horizontal, 9)
                                 .padding(.vertical, 4)
-                                .background(pill.tint.opacity(0.11), in: Capsule())
+                                .background(
+                                    isSelected ? pill.tint : pill.tint.opacity(0.11),
+                                    in: Capsule()
+                                )
+                                .opacity(isDimmed ? 0.55 : 1)
                             }
+                            .buttonStyle(.plain)
+                            .accessibilityAddTraits(isSelected ? .isSelected : [])
+                            .accessibilityHint(isSelected ? "再次点击取消当天筛选" : "只看这一天的\(pill.kind.title)")
                         }
                     }
-                    .scrollIndicators(.hidden)
                 }
+                .scrollIndicators(.hidden)
             }
-            .padding(.horizontal, JieziSpacing.xs)
-            .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
-        .accessibilityHint(isCollapsed ? "点击展开这一天的记录" : "点击折叠这一天的记录")
+        .padding(.horizontal, JieziSpacing.xs)
     }
 
     private func dayIdentity(_ dateKey: String) -> some View {
@@ -233,6 +294,7 @@ struct RecordsView: View {
 
     private struct DaySummaryPill: Identifiable {
         let id: String
+        let kind: NativeDayRecordKind
         let text: String
         let tint: Color
     }
@@ -245,10 +307,10 @@ struct RecordsView: View {
         )
         var pills: [DaySummaryPill] = []
         if summary.expense > 0 {
-            pills.append(DaySummaryPill(id: "expense", text: "支出 \(money(summary.expense))", tint: palette.coral))
+            pills.append(DaySummaryPill(id: "expense", kind: .expense, text: "支出 \(money(summary.expense))", tint: palette.coral))
         }
         if summary.income > 0 {
-            pills.append(DaySummaryPill(id: "income", text: "收入 \(money(summary.income))", tint: palette.brand))
+            pills.append(DaySummaryPill(id: "income", kind: .income, text: "收入 \(money(summary.income))", tint: palette.brand))
         }
         let nonFinancialDomains: [(NativeDayRecordKind, String, String)] = [
             (.sleep, "睡眠", "条"),
@@ -261,6 +323,7 @@ struct RecordsView: View {
             if count > 0 {
                 pills.append(DaySummaryPill(
                     id: kind.rawValue,
+                    kind: kind,
                     text: "\(label) \(count)\(unit)",
                     tint: domainColor(for: kind.rawValue)
                 ))
@@ -269,17 +332,23 @@ struct RecordsView: View {
         return pills
     }
 
-    private func timelineRecordRow(_ item: NativeDayRecord, isLast: Bool) -> some View {
+    private func monthDetailMap() -> [String: NativeRecordDetail] {
+        guard let first = groups.last?.dateKey, let last = groups.first?.dateKey else { return [:] }
+        return appState.recordDetails(from: min(first, last), through: max(first, last))
+    }
+
+    private func timelineRecordRow(_ item: NativeDayRecord, detail: NativeRecordDetail?, isLast: Bool) -> some View {
         let domainKey = item.domainKey ?? item.kind.rawValue
         let tint = domainColor(for: domainKey)
         let parsedTime = parsedTimelineClock(item.timeLabel)
         let isRichDomain = item.kind == .sleep || item.kind == .food || item.kind == .sport || item.kind == .reading
+        let dockScale = dockMagnificationScale(for: item.id)
 
         return HStack(alignment: .top, spacing: 8) {
             Text(parsedTime.text)
                 .font(JieziFont.caption2.monospacedDigit().weight(parsedTime.isInferred ? .regular : .semibold))
                 .foregroundStyle(parsedTime.isInferred ? palette.muted.opacity(0.75) : palette.brand)
-                .frame(width: 38, alignment: .trailing)
+                .frame(width: 36, alignment: .trailing)
                 .padding(.top, 12)
 
             VStack(spacing: 0) {
@@ -295,10 +364,28 @@ struct RecordsView: View {
                         .padding(.top, 4)
                 }
             }
-            .frame(width: 10)
+            .frame(width: 9)
+
+            if showThumbnails {
+                RecordDockThumbnail(
+                    record: item,
+                    imageURL: detail?.imageURL,
+                    tint: tint,
+                    dockScale: dockScale,
+                    isActive: dockActiveRecordID == item.id,
+                    frameStore: dockFrameStore,
+                    onDockDragChanged: { locationY in
+                        handleDockScrub(at: locationY)
+                    },
+                    onDockDragEnded: {
+                        clearDockPreview()
+                    }
+                )
+                .padding(.top, 6)
+            }
 
             NavigationLink(value: NativeRecordRoute(reference: item.reference)) {
-                HStack(alignment: .center, spacing: 10) {
+                HStack(alignment: .center, spacing: 8) {
                     VStack(alignment: .leading, spacing: 3) {
                         Text(item.title)
                             .font(.subheadline.weight(isRichDomain ? .semibold : .medium))
@@ -313,7 +400,7 @@ struct RecordsView: View {
                         }
                     }
 
-                    Spacer(minLength: 8)
+                    Spacer(minLength: 6)
 
                     if !item.value.isEmpty {
                         Text(item.value)
@@ -322,8 +409,8 @@ struct RecordsView: View {
                             .lineLimit(1)
                     }
                 }
-                .padding(.horizontal, 14)
-                .padding(.vertical, 11)
+                .padding(.horizontal, 13)
+                .padding(.vertical, 10)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(
                     isRichDomain ? tint.opacity(0.10) : palette.paper.opacity(0.88),
@@ -331,11 +418,146 @@ struct RecordsView: View {
                 )
                 .overlay {
                     RoundedRectangle(cornerRadius: 16, style: .continuous)
-                        .stroke(isRichDomain ? tint.opacity(0.18) : palette.brand.opacity(0.09), lineWidth: 1)
+                        .stroke(
+                            dockActiveRecordID == item.id ? tint.opacity(0.55) : (isRichDomain ? tint.opacity(0.18) : palette.brand.opacity(0.09)),
+                            lineWidth: dockActiveRecordID == item.id ? 1.5 : 1
+                        )
                 }
                 .padding(.bottom, isLast ? 2 : 8)
             }
             .buttonStyle(.plain)
+        }
+        .zIndex(dockActiveRecordID == item.id ? 5 : (dockScale > 1.05 ? 2 : 0))
+    }
+
+    private func dockMagnificationScale(for recordID: String) -> CGFloat {
+        guard let dragY = dockDragY, let frame = dockFrameStore.frames[recordID] else { return 1.0 }
+        let distance = abs(frame.midY - dragY)
+        let radius: CGFloat = 115
+        guard distance < radius else { return 1.0 }
+        let normalized = 1 - distance / radius
+        let curve = 0.5 * (1 - cos(.pi * normalized))
+        return 1.0 + 0.55 * curve
+    }
+
+    private func handleDockScrub(at locationY: CGFloat) {
+        dockDragY = locationY
+        let nearest = dockFrameStore.frames.min { lhs, rhs in
+            abs(lhs.value.midY - locationY) < abs(rhs.value.midY - locationY)
+        }
+        if let nearest, abs(nearest.value.midY - locationY) < 90 {
+            if dockActiveRecordID != nearest.key {
+                dockActiveRecordID = nearest.key
+                JieziHaptics.tap()
+            }
+        }
+    }
+
+    private func clearDockPreview() {
+        withAnimation(.spring(response: 0.24, dampingFraction: 0.85)) {
+            dockDragY = nil
+            dockActiveRecordID = nil
+            dockPreviewImage = nil
+        }
+    }
+
+    private func recordForID(_ id: String?) -> NativeDayRecord? {
+        guard let id else { return nil }
+        for group in groups {
+            if let found = group.records.first(where: { $0.id == id }) {
+                return found
+            }
+        }
+        return nil
+    }
+
+    @ViewBuilder
+    private var dockMagnifierOverlay: some View {
+        if let activeID = dockActiveRecordID,
+           let dragY = dockDragY,
+           let record = recordForID(activeID) {
+            GeometryReader { proxy in
+                let previewSize: CGFloat = 216
+                let clampedY = min(max(dragY, 150), max(150, proxy.size.height - 150))
+                let centerX = min(proxy.size.width - previewSize / 2 - 20, max(previewSize / 2 + 116, proxy.size.width * 0.62))
+                VStack(alignment: .leading, spacing: 8) {
+                    ZStack {
+                        RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            .fill(palette.paper)
+                        if let dockPreviewImage {
+                            Image(uiImage: dockPreviewImage)
+                                .resizable()
+                                .scaledToFit()
+                                .frame(maxWidth: previewSize, maxHeight: previewSize)
+                                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        } else {
+                            ProgressView()
+                                .tint(palette.brand)
+                        }
+                    }
+                    .frame(width: previewSize, height: previewSize)
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(record.title)
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(palette.ink)
+                            .lineLimit(1)
+                        HStack(spacing: 6) {
+                            Text(parsedTimelineClock(record.timeLabel).text)
+                                .font(JieziFont.caption2.monospacedDigit())
+                                .foregroundStyle(palette.muted)
+                            if !record.value.isEmpty {
+                                Text(record.value)
+                                    .font(JieziFont.caption.weight(.semibold).monospacedDigit())
+                                    .foregroundStyle(valueColor(for: record.kind))
+                            }
+                        }
+                    }
+                    .frame(width: previewSize, alignment: .leading)
+                }
+                .padding(10)
+                .background(
+                    palette.paper.opacity(0.98),
+                    in: RoundedRectangle(cornerRadius: 20, style: .continuous)
+                )
+                .overlay {
+                    RoundedRectangle(cornerRadius: 20, style: .continuous)
+                        .stroke(palette.brand.opacity(0.18), lineWidth: 1)
+                }
+                .shadow(color: palette.ink.opacity(0.20), radius: 22, x: 0, y: 10)
+                .position(x: centerX, y: clampedY)
+            }
+            .allowsHitTesting(false)
+        }
+    }
+
+    private func loadDockPreviewImage(for recordID: String?) async {
+        guard let record = recordForID(recordID) else {
+            dockPreviewImage = nil
+            return
+        }
+        let detail = appState.recordDetail(matching: record.reference)
+        let url: URL?
+        if let directURL = detail?.imageURL {
+            url = directURL
+        } else {
+            url = await appState.thumbnailImageURL(for: record, force: false)
+        }
+        guard let url, !Task.isCancelled else {
+            dockPreviewImage = nil
+            return
+        }
+        // 优先 0ms 瞬时展示已缓存的高清图或小图，彻底消除滑动切换时的空白与滞后。
+        if let hiResCached = JieziRecordThumbnailCache.shared.cachedThumbnail(for: url, maxPixelSize: 520) {
+            dockPreviewImage = hiResCached
+            return
+        }
+        if let quickThumb = JieziRecordThumbnailCache.shared.cachedThumbnail(for: url, maxPixelSize: 108) {
+            dockPreviewImage = quickThumb
+        }
+        if let image = await JieziRecordThumbnailCache.shared.thumbnail(for: url, maxPixelSize: 520) {
+            guard !Task.isCancelled, dockActiveRecordID == recordID else { return }
+            dockPreviewImage = image
         }
     }
 
@@ -1151,4 +1373,141 @@ private struct RecordEditSheet: View {
 private struct ImagePreviewRoute: Identifiable {
     let url: URL
     var id: String { url.absoluteString }
+}
+
+private final class RecordDockFrameStore {
+    var frames: [String: CGRect] = [:]
+}
+
+private struct RecordDockThumbnail: View {
+    let record: NativeDayRecord
+    let imageURL: URL?
+    let tint: Color
+    let dockScale: CGFloat
+    let isActive: Bool
+    let frameStore: RecordDockFrameStore
+    let onDockDragChanged: (CGFloat) -> Void
+    let onDockDragEnded: () -> Void
+
+    @State private var image: UIImage?
+
+    private var displayedImage: UIImage? {
+        if let image { return image }
+        if let imageURL {
+            return JieziRecordThumbnailCache.shared.cachedThumbnail(for: imageURL, maxPixelSize: 108)
+        }
+        return nil
+    }
+
+    var body: some View {
+        Group {
+            if let img = displayedImage {
+                Image(uiImage: img)
+                    .resizable()
+                    .scaledToFill()
+                    .frame(width: 36, height: 36)
+                    .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 9, style: .continuous)
+                            .stroke(isActive ? tint : tint.opacity(0.22), lineWidth: isActive ? 1.5 : 0.75)
+                    }
+                    .scaleEffect(dockScale, anchor: .leading)
+                    .animation(.interactiveSpring(response: 0.16, dampingFraction: 0.78), value: dockScale)
+                    .background(
+                        GeometryReader { proxy in
+                            let rect = proxy.frame(in: .named("records-dock-space"))
+                            Color.clear.onAppear {
+                                frameStore.frames[record.id] = rect
+                            }
+                            .onChange(of: rect) { newRect in
+                                frameStore.frames[record.id] = newRect
+                            }
+                        }
+                    )
+                    .contentShape(Rectangle())
+                    .highPriorityGesture(
+                        DragGesture(minimumDistance: 0, coordinateSpace: .named("records-dock-space"))
+                            .onChanged { drag in
+                                onDockDragChanged(drag.location.y)
+                            }
+                            .onEnded { _ in
+                                onDockDragEnded()
+                            }
+                    )
+                    .accessibilityLabel("\(record.title)缩略图")
+                    .accessibilityHint("按住并上下滑动可连续放大预览图片")
+            } else {
+                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                    .strokeBorder(tint.opacity(imageURL == nil ? 0.10 : 0.22), style: StrokeStyle(lineWidth: 0.75, dash: [3, 3]))
+                    .frame(width: 36, height: 36)
+            }
+        }
+        .onDisappear {
+            frameStore.frames.removeValue(forKey: record.id)
+        }
+        .task(id: imageURL?.absoluteString ?? "") {
+            guard let imageURL else {
+                image = nil
+                return
+            }
+            if let cached = JieziRecordThumbnailCache.shared.cachedThumbnail(for: imageURL, maxPixelSize: 108) {
+                image = cached
+                return
+            }
+            if let decoded = await JieziRecordThumbnailCache.shared.thumbnail(for: imageURL, maxPixelSize: 108) {
+                guard !Task.isCancelled else { return }
+                image = decoded
+            }
+        }
+    }
+}
+
+private final class JieziRecordThumbnailCache {
+    static let shared = JieziRecordThumbnailCache()
+
+    private let cache: NSCache<NSString, UIImage> = {
+        let c = NSCache<NSString, UIImage>()
+        c.countLimit = 180
+        c.totalCostLimit = 24 * 1024 * 1024
+        return c
+    }()
+
+    func cachedThumbnail(for url: URL, maxPixelSize: Int) -> UIImage? {
+        let key = "\(url.absoluteString)#\(maxPixelSize)" as NSString
+        return cache.object(forKey: key)
+    }
+
+    func thumbnail(for url: URL, maxPixelSize: Int) async -> UIImage? {
+        let key = "\(url.absoluteString)#\(maxPixelSize)" as NSString
+        if let cached = cache.object(forKey: key) {
+            return cached
+        }
+        let decoded: UIImage? = await Task.detached(priority: .utility) {
+            let options: [CFString: Any] = [
+                kCGImageSourceCreateThumbnailFromImageAlways: true,
+                kCGImageSourceShouldCacheImmediately: true,
+                kCGImageSourceCreateThumbnailWithTransform: true,
+                kCGImageSourceThumbnailMaxPixelSize: maxPixelSize,
+            ]
+            if url.isFileURL {
+                guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
+                      let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else {
+                    return nil
+                }
+                return UIImage(cgImage: cgImage)
+            }
+            guard let (data, _) = try? await URLSession.shared.data(from: url),
+                  let source = CGImageSourceCreateWithData(data as CFData, nil),
+                  let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else {
+                return nil
+            }
+            return UIImage(cgImage: cgImage)
+        }.value
+
+        if let decoded {
+            let cost = Int(decoded.size.width * decoded.size.height * decoded.scale * decoded.scale * 4)
+            cache.setObject(decoded, forKey: key, cost: cost)
+        }
+        return decoded
+    }
 }

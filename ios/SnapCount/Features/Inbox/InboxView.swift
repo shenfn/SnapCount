@@ -850,10 +850,16 @@ struct InboxVerdictStageView: View {
             titleVisibility: .visible
         ) {
             Button("确认销毁", role: .destructive) {
-                guard let item = current, let record = item.stagingRecord else { return }
+                guard let item = current else { return }
                 Task {
-                    if await appState.discardStagingRecord(record, preserveInboxNavigation: true) {
-                        finishAction(for: item.id)
+                    if let record = item.stagingRecord {
+                        if await appState.discardStagingRecord(record, preserveInboxNavigation: true) {
+                            finishAction(for: item.id)
+                        }
+                    } else if let pending = item.pendingExpense {
+                        if await appState.deleteRecord(reference: pending.reference) {
+                            finishAction(for: item.id)
+                        }
                     }
                 }
             }
@@ -974,17 +980,49 @@ struct InboxVerdictStageView: View {
     @ViewBuilder
     private func stageActions(_ item: NativeInboxItem) -> some View {
         if let pending = item.pendingExpense {
-            Button {
-                pendingEditorContext = PendingEditorContext(itemId: item.id, reference: pending.reference)
-            } label: {
-                Label("补全这笔账单", systemImage: "rectangle.and.pencil.and.ellipsis")
-                    .font(.subheadline.weight(.semibold))
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 13)
+            VStack(spacing: JieziSpacing.sm) {
+                if pending.amount > 0 {
+                    Button {
+                        Task { await quickConfirmPending(item, pending: pending) }
+                    } label: {
+                        if appState.isConfirmingPendingRecord {
+                            ProgressView()
+                                .tint(.white)
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 13)
+                        } else {
+                            Label(
+                                String(format: "直接收下 · ¥%.2f", pending.amount),
+                                systemImage: "checkmark.circle.fill"
+                            )
+                            .font(.subheadline.weight(.semibold))
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 13)
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.white)
+                    .background(JieziTheme.brandWash, in: RoundedRectangle(cornerRadius: JieziRadius.sm, style: .continuous))
+                    .disabled(appState.isConfirmingPendingRecord)
+                }
+
+                HStack(spacing: JieziSpacing.sm) {
+                    stageActionButton("slider.horizontal.3", title: pending.amount > 0 ? "调整补全" : "补全这笔账单") {
+                        pendingEditorContext = PendingEditorContext(itemId: item.id, reference: pending.reference)
+                    }
+                    stageActionButton("trash", title: "销毁", destructive: true) {
+                        showDiscardConfirmation = true
+                    }
+                }
+
+                if let message = appState.pendingResolutionMessage, message.hasPrefix("保存失败") {
+                    Text(message)
+                        .font(.caption)
+                        .foregroundStyle(JieziTheme.coral)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
             }
-            .buttonStyle(.plain)
-            .foregroundStyle(.white)
-            .background(JieziTheme.brandWash, in: RoundedRectangle(cornerRadius: JieziRadius.sm, style: .continuous))
+            .disabled(appState.isConfirmingPendingRecord)
             .padding(.horizontal, 26)
             .padding(.top, JieziSpacing.md)
         } else if let record = item.stagingRecord {
@@ -1083,6 +1121,24 @@ struct InboxVerdictStageView: View {
             domainKey: domainId,
             preserveInboxNavigation: true
         ) != nil {
+            finishAction(for: item.id)
+        }
+    }
+
+    private func quickConfirmPending(_ item: NativeInboxItem, pending: NativePendingExpense) async {
+        appState.pendingResolutionMessage = nil
+        await appState.loadRecordDetail(reference: pending.reference)
+        guard let detail = appState.selectedRecordDetail, detail.id == pending.reference else {
+            pendingEditorContext = PendingEditorContext(itemId: item.id, reference: pending.reference)
+            return
+        }
+        let draft = NativePendingResolutionDraft(detail: detail)
+        guard draft.validationMessage == nil else {
+            pendingEditorContext = PendingEditorContext(itemId: item.id, reference: pending.reference)
+            return
+        }
+        if await appState.confirmPendingRecord(draft, preserveInboxNavigation: true) {
+            JieziHaptics.success()
             finishAction(for: item.id)
         }
     }

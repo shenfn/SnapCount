@@ -66,16 +66,9 @@ struct NativeDomainPageContent: View {
                             .font(JieziType.moneyCard).foregroundStyle(scene.foreground)
                     } else { dailyHero }
 
-                    if let refreshMessage = model.refreshMessage {
+                    if let refreshMessage = model.refreshMessage,
+                       !refreshMessage.hasPrefix("正在读取") {
                         loadStateCard(refreshMessage)
-                    }
-
-                    if let measurementNote = model.measurementNote {
-                        Text(measurementNote)
-                            .font(JieziFont.caption)
-                            .foregroundStyle(scene.muted)
-                            .fixedSize(horizontal: false, vertical: true)
-                            .padding(.horizontal, 4)
                     }
 
                     domainSections
@@ -87,6 +80,12 @@ struct NativeDomainPageContent: View {
             .padding(.horizontal, JieziPrototypeLayout.page_inset)
             .padding(.top, 14)
             .padding(.bottom, 24)
+            .contentShape(Rectangle())
+            .onTapGesture {
+                if selectedTimelineEntryID != nil {
+                    selectedTimelineEntryID = nil
+                }
+            }
         }
         .scrollIndicators(.hidden)
         .sheet(isPresented: $showManualRecordSheet) {
@@ -145,6 +144,7 @@ struct NativeDomainPageContent: View {
                 else { metricCard("最大一餐", value: "暂无可比较记录", caption: "需要可读取的热量估算") }
             } second: { periodSummaryEntry }
         case .sport:
+            sportWeeklyPulseCard
             weeklyTrend
             pairedCards {
                 metricCard("本周次数", value: "\(model.periodRecordCount) 次",
@@ -245,7 +245,20 @@ struct NativeDomainPageContent: View {
         let maximum = isDrillDown ? max(model.timeline.compactMap(\.cumulativeAmount).max() ?? 0,
                                         model.timeline.compactMap(\.amount).max() ?? 0, 1) : 1
         return VStack(alignment: .leading, spacing: 10) {
-            Text(isDrillDown ? "金额 · 按时间" : "时间分布").font(JieziType.cardTitle)
+            HStack(alignment: .center, spacing: 6) {
+                Label(isDrillDown ? "金额 · 按时间" : "时间分布", systemImage: "clock.fill")
+                    .font(JieziFont.caption.weight(.semibold))
+                    .foregroundStyle(scene.muted)
+                    .symbolRenderingMode(.hierarchical)
+                Spacer(minLength: 8)
+                if let firstMinute = minutes.first, let lastMinute = minutes.last, !isDrillDown {
+                    Text(firstMinute == lastMinute
+                         ? "\(clockLabel(firstMinute)) · \(model.timeline.count) 笔"
+                         : "\(clockLabel(firstMinute))–\(clockLabel(lastMinute)) · \(model.timeline.count) 笔")
+                        .font(JieziFont.caption2.monospacedDigit())
+                        .foregroundStyle(scene.muted.opacity(0.85))
+                }
+            }
             if isDrillDown {
                 Text("柱为单笔支出，虚线为图中支出累计。")
                     .font(JieziFont.caption2).foregroundStyle(scene.muted)
@@ -301,23 +314,13 @@ struct NativeDomainPageContent: View {
                         },
                         selectedEntryID: $selectedTimelineEntryID
                     )
-                    HStack {
-                        Text(selectedEntry.map { "当前选中 · \(clockLabel($0.minute)) · \(selectedEntries.count)笔" } ?? "按住时间轴拖动选择一笔")
-                            .font(JieziFont.caption2).foregroundStyle(scene.muted)
-                        Spacer()
-                        if selectedEntry != nil {
-                            Button("收起") {
-                                JieziHaptics.tap()
-                                selectedTimelineEntryID = nil
-                            }
-                            .font(JieziFont.caption2.weight(.semibold))
-                            .foregroundStyle(scene.accent)
-                            .buttonStyle(.plain)
-                        }
-                    }
+                    Text(selectedEntry != nil ? "轻点气泡查看详情 · 点击空白处收起" : "按住时间轴拖动或点选一笔")
+                        .font(JieziFont.caption2).foregroundStyle(scene.muted)
                 }
-                ForEach(selectedEntries) { entry in
-                    recordRow(entry.record, timeLabel: clockLabel(entry.minute))
+                if isDrillDown {
+                    ForEach(selectedEntries) { entry in
+                        recordRow(entry.record, timeLabel: clockLabel(entry.minute), showsTimeColumn: false, showsIcon: false)
+                    }
                 }
             }
             if !missingTime.isEmpty {
@@ -557,62 +560,183 @@ struct NativeDomainPageContent: View {
             caption: "\(model.validDayCount) 个指标完整日 · 查看日期 ›")
     }
 
-    private var foodEnergyReference: some View {
-        return VStack(alignment: .leading, spacing: 14) {
-            Text("能量参考尺").font(JieziType.cardTitle)
-            Button { showsEnergyReference = true } label: {
-                Label("2,000 千卡 · 通用营养参考", systemImage: "info.circle")
-                    .font(JieziFont.caption)
-                    .foregroundStyle(scene.accent)
-                    .multilineTextAlignment(.leading)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .frame(minHeight: 44, alignment: .leading)
-            }
-            .buttonStyle(.plain)
-            .accessibilityHint("查看通用参考与个人需要的区别")
-            if model.records.isEmpty {
-                Text("记录餐食后，在这里回看已记录的食物能量。")
-                    .font(JieziFont.body)
-            } else if let energy = model.knownPrimaryTotal, energy.isFinite, energy >= 0 {
-                Chart {
-                    RuleMark(y: .value("参考尺", 0.5))
-                        .foregroundStyle(scene.foreground.opacity(0.18))
-                    RuleMark(x: .value("通用参考", 2_000.0))
-                        .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 4]))
-                        .foregroundStyle(scene.muted)
-                        .accessibilityLabel("2,000 千卡通用参考，不是个人目标")
-                    PointMark(x: .value("已记录食物能量", energy), y: .value("参考尺", 0.5))
-                        .symbolSize(JieziPrototypeLayout.food_energy_point_size)
-                        .foregroundStyle(scene.dataAccent)
-                        .accessibilityLabel("已记录食物能量约 \(String(format: "%.0f", energy)) 千卡")
+    private var foodTimelineEntries: [NativeTimelineEntry] {
+        model.records.compactMap { record -> NativeTimelineEntry? in
+            let rawTime = record.timeLabel?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            let clockText = rawTime.hasPrefix("上传 ") ? String(rawTime.dropFirst(3)) : rawTime
+            let parts = clockText.split(separator: ":").compactMap { Int($0) }
+            let minute: Int
+            if parts.count >= 2, (0...23).contains(parts[0]), (0...59).contains(parts[1]) {
+                minute = parts[0] * 60 + parts[1]
+            } else {
+                let meal = detail(for: record)?.payload?.string("meal_type") ?? ""
+                switch meal {
+                case "breakfast": minute = 8 * 60
+                case "lunch": minute = 12 * 60 + 15
+                case "dinner": minute = 18 * 60 + 30
+                default: minute = 15 * 60
                 }
-                .chartXScale(domain: .automatic(includesZero: true))
-                .chartYScale(domain: 0.0...1.0)
-                .chartYAxis(.hidden)
-                .chartXAxis {
-                    AxisMarks(values: .automatic(desiredCount: dynamicTypeSize.isAccessibilitySize ? 2 : 4)) { value in
-                        AxisTick().foregroundStyle(scene.muted)
-                        AxisValueLabel {
-                            if let energy = value.as(Double.self) {
-                                Text(energy, format: .number.precision(.fractionLength(0)))
-                                    .font(JieziFont.caption2.monospacedDigit())
-                                    .foregroundStyle(scene.muted)
-                            }
+            }
+            let kcal = detail(for: record)?.payload?.double("total_calorie_kcal")
+                ?? detail(for: record)?.payload?.double("calorie_kcal")
+            return NativeTimelineEntry(
+                record: record,
+                minute: minute,
+                amount: kcal,
+                cumulativeAmount: nil,
+                timeSourceLabel: rawTime.hasPrefix("上传 ") ? "上传时间" : "用餐时间"
+            )
+        }.sorted { $0.minute < $1.minute }
+    }
+
+    private var foodEnergyReference: some View {
+        let entries = foodTimelineEntries
+        let selectedEntry = selectedTimelineEntryID.flatMap { id in entries.first { $0.id == id } }
+        return VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .center, spacing: 6) {
+                Label("今日餐食", systemImage: "fork.knife")
+                    .font(JieziFont.caption.weight(.semibold))
+                    .foregroundStyle(scene.muted)
+                    .symbolRenderingMode(.hierarchical)
+                Spacer(minLength: 8)
+                Button { showsEnergyReference = true } label: {
+                    HStack(spacing: 4) {
+                        if let energy = model.knownPrimaryTotal, energy.isFinite, energy > 0 {
+                            Text("约 \(String(format: "%.0f", energy)) 千卡")
+                                .font(JieziFont.caption2.monospacedDigit())
+                        } else {
+                            Text("参考说明")
+                                .font(JieziFont.caption2)
                         }
+                        Image(systemName: "info.circle")
+                            .font(.system(size: 11))
+                    }
+                    .foregroundStyle(scene.accent)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("2,000 千卡 · 通用营养参考")
+                .accessibilityHint("查看通用参考与个人需要的区别")
+            }
+
+            if entries.isEmpty {
+                Text("记录餐食后，在这里按时间拖动查看照片与热量。")
+                    .font(JieziFont.caption)
+                    .foregroundStyle(scene.muted)
+            } else {
+                ExpenseTimelineScrubber(
+                    entries: entries,
+                    scene: scene,
+                    clockLabel: clockLabel,
+                    recordValue: recordValue,
+                    onOpenEntry: { appState.openDayRecord($0.record) },
+                    imageURLProvider: { record in
+                        if let url = await appState.thumbnailImageURL(for: record, force: false) {
+                            return url
+                        }
+                        return detail(for: record)?.imageURL
+                    },
+                    compactLabelProvider: { String(format: "%.0f千卡", $0) },
+                    selectedEntryID: $selectedTimelineEntryID
+                )
+
+                HStack {
+                    Text(selectedEntry.map { "当前选中 · \(clockLabel($0.minute)) · \($0.record.title)" } ?? "按住餐食轴拖动查看照片与热量")
+                        .font(JieziFont.caption2)
+                        .foregroundStyle(scene.muted)
+                        .lineLimit(1)
+                    Spacer()
+                    if selectedEntry != nil {
+                        Button("收起") {
+                            JieziHaptics.tap()
+                            selectedTimelineEntryID = nil
+                        }
+                        .font(JieziFont.caption2.weight(.semibold))
+                        .foregroundStyle(scene.accent)
+                        .buttonStyle(.plain)
                     }
                 }
-                .frame(height: JieziPrototypeLayout.food_energy_reference_height)
-                .accessibilityElement(children: .ignore)
-                .accessibilityLabel("能量参考尺")
-                .accessibilityValue("已记录约 \(String(format: "%.0f", energy)) 千卡；2,000 千卡为通用参考，不是个人目标")
-            } else {
-                Text("部分餐次未提供完整估算，暂不标出总能量。")
-                    .font(JieziFont.body)
             }
-            Text("千卡 · 仅对应已记录餐食；未估算的餐次不按零处理。")
-                .font(JieziFont.caption2)
-                .foregroundStyle(scene.muted)
-                .fixedSize(horizontal: false, vertical: true)
+        }
+        .foregroundStyle(scene.foreground)
+        .padding(JieziPrototypeLayout.card_inset)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(scene.surface.opacity(0.66), in: RoundedRectangle(cornerRadius: JieziPrototypeLayout.card_radius))
+    }
+
+    private var sportWeeklyPulseCard: some View {
+        let activeDays = model.weeklyValues.filter { ($0.value ?? 0) > 0 }.count
+        let longestMinutes = model.weeklyValues.compactMap(\.value).max()
+        let weekdayLabels = ["一", "二", "三", "四", "五", "六", "日"]
+
+        return VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .center, spacing: 6) {
+                Label("本周节奏", systemImage: "figure.run")
+                    .font(JieziFont.caption.weight(.semibold))
+                    .foregroundStyle(scene.muted)
+                    .symbolRenderingMode(.hierarchical)
+                Spacer(minLength: 8)
+                Text("\(activeDays) / 7 天有运动")
+                    .font(JieziFont.caption2.monospacedDigit())
+                    .foregroundStyle(scene.accent)
+            }
+
+            HStack(spacing: 0) {
+                ForEach(Array(model.weeklyValues.prefix(7).enumerated()), id: \.element.id) { idx, day in
+                    let minutes = day.value ?? 0
+                    let active = minutes > 0
+                    let isSelected = day.dateKey == model.dateKey
+                    Button {
+                        JieziHaptics.tap()
+                        selectDate(day.dateKey)
+                    } label: {
+                        VStack(spacing: 6) {
+                            Text(idx < weekdayLabels.count ? weekdayLabels[idx] : "")
+                                .font(JieziFont.caption2)
+                                .foregroundStyle(isSelected ? scene.foreground : scene.muted)
+                            ZStack {
+                                Circle()
+                                    .fill(active ? scene.accent : scene.foreground.opacity(0.06))
+                                    .frame(width: 26, height: 26)
+                                if active {
+                                    Image(systemName: "checkmark")
+                                        .font(.system(size: 11, weight: .bold))
+                                        .foregroundStyle(scene.surface)
+                                } else {
+                                    Circle()
+                                        .stroke(scene.foreground.opacity(0.14), lineWidth: 1)
+                                        .frame(width: 26, height: 26)
+                                }
+                            }
+                            .overlay {
+                                if isSelected {
+                                    Circle()
+                                        .stroke(scene.foreground.opacity(0.45), lineWidth: 1.5)
+                                        .frame(width: 32, height: 32)
+                                }
+                            }
+                            Text(active ? "\(Int(minutes.rounded()))m" : "—")
+                                .font(.system(size: 10, weight: active ? .semibold : .regular).monospacedDigit())
+                                .foregroundStyle(active ? scene.foreground : scene.muted.opacity(0.6))
+                        }
+                        .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+
+            if let longestMinutes, longestMinutes > 0 {
+                HStack(spacing: 12) {
+                    Text("单次最长 \(Int(longestMinutes.rounded())) 分钟")
+                        .font(JieziFont.caption2.monospacedDigit())
+                        .foregroundStyle(scene.muted)
+                    if !model.periodTypes.isEmpty {
+                        Text("·  \(model.periodTypes.joined(separator: " / "))")
+                            .font(JieziFont.caption2)
+                            .foregroundStyle(scene.muted)
+                            .lineLimit(1)
+                    }
+                }
+            }
         }
         .foregroundStyle(scene.foreground)
         .padding(JieziPrototypeLayout.card_inset)
@@ -630,10 +754,18 @@ struct NativeDomainPageContent: View {
 
     private var merchantRanking: some View {
         let maximum = max(model.merchants.compactMap(\.total).max() ?? 0, 1)
-        return VStack(alignment: .leading, spacing: 14) {
-            HStack(alignment: .firstTextBaseline) {
-                Text("商户排行").font(JieziType.cardTitle)
-                Text("By merchant").font(JieziFont.caption2).foregroundStyle(scene.muted)
+        return VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .center) {
+                Label("商户排行", systemImage: "storefront.fill")
+                    .font(JieziFont.caption.weight(.semibold))
+                    .foregroundStyle(scene.muted)
+                    .symbolRenderingMode(.hierarchical)
+                Spacer(minLength: 8)
+                if !isDrillDown && !model.merchants.isEmpty {
+                    Text("共 \(model.merchants.count) 家")
+                        .font(JieziFont.caption2.monospacedDigit())
+                        .foregroundStyle(scene.muted.opacity(0.85))
+                }
             }
             if model.merchants.isEmpty {
                 Text("这一天还没有可汇总的商户记录")
@@ -724,7 +856,10 @@ struct NativeDomainPageContent: View {
         } ?? model.sleepRanges
         let values = sourceRanges.compactMap(NativeSleepTimelineAxis.value(for:))
         let bounds = NativeSleepTimelineAxis.bounds(for: values.map { $0.startMinute...$0.endMinute })
-        let tickValues = stride(from: bounds.lowerBound, through: bounds.upperBound, by: NativeSleepTimelineAxis.tickSpacing).map { $0 }
+        let baseStep: Double = NativeSleepTimelineAxis.tickSpacing
+        let span: Double = max(bounds.upperBound - bounds.lowerBound, baseStep)
+        let adaptiveStep: Double = max(baseStep, ceil(span / 240.0) * 60.0)
+        let tickValues: [Double] = stride(from: bounds.lowerBound, through: bounds.upperBound, by: adaptiveStep).map { $0 }
         return VStack(alignment: .leading, spacing: 14) {
             Text("入睡与醒来")
                 .font(JieziType.cardTitle)
@@ -1172,21 +1307,37 @@ struct NativeDomainPageContent: View {
         .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
     }
 
-    private func recordRow(_ record: NativeDayRecord, timeLabel: String? = nil) -> some View {
+    private func recordRow(
+        _ record: NativeDayRecord,
+        timeLabel: String? = nil,
+        showsTimeColumn: Bool = true,
+        showsIcon: Bool = false
+    ) -> some View {
         HStack(alignment: .top, spacing: 0) {
             if domain == .food {
                 FoodRecordThumbnail(record: record, detail: detail(for: record))
                     .padding(.leading, 12).padding(.top, 12)
             }
             Button { appState.openDayRecord(record) } label: {
-                recordRowContent(record, timeLabel: timeLabel, showsIcon: domain != .food)
+                recordRowContent(
+                    record,
+                    timeLabel: timeLabel,
+                    showsTimeColumn: showsTimeColumn,
+                    showsIcon: domain != .food && showsIcon
+                )
             }
             .buttonStyle(.plain)
             .accessibilityLabel("\(timeLabel ?? record.timeLabel ?? "时间未提供")，\(record.title)，\(recordSecondaryText(record))，\(recordValue(record))，打开详情")
         }
     }
 
-    private func recordRowContent(_ record: NativeDayRecord, neutral: Bool = false, timeLabel: String? = nil, showsIcon: Bool = true) -> some View {
+    private func recordRowContent(
+        _ record: NativeDayRecord,
+        neutral: Bool = false,
+        timeLabel: String? = nil,
+        showsTimeColumn: Bool = true,
+        showsIcon: Bool = false
+    ) -> some View {
         let rowScene = neutral ? JieziScene.expense : scene
         let rowLayout = dynamicTypeSize.isAccessibilitySize
             ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
@@ -1199,21 +1350,23 @@ struct NativeDomainPageContent: View {
             return isUploadTime ? String(rawTime.dropFirst(3)) : rawTime
         }()
         return rowLayout {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(clock ?? "—")
-                        .font(JieziFont.caption2.monospacedDigit())
-                        .foregroundStyle(rowScene.muted)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.75)
-                    if isUploadTime {
-                        Text("上传")
-                            .font(.system(size: 9, weight: .semibold))
-                            .foregroundStyle(rowScene.muted.opacity(0.62))
+                if showsTimeColumn {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(clock ?? "—")
+                            .font(JieziFont.caption2.monospacedDigit())
+                            .foregroundStyle(rowScene.muted)
                             .lineLimit(1)
+                            .minimumScaleFactor(0.75)
+                        if isUploadTime {
+                            Text("上传")
+                                .font(.system(size: 9, weight: .semibold))
+                                .foregroundStyle(rowScene.muted.opacity(0.62))
+                                .lineLimit(1)
+                        }
                     }
+                    .frame(width: dynamicTypeSize.isAccessibilitySize ? nil : 42, alignment: .leading)
+                    .padding(.top, 3)
                 }
-                .frame(width: dynamicTypeSize.isAccessibilitySize ? nil : 42, alignment: .leading)
-                .padding(.top, 3)
 
                 if showsIcon { Image(systemName: record.systemImage)
                     .font(.system(size: 15, weight: .medium))

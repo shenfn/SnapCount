@@ -17,14 +17,26 @@ enum NativeSleepTimelineAxis {
     static let tickSpacing = 180.0 // 3 小时
 
     static func value(for interval: NativeSleepInterval) -> NativeSleepTimelineValue? {
-        guard let startMinute = clockMinutes(for: interval.start) else { return nil }
-        let durationMinutes = interval.end.timeIntervalSince(interval.start) / 60
+        var effectiveStart = interval.start
+        var durationMinutes = interval.end.timeIntervalSince(effectiveStart) / 60
         guard durationMinutes.isFinite, durationMinutes > 0 else { return nil }
+        // 识别模型偶发把凌晨入睡（如 00:25）错写为前一天，导致跨度多出整整 24 小时（如 31h）。
+        // 超过 24 小时时按整天对齐到醒来前最近的合理睡眠区间。
+        if durationMinutes > 1_440 {
+            let extraDays = floor((durationMinutes - 1) / 1_440)
+            let shiftedStart = effectiveStart.addingTimeInterval(extraDays * 86_400)
+            let shiftedDuration = interval.end.timeIntervalSince(shiftedStart) / 60
+            if shiftedDuration > 0, shiftedDuration <= 1_440 {
+                effectiveStart = shiftedStart
+                durationMinutes = shiftedDuration
+            }
+        }
+        guard let startMinute = clockMinutes(for: effectiveStart) else { return nil }
         return NativeSleepTimelineValue(
             interval: interval,
             startMinute: startMinute,
             endMinute: startMinute + durationMinutes,
-            startDateKey: NativeLocalDate.dateKey(interval.start),
+            startDateKey: NativeLocalDate.dateKey(effectiveStart),
             endDateKey: NativeLocalDate.dateKey(interval.end)
         )
     }

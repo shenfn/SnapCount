@@ -267,7 +267,7 @@ order_finished_at（订单完成时间）：
   - quality_score：睡眠评分，无法识别返回 null
   - quality_level：>=80 为“优秀”，>=70 为“良好”，>=60 为“一般”，否则“较差”；没有评分时可根据页面描述返回 null
   - source_app：来源 App，无法判断可返回“健康”
-- 若图片可见，还要提取 sleep_start_at、wake_at、deep_sleep_minutes、light_sleep_minutes、rem_minutes、awake_minutes。
+- 若图片可见，还要提取 sleep_start_at、wake_at、deep_sleep_minutes、light_sleep_minutes、rem_minutes、awake_minutes。注意：若入睡时间在凌晨 00:00–06:00 之间，sleep_start_at 的日期与 wake_at 为同一天，切勿错写成前一天导致跨度多出 24 小时。
 - occurred_at 只有在页面同时提供完整日期和具体时分时才返回；只有日期或无法确认时分时返回 null，不得用 12:00 代替。上传时刻只写入 client_captured_at。
 
 当 record_type 为 reading 时：

@@ -68,6 +68,7 @@ struct ExpenseTimelineScrubber: View {
     let recordValue: (NativeDayRecord) -> String
     let onOpenEntry: (NativeTimelineEntry) -> Void
     var imageURLProvider: ((NativeDayRecord) async -> URL?)?
+    var compactLabelProvider: ((Double) -> String)? = nil
 
     @Binding var selectedEntryID: String?
     @State private var gestureAxis: GestureAxis?
@@ -90,7 +91,70 @@ struct ExpenseTimelineScrubber: View {
         VStack(spacing: 6) {
             GeometryReader { proxy in
                 let width = max(proxy.size.width, 1)
+                let maxAmount = max(entries.compactMap(\.amount).max() ?? 1, 1)
+                let baselineY: CGFloat = 74
+                let showStaticLabels = selectedEntry == nil && entries.count <= 6
+                let visibleLabelIDs: Set<String> = {
+                    guard showStaticLabels else { return [] }
+                    var placed: [(x: CGFloat, y: CGFloat)] = []
+                    var accepted: Set<String> = []
+                    let sortedByHeight = entries.sorted { ($0.amount ?? 0) > ($1.amount ?? 0) }
+                    for entry in sortedByHeight {
+                        guard entry.amount != nil else { continue }
+                        let rawX = trackX(for: entry.minute, width: width)
+                        let labelX = min(max(rawX, 22), max(22, width - 22))
+                        let ratio = min(max((entry.amount ?? 0) / maxAmount, 0.18), 1.0)
+                        let stemHeight = 14 + CGFloat(ratio) * 28
+                        let labelY = max(12, baselineY - stemHeight - 12)
+                        let overlaps = placed.contains { abs($0.x - labelX) < 34 && abs($0.y - labelY) < 14 }
+                        if !overlaps {
+                            placed.append((labelX, labelY))
+                            accepted.insert(entry.id)
+                        }
+                    }
+                    return accepted
+                }()
+
                 ZStack(alignment: .topLeading) {
+                    // 未选中态：按金额比例从底线向上生长的脉冲细柱 + 柱顶轻金额，消除上方空白单调感
+                    ForEach(entries) { entry in
+                        let x = trackX(for: entry.minute, width: width)
+                        let isSelected = entry.id == selectedEntryID
+                        let ratio = min(max((entry.amount ?? 0) / maxAmount, 0.18), 1.0)
+                        let stemHeight = 14 + CGFloat(ratio) * 28
+                        let topY = baselineY - stemHeight
+
+                        Capsule()
+                            .fill(
+                                LinearGradient(
+                                    colors: [
+                                        isSelected ? scene.foreground : scene.dataAccent.opacity(selectedEntry == nil ? 0.85 : 0.35),
+                                        (isSelected ? scene.foreground : scene.dataAccent).opacity(0.14)
+                                    ],
+                                    startPoint: .top,
+                                    endPoint: .bottom
+                                )
+                            )
+                            .frame(width: isSelected ? 5 : 4, height: stemHeight)
+                            .position(x: x, y: baselineY - stemHeight / 2)
+                            .allowsHitTesting(false)
+
+                        Circle()
+                            .fill(isSelected ? scene.foreground : scene.dataAccent.opacity(selectedEntry == nil ? 0.95 : 0.45))
+                            .overlay(Circle().stroke(scene.surface, lineWidth: 1.5))
+                            .frame(width: isSelected ? 10 : 8, height: isSelected ? 10 : 8)
+                            .position(x: x, y: topY)
+                            .allowsHitTesting(false)
+
+                        if visibleLabelIDs.contains(entry.id), let amount = entry.amount {
+                            Text(compactAmountLabel(amount))
+                                .font(.system(size: 10, weight: .medium, design: .rounded).monospacedDigit())
+                                .foregroundStyle(scene.muted)
+                                .position(x: min(max(x, 22), max(22, width - 22)), y: max(12, topY - 12))
+                                .allowsHitTesting(false)
+                        }
+                    }
+
                     if let selectedEntry {
                         floatingCallout(entry: selectedEntry, containerWidth: width)
                             .position(
@@ -102,7 +166,7 @@ struct ExpenseTimelineScrubber: View {
                     ZStack {
                         // 刻度底线 + 竖向小刻度（位置严格固定，拖动不抖动）
                         Capsule()
-                            .fill(scene.foreground.opacity(isScrubbing ? 0.16 : 0.1))
+                            .fill(scene.foreground.opacity(isScrubbing ? 0.16 : 0.10))
                             .frame(height: 2)
                             .padding(.horizontal, 2)
 
@@ -114,20 +178,17 @@ struct ExpenseTimelineScrubber: View {
                                 .allowsHitTesting(false)
                         }
 
-                        ForEach(entries) { entry in
-                            let isSelected = entry.id == selectedEntryID
-                            Circle()
-                                .fill(isSelected ? scene.foreground : scene.dataAccent.opacity(0.58))
-                                .overlay(Circle().stroke(scene.surface, lineWidth: 2))
-                                .frame(width: isSelected ? 16 : 12, height: isSelected ? 16 : 12)
-                                .position(x: trackX(for: entry.minute, width: width), y: 26)
-                                .allowsHitTesting(false)
-                        }
-
                         if let selectedEntry {
                             Rectangle()
                                 .fill(scene.foreground)
                                 .frame(width: 1.5, height: 48)
+                                .position(x: trackX(for: selectedEntry.minute, width: width), y: 26)
+                                .allowsHitTesting(false)
+
+                            Circle()
+                                .fill(scene.foreground)
+                                .overlay(Circle().stroke(scene.surface, lineWidth: 2))
+                                .frame(width: 14, height: 14)
                                 .position(x: trackX(for: selectedEntry.minute, width: width), y: 26)
                                 .allowsHitTesting(false)
                         }
@@ -145,7 +206,7 @@ struct ExpenseTimelineScrubber: View {
                     }
                     .frame(maxWidth: .infinity)
                     .frame(height: 52)
-                    .position(x: width / 2, y: 74)
+                    .position(x: width / 2, y: baselineY)
                 }
             }
             .frame(height: 102)
@@ -255,9 +316,9 @@ struct ExpenseTimelineScrubber: View {
                 selectedEntryID = nil
             } label: {
                 Image(systemName: "xmark")
-                    .font(.system(size: 9, weight: .bold))
-                    .foregroundStyle(scene.surface.opacity(0.72))
-                    .frame(width: 22, height: 28)
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundStyle(scene.surface.opacity(0.76))
+                    .frame(width: 28, height: 34)
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
@@ -269,6 +330,16 @@ struct ExpenseTimelineScrubber: View {
         .background(scene.foreground, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         .shadow(color: scene.foreground.opacity(0.18), radius: 8, y: 4)
         .frame(maxWidth: min(containerWidth - 8, 286))
+    }
+
+    private func compactAmountLabel(_ amount: Double) -> String {
+        if let compactLabelProvider {
+            return compactLabelProvider(amount)
+        }
+        if abs(amount - amount.rounded()) < 0.005 {
+            return String(format: "¥%.0f", amount)
+        }
+        return String(format: "¥%.1f", amount)
     }
 
     private func formatTickLabel(_ minute: Int) -> String {
