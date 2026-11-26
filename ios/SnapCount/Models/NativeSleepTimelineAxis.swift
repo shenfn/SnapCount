@@ -20,13 +20,15 @@ enum NativeSleepTimelineAxis {
         var effectiveStart = interval.start
         var durationMinutes = interval.end.timeIntervalSince(effectiveStart) / 60
         guard durationMinutes.isFinite, durationMinutes > 0 else { return nil }
-        // 识别模型偶发把凌晨入睡（如 00:25）错写为前一天，导致跨度多出整整 24 小时（如 31h）。
-        // 超过 24 小时时按整天对齐到醒来前最近的合理睡眠区间。
-        if durationMinutes > 1_440 {
-            let extraDays = floor((durationMinutes - 1) / 1_440)
-            let shiftedStart = effectiveStart.addingTimeInterval(extraDays * 86_400)
+        // 识别模型偶发把凌晨入睡（00:00–06:59，如 00:25）错写为前一天，导致跨度多出整整 24 小时（如 31h）。
+        // 仅当入睡在凌晨且加 1 天后与醒来同日时自动纠偏，保留 LF038-05 明确跨多日记录（如 23:00 跨两天）的原始时长。
+        if durationMinutes > 1_440, durationMinutes < 2_880,
+           let startHour = Int(NativeLocalDate.timeKey(effectiveStart).prefix(2)),
+           startHour < 7 {
+            let shiftedStart = effectiveStart.addingTimeInterval(86_400)
             let shiftedDuration = interval.end.timeIntervalSince(shiftedStart) / 60
-            if shiftedDuration > 0, shiftedDuration <= 1_440 {
+            if shiftedDuration > 0,
+               NativeLocalDate.dateKey(shiftedStart) == NativeLocalDate.dateKey(interval.end) {
                 effectiveStart = shiftedStart
                 durationMinutes = shiftedDuration
             }
